@@ -40,14 +40,6 @@ loopx value-connectors github-public-probe \
   --format json
 ```
 
-Run the dry-run finance market snapshot canary:
-
-```bash
-loopx value-connectors finance-market-snapshot \
-  --symbol 0700.HK \
-  --format json
-```
-
 Detect public maintainer interest after an approved LoopX comment without
 reading comment bodies or bumping the thread:
 
@@ -84,9 +76,9 @@ loopx value-connectors plan \
 | `connector_approval_gate_v0` | Exact-call approval gate for account setup, external writes, sends, publishing, or private expansion. |
 | `github_public_channel_probe_packet_v0` | Starter connector output for public GitHub issue/PR/discussion metadata. |
 | `github_public_reply_monitor_packet_v0` | Starter connector output for public maintainer reply detection after a LoopX comment. |
-| `finance_market_snapshot_profile_v0` | Candidate profile for quote/fund/news/announcement pulls with source, freshness, uncertainty, and no-investment-advice gates. |
+| `finance_market_snapshot_profile_v0` | Candidate profile for public finance value-discovery research with source, uncertainty, and no-investment-advice gates. |
 | `finance_market_snapshot_probe_packet_v0` | No-credential public-source probe packet for Eastmoney/Futu/GitHub OSS source readiness, gates, and fallback decisions. |
-| `finance_market_snapshot_canary_packet_v0` | Dry-run public quote canary for a tiny cross-market symbol catalog, compact quote fields, source warnings, and human thesis-review context. |
+| `finance_value_discovery_research_packet_v0` | Human-owned finance research packet with thesis, value drivers, industry-chain position, mispricing hypothesis, disconfirming evidence, missing evidence, and a verification window. |
 | `value_connector_install_check_packet_v0` | Local install/use checklist for connector starters. |
 
 ## Boundaries
@@ -122,40 +114,37 @@ comment author, author association, timestamps, and URL. It detects whether a
 public maintainer/member/collaborator replied after the LoopX comment and
 returns `prepare_public_triage_note`; otherwise it returns `wait_no_bump`.
 
-## Finance Market Snapshot Profile
+## Finance Value Discovery Profile
 
-`finance_market_snapshot` is a planned finance profile for bounded market-fact
-pulls. The v0 surface includes a tiny cross-market dry-run public quote canary
-plus the plan and gate contract. It is not a live trading adapter and not an
-investment-advice engine.
+`finance_market_snapshot` is a planned finance profile for public value
+discovery. The v0 surface is a plan and gate contract, not a live trading
+adapter, not a price-action engine, and not an investment-advice engine.
 
-Supported pull intents:
+Supported research intents:
 
-- quote snapshots for stocks, ETFs, and indexes;
-- fund snapshots such as NAV, fee, size, holding summary, and announcement
-  timestamp;
-- public news, company announcement, earnings, and regulatory-disclosure
-  snapshots;
-- compact watch todos for a user-provided public symbol list.
+- company value-discovery thesis review from public business facts;
+- industry-chain position and catalyst mapping;
+- market-mispricing hypotheses grounded in business quality, cash generation,
+  reinvestment runway, margin durability, competitive position, or policy and
+  supply-chain changes;
+- source-labeled evidence for and against a thesis;
+- missing-evidence lists and verification windows that tell a human what should
+  update the thesis.
 
-Preferred source order:
+Every finance value-discovery packet should project:
 
-1. a user-owned terminal or daemon such as Futu OpenD when account permission,
-   local daemon state, and data entitlement are already available;
-2. public finance metadata pages/APIs such as Eastmoney for quote, fund, news,
-   and announcement facts;
-3. GitHub-hosted open-source wrappers or public datasets as fallback only after
-   terms, freshness, and source-origin checks.
-
-Every finance packet should project:
-
-- source id and source URL or provider label;
-- `observed_at` or provider timestamp;
-- freshness label: `live`, `delayed`, `cached`, `source_unverified`, or
-  `manual_review_required`;
-- missing-field list instead of silent fallback filling;
-- `human_decision_owner=true` when a packet is used for thesis review;
+- `human_decision_owner=true`;
+- a thesis and value-driver list;
+- industry-chain position and catalyst chain;
+- mispricing hypothesis;
+- source-labeled `evidence_for`;
+- source-labeled `disconfirming_evidence`;
+- `missing_evidence` instead of silent fallback filling;
+- `verification_window` for future facts that should update judgment;
 - non-investment-advice disclaimer.
+
+Market quotes, volume, and short-term moves are out of scope for this profile.
+They must not become the thesis, success metric, or promotion target.
 
 Forbidden before an exact approval gate:
 

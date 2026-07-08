@@ -19,7 +19,14 @@ def main() -> int:
 
     required = [
         "finance_market_snapshot_probe_packet_v0",
-        "finance_market_snapshot_canary_packet_v0",
+        "finance_value_discovery_research_packet_v0",
+        "human_decision_owner",
+        "value_drivers",
+        "industry_chain_position",
+        "mispricing_hypothesis",
+        "disconfirming_evidence",
+        "missing_evidence",
+        "verification_window",
         "Eastmoney public quote endpoint",
         "Futu OpenAPI / OpenD",
         "AKShare",
@@ -39,6 +46,10 @@ def main() -> int:
         "emits price targets",
         "guarantees returns",
         '"trading_enabled": true',
+        "finance-market-snapshot --symbol",
+        "latest_price",
+        "pct_change",
+        "turnover",
     ]
     lower_packet = packet.lower()
     for text in forbidden_claims:
@@ -48,11 +59,11 @@ def main() -> int:
     assert "account login" in packet and "credentials" in packet
     assert "trading, order placement" in packet
     assert "no-credential probe packet" in readme
-    assert "finance-market-snapshot" in readme
-    assert "--symbol 0700.HK" in readme and "--symbol AAPL" in readme
-    assert "`sh600519`" in readme and "`09988.HK`" in readme
+    assert "value discovery" in readme.lower()
+    assert "quotes, volume, and short-term moves are out of scope" in readme
+    assert "finance-market-snapshot --symbol" not in readme
     assert "finance_market_snapshot_probe_packet_v0" in protocol
-    assert "finance_market_snapshot_canary_packet_v0" in protocol
+    assert "finance_value_discovery_research_packet_v0" in protocol
 
     print("value-connectors-finance-probe-doc-smoke: ok")
     return 0

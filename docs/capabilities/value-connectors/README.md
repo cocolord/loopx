@@ -78,7 +78,7 @@ association, timestamp, and URL metadata, then emits either
 | `github_public_channel` | implemented starter | yes | none |
 | `github_public_reply_monitor` | implemented starter | yes | none |
 | `social_browser_x` | ego-browser-backed profile | install-check, public-handle packet, and gated plan | exact profile/post/reply gate required |
-| `finance_market_snapshot` | dry-run canary | public quote canary, plan, user prompt surface, and [no-credential probe packet](finance-market-snapshot-probe.md) | account, private portfolio, trading, and paid-data gates required |
+| `finance_market_snapshot` | value-discovery profile | research packet shape, plan, user prompt surface, and [no-credential probe packet](finance-market-snapshot-probe.md) | account, private portfolio, trading, and paid-data gates required |
 | `agent_reach_ops_source_map` | field-derived source profile | `loopx value-connectors source-map --connector agent_reach_ops_source_map --format json`; [profile note](agent-reach-ops-source-map.md) | publish/audit record required for every external write |
 | `botmail_identity` | host connector profile | install-check only | exact send gate required |
 | `community_channel` | host/browser connector profile | install-check and plan | exact account/message gate required |
@@ -159,60 +159,57 @@ discretion does not remove the need to record exact body, channel/account,
 time, source refs, and stop conditions. See the
 [Agent-Reach ops source-map profile](agent-reach-ops-source-map.md).
 
-## Finance Market Snapshot Profile
+## Finance Value Discovery Profile
 
-`finance_market_snapshot` is a dry-run value connector canary for users who
-want an agent to pull market facts before human analysis. It is useful when the user
-asks for a bounded snapshot such as:
+`finance_market_snapshot` is a planned value connector profile for finance
+value discovery, not for market-timing, price action, or trade automation. Its
+job is to help a person turn a broad investment idea into a falsifiable research
+packet before any decision is made.
 
-- 股票或 ETF 行情: 最新价、涨跌幅、成交额、市值、估值区间、更新时间;
-- 基金信息: 净值、费率、持仓摘要、同类排名、公告更新时间;
-- 新闻和公告: 公司公告、业绩预告、监管披露、重要新闻摘要;
-- 组合观察: 用户给出的公开标的清单的异动、风险提示、待复核项。
+The profile is useful when the user asks for:
 
-Suggested source order:
+- a company value-discovery thesis from public business facts;
+- an industry-chain catalyst map and where the company sits in that chain;
+- a market-mispricing hypothesis that explains what the market may be missing;
+- supporting evidence, disconfirming evidence, missing evidence, and a
+  verification window;
+- a compact research packet that helps a human update judgment without
+  delegating the decision to the agent.
 
-1. Futu OpenD or another user-owned market terminal when the user already has a
-   local daemon, account permission, and data entitlement.
-2. Eastmoney or other public finance pages/APIs for public quote, fund,
-   announcement, and news metadata.
-3. GitHub-hosted open-source finance API wrappers or public datasets only as a
-   fallback after freshness, terms, and data-origin checks.
+The core packet shape is `finance_value_discovery_research_packet_v0`:
 
-The profile should label every answer with freshness and confidence: `live`,
-`delayed`, `cached`, `source_unverified`, or `manual_review_required`. It should
-also say when a field is missing instead of filling it from a stale fallback.
-
-Run the first public quote canary without a live network read:
-
-```bash
-loopx value-connectors finance-market-snapshot \
-  --symbol 0700.HK \
-  --format json
+```json
+{
+  "schema_version": "finance_value_discovery_research_packet_v0",
+  "connector_id": "finance_market_snapshot",
+  "human_decision_owner": true,
+  "investment_advice": false,
+  "autotrade_allowed": false,
+  "thesis": "<human-provided or agent-drafted value-discovery thesis>",
+  "value_drivers": ["business quality", "reinvestment runway", "margin durability"],
+  "industry_chain_position": "<where the company captures value in the chain>",
+  "catalysts": ["industry demand change", "product cycle", "regulatory or supply shift"],
+  "mispricing_hypothesis": "<why the market might be underestimating the value driver>",
+  "evidence_for": ["source-labeled public evidence supporting the thesis"],
+  "disconfirming_evidence": ["source-labeled public evidence challenging the thesis"],
+  "missing_evidence": ["facts required before stronger conviction"],
+  "verification_window": "<events or reports that should update the thesis>",
+  "source_freshness": "manual_review_required"
+}
 ```
 
-Run the same canary with a bounded public Eastmoney quote read:
-
-```bash
-loopx value-connectors finance-market-snapshot \
-  --symbol AAPL \
-  --fetch-metadata \
-  --format json
-```
-
-The canary is intentionally tiny, but it is not A-share-only. The starter
-catalog covers a few public examples across A-share, Hong Kong, and US markets
-such as `sh600519`, `sz000001`, `0700.HK`, `09988.HK`, `AAPL`, `BABA`, `MSFT`,
-and `NVDA`. It emits compact allowlisted quote fields, labels the source as
-`source_unverified`, and carries a `research_context` that keeps humans as the
-decision owner. Treat the packet as thesis-review evidence, not advice.
+Source connectors remain supporting tools. Public filings, company reports,
+industry research excerpts, announcements, news, and public datasets can feed
+the packet when their source, timestamp, and uncertainty are visible. Market
+quotes, volume, and short-term moves are out of scope for this value-discovery
+profile.
 
 Safe user prompts:
 
 ```text
-/loopx 拉取 AAPL、MSFT、NVDA 今日行情和近 7 天关键新闻，标出更新时间和数据源；不要给投资建议。
-/loopx 对 5 只沪深 ETF 做一个公开信息快照：净值、规模、费率、公告、异动；缺失字段列出来。
-/loopx 监控我给出的股票清单是否出现公告或大幅波动，只写 compact todo，不自动交易。
+/loopx 基于公开资料为腾讯做一个价值发现 packet：业务质量、产业链位置、潜在误定价、反证和验证窗口；不要给投资建议。
+/loopx 把“AI 云需求可能重估阿里长期价值”拆成 thesis、value drivers、evidence_for、disconfirming_evidence 和 missing_evidence。
+/loopx 对一个行业链条做价值发现：谁捕获价值、哪些催化改变利润池、哪些事实能推翻这个 thesis。
 ```
 
 Boundaries:
@@ -223,6 +220,8 @@ Boundaries:
   wording;
 - no hidden source mixing: every metric must carry source, timestamp, and
   uncertainty label;
+- no price-action thesis: do not turn short-term quote changes, volume, or
+  momentum into the value-discovery argument;
 - no raw credential, account id, private holding, or paid provider payload in
   LoopX state.
 
@@ -232,24 +231,23 @@ Example plan-only packet:
 loopx value-connectors plan \
   --connector-id finance_market_snapshot \
   --connector-kind custom_connector \
-  --channel "public finance metadata snapshot" \
+  --channel "public finance value discovery" \
   --stage observe \
-  --target-ref "AAPL/MSFT/NVDA quote and news snapshot" \
-  --target-url https://www.eastmoney.com \
+  --target-ref "Tencent value-discovery thesis review" \
+  --target-url https://www.tencent.com/en-us/investors.html \
   --external-read \
   --value-axis capability \
-  --money-metric "reduce analyst time spent collecting public market facts" \
-  --success-metric "fresh quote/news table with source, timestamp, and uncertainty labels" \
-  --kill-condition "source terms, freshness, or symbol mapping cannot be verified" \
+  --money-metric "reduce human time spent turning public company facts into a falsifiable thesis" \
+  --success-metric "research packet with value drivers, catalyst chain, disconfirming evidence, missing evidence, and verification window" \
+  --kill-condition "the thesis depends on price action, private data, paid-source claims, or unverified evidence" \
   --format json
 ```
 
 See the [no-credential probe packet](finance-market-snapshot-probe.md) for the
-current source findings. The short version: Eastmoney public quote metadata is
-available through a `source_unverified` canary, GitHub OSS wrappers are
-fallback candidates that still need source-origin checks, and Futu/OpenD is
-gated until the user provides a local daemon, account permission, API
-agreements, and quote rights.
+current source findings. The short version: public quote/source probes are only
+source-readiness evidence. The finance profile should promote a source into the
+value-discovery packet only when it helps explain or challenge business value,
+industry-chain position, catalysts, or missing evidence.
 
 ## Protocol
 

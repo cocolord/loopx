@@ -78,29 +78,40 @@ Forbidden in this probe:
 
 ## Recommended Next Slice
 
-The first dry-run-only `finance_market_snapshot` canary is:
+The next slice is a value-discovery research packet, not a market quote canary.
+It should use public sources only to support or challenge a business-value
+thesis:
 
-```bash
-loopx value-connectors finance-market-snapshot --symbol 0700.HK --format json
+```json
+{
+  "schema_version": "finance_value_discovery_research_packet_v0",
+  "connector_id": "finance_market_snapshot",
+  "human_decision_owner": true,
+  "investment_advice": false,
+  "autotrade_allowed": false,
+  "thesis": "The market may be underestimating a durable business value driver.",
+  "value_drivers": ["business quality", "reinvestment runway"],
+  "industry_chain_position": "where the company captures value in the chain",
+  "catalysts": ["industry or product-cycle changes that could reveal value"],
+  "mispricing_hypothesis": "why current consensus may be incomplete",
+  "evidence_for": ["source-labeled public evidence supporting the thesis"],
+  "disconfirming_evidence": ["source-labeled public evidence challenging the thesis"],
+  "missing_evidence": ["facts required before stronger conviction"],
+  "verification_window": "future disclosures or events that should update judgment"
+}
 ```
 
-It runs before any live adapter:
+The packet runs before any live adapter:
 
-1. accept a tiny starter catalog across A-share, Hong Kong, and US examples
-   such as `sh600519`, `0700.HK`, `09988.HK`, `AAPL`, and `BABA`;
-2. call only the public Eastmoney quote endpoint with explicit timeout and user
-   agent;
-3. emit only compact allowlisted fields and field-presence metadata, not raw
-   provider payloads;
-4. label every result `source_unverified` until terms/freshness are reviewed;
+1. start from a human-owned thesis or ask the user to provide one;
+2. identify value drivers before collecting sources;
+3. map industry-chain position and catalysts;
+4. include disconfirming evidence and missing evidence by default;
 5. fail closed to a user gate for Futu/OpenD, private portfolio, paid data,
-   trading, captcha, or credential paths.
+   trading, captcha, credential paths, or any request for advice.
 
-The emitted `finance_market_snapshot_canary_packet_v0` keeps
-`human_decision_owner=true` and marks thesis impact as
-`manual_review_required`. This follows the research-loop lesson that finance
-connectors should help a person review evidence and update judgment, not
-delegate investment decisions to the agent.
+Public quote endpoints remain source-readiness probes only. Price, volume, and
+short-term moves are not the value-discovery thesis.
 
 ## Sources
 
