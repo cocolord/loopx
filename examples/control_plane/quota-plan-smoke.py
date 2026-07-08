@@ -1759,6 +1759,124 @@ def assert_goal_boundary_in_should_run() -> None:
     assert "goal_boundary_orchestration: mode=multi_subagent spawn_allowed=True max_children=2" in markdown, markdown
 
 
+def assert_primary_agent_orchestrates_child_lanes() -> None:
+    goal_id = "controller-child-lanes"
+    controller_goal = goal(goal_id, compute=1.0)
+    controller_goal.update(
+        {
+            "coordination": {
+                "registered_agents": [
+                    "codex-main-control",
+                    "codex-a-share-alpha",
+                    "codex-us-qdii-alpha",
+                ],
+                "primary_agent": "codex-main-control",
+            },
+            "spawn_policy": {
+                "mode": "multi_subagent",
+                "allowed": True,
+                "max_children": 2,
+            },
+        }
+    )
+    item = attention(goal_id, compute=1.0)
+    item.update(
+        {
+            "recommended_action": "orchestrate child alpha lanes",
+            "agent_todos": {
+                "schema_version": "todo_summary_v0",
+                "source_section": "Agent Todo",
+                "total": 4,
+                "open": 4,
+                "done": 0,
+                "items": [
+                    {
+                        "index": 1,
+                        "done": False,
+                        "status": "open",
+                        "todo_id": "todo_controller_worker",
+                        "task_class": "advancement_task",
+                        "priority": "P0",
+                        "text": "Controller should not do this worker lane directly.",
+                        "claimed_by": "codex-main-control",
+                    },
+                    {
+                        "index": 2,
+                        "done": False,
+                        "status": "open",
+                        "todo_id": "todo_a_share",
+                        "task_class": "advancement_task",
+                        "priority": "P0",
+                        "text": "Explore A-share PIT industry cache route.",
+                        "claimed_by": "codex-a-share-alpha",
+                    },
+                    {
+                        "index": 3,
+                        "done": False,
+                        "status": "open",
+                        "todo_id": "todo_qdii",
+                        "task_class": "advancement_task",
+                        "priority": "P0",
+                        "text": "Explore QDII dip-ladder route.",
+                        "claimed_by": "codex-us-qdii-alpha",
+                    },
+                    {
+                        "index": 4,
+                        "done": False,
+                        "status": "open",
+                        "todo_id": "todo_review",
+                        "task_class": "continuous_monitor",
+                        "priority": "P1",
+                        "text": "Review accepted child-lane evidence and write back final state.",
+                        "claimed_by": "codex-main-control",
+                    },
+                ],
+            },
+        }
+    )
+    payload = {
+        "ok": True,
+        "registry": "./fixtures/registry.json",
+        "runtime_root": "./fixtures/runtime",
+        "goal_count": 1,
+        "run_count": 1,
+        "attention_queue": {"items": [item]},
+        "run_history": {"goals": [controller_goal]},
+    }
+
+    decision = build_quota_should_run(
+        payload,
+        goal_id=goal_id,
+        agent_id="codex-main-control",
+    )
+    markdown = render_quota_should_run_markdown(decision)
+
+    contract = decision["subagent_orchestration_contract"]
+    assert decision["effective_action"] == "orchestrate_child_lanes", decision
+    assert "spawn or resume eligible child lanes" in decision["recommended_action"], decision
+    assert decision["work_lane_contract"]["obligation"] == "orchestrate_child_lanes", decision
+    assert decision["execution_obligation"]["contract_obligation"] == "orchestrate_child_lanes", decision
+    assert "agent_lane_next_action" not in decision, decision
+    assert decision["goal_route_hint"]["route_decision"] == "orchestrate_child_lanes", decision
+    assert "current_agent_next_action" not in decision["goal_route_hint"], decision
+    assert contract["mode"] == "multi_subagent", contract
+    assert contract["controller_agent_id"] == "codex-main-control", contract
+    assert contract["spawn_required"] is True, contract
+    assert contract["writeback_owner"] == "controller", contract
+    assert [lane["agent_id"] for lane in contract["eligible_child_lanes"]] == [
+        "codex-a-share-alpha",
+        "codex-us-qdii-alpha",
+    ], contract
+    assert [lane["todo_id"] for lane in contract["eligible_child_lanes"]] == [
+        "todo_a_share",
+        "todo_qdii",
+    ], contract
+    assert decision["interaction_contract"]["agent_channel"]["primary_action"].startswith(
+        "spawn/resume child lanes"
+    ), decision
+    assert "subagent_orchestration: mode=multi_subagent spawn_required=True child_lanes=2" in markdown, markdown
+
+
 def assert_decision_freshness_warning_in_should_run() -> None:
     goal_id = "stale-gate-reuse"
     stale_goal = goal(goal_id, compute=1.0)
@@ -2154,6 +2272,7 @@ def main() -> int:
     assert_project_asset_backed_no_evidence_should_run()
     assert_heartbeat_recommendation_lifecycle()
     assert_goal_boundary_in_should_run()
+    assert_primary_agent_orchestrates_child_lanes()
     assert_decision_freshness_warning_in_should_run()
     assert_safe_bypass_slot_preview(status_payload)
     assert_quota_void_event_net_ledger()

@@ -1561,6 +1561,80 @@ def _effective_action(
     return "quota_skip"
 
 
+def _subagent_orchestration_contract(
+    *,
+    goal_boundary: dict[str, Any],
+    agent_identity: dict[str, Any] | None,
+    agent_todo_summary: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Return controller-owned child lane work when primary should supervise."""
+
+    if not isinstance(agent_identity, dict):
+        return None
+    agent_id = normalize_todo_claimed_by(agent_identity.get("agent_id"))
+    primary_agent = normalize_todo_claimed_by(agent_identity.get("primary_agent"))
+    if not agent_id or agent_id != primary_agent:
+        return None
+    orchestration = (
+        goal_boundary.get("orchestration")
+        if isinstance(goal_boundary.get("orchestration"), dict)
+        else {}
+    )
+    if orchestration.get("mode") != "multi_subagent":
+        return None
+    if orchestration.get("spawn_allowed") is not True:
+        return None
+    max_children = orchestration.get("max_children")
+    if not isinstance(max_children, int) or max_children <= 0:
+        return None
+    other_items = (
+        agent_todo_summary.get("claimed_by_others_items")
+        if isinstance(agent_todo_summary.get("claimed_by_others_items"), list)
+        else []
+    )
+    child_lanes: list[dict[str, Any]] = []
+    seen_agents: set[str] = set()
+    for item in other_items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("task_class") or "") != "advancement_task":
+            continue
+        child_agent = normalize_todo_claimed_by(item.get("claimed_by"))
+        if not child_agent or child_agent in seen_agents:
+            continue
+        title = str(item.get("title") or item.get("text") or "").strip()
+        child_lanes.append(
+            {
+                "agent_id": child_agent,
+                "todo_id": str(item.get("todo_id") or "").strip() or None,
+                "priority": item.get("priority"),
+                "task_class": item.get("task_class"),
+                "action_kind": item.get("action_kind"),
+                "title": title,
+            }
+        )
+        seen_agents.add(child_agent)
+        if len(child_lanes) >= max_children:
+            break
+    if not child_lanes:
+        return None
+    return {
+        "schema_version": "subagent_orchestration_contract_v0",
+        "mode": "multi_subagent",
+        "controller_agent_id": agent_id,
+        "spawn_required": True,
+        "spawn_allowed": True,
+        "max_children": max_children,
+        "eligible_child_lanes": child_lanes,
+        "blocked_child_lanes": [],
+        "writeback_owner": "controller",
+        "controller_obligation": (
+            "spawn or resume eligible child lanes, review returned evidence, "
+            "then write accepted state/todos as the controller"
+        ),
+    }
+
+
 def build_quota_should_run(
     status_payload: dict[str, Any],
     *,
@@ -1664,6 +1738,25 @@ def build_quota_should_run(
         )
         self_repair_allowed = bool(stall_self_repair and stall_self_repair.get("allowed"))
         work_lane_contract = _work_lane_contract(item, agent_todo_summary=agent_todo_summary)
+        subagent_orchestration_contract = _subagent_orchestration_contract(
+            goal_boundary=goal_boundary,
+            agent_identity=agent_identity,
+            agent_todo_summary=agent_todo_summary,
+        )
+        if subagent_orchestration_contract:
+            work_lane_contract = {
+                "schema_version": "work_lane_contract_v1",
+                "lane": "subagent_orchestration",
+                "next_lane": "controller_review",
+                "obligation": "orchestrate_child_lanes",
+                "must_attempt_work": True,
+                "reason_codes": ["eligible_child_lanes"],
+                "monitor_policy": "material_transition_only",
+                "action": subagent_orchestration_contract["controller_obligation"],
+                "eligible_child_lane_count": len(
+                    subagent_orchestration_contract["eligible_child_lanes"]
+                ),
+            }
         agent_frontier_id = (
             normalize_todo_claimed_by(agent_identity.get("agent_id"))
             if isinstance(agent_identity, dict)
@@ -1837,6 +1930,17 @@ def build_quota_should_run(
         if automation_prompt_upgrade_required:
             should_run = False
             effective_action = "automation_prompt_upgrade_required"
+        if (
+            subagent_orchestration_contract
+            and should_run
+            and normal_delivery_allowed
+            and effective_action == "normal_run"
+        ):
+            effective_action = "orchestrate_child_lanes"
+            reason = (
+                "primary agent must spawn or resume eligible child lanes before "
+                "doing worker-lane delivery itself"
+            )
         recommendation_item = {**item, "quota": quota}
         heartbeat_recommendation = build_heartbeat_recommendation(
             recommendation_item,
@@ -1970,6 +2074,10 @@ def build_quota_should_run(
             agent_todo_summary=agent_todo_summary,
             work_lane_contract=work_lane_contract,
         )
+        if subagent_orchestration_contract:
+            selected_recommended_action = subagent_orchestration_contract[
+                "controller_obligation"
+            ]
         due_monitor_attempt = work_lane_contract_is_due_monitor_attempt(work_lane_contract)
         if capability_gate and not due_monitor_attempt:
             if capability_gate.get("action") in {"repair_bridge", "ask_owner", "skip"}:
@@ -2008,7 +2116,7 @@ def build_quota_should_run(
             allow_unrelated_gate=bool(quota.get("safe_bypass_allowed")),
         )
         agent_lane_next_action = None
-        if not due_monitor_attempt:
+        if not due_monitor_attempt and not subagent_orchestration_contract:
             agent_lane_next_action = build_agent_lane_next_action(
                 agent_identity=agent_identity,
                 agent_todo_summary=agent_todo_summary,
@@ -2105,6 +2213,17 @@ def build_quota_should_run(
             latest_run_recommended_action=latest_run_recommended_action_text,
             selected_recommended_action=selected_recommended_action,
         )
+        if subagent_orchestration_contract and isinstance(goal_route_hint, dict):
+            goal_route_hint = {
+                **goal_route_hint,
+                "kind": "subagent_orchestration",
+                "route_decision": "orchestrate_child_lanes",
+                "reason": "primary controller must spawn/resume eligible child lanes",
+                "child_lane_count": len(
+                    subagent_orchestration_contract["eligible_child_lanes"]
+                ),
+            }
+            goal_route_hint.pop("current_agent_next_action", None)
         agent_scope_action = _agent_scope_frontier_action(effective_action)
         payload_work_lane_contract = (
             None
@@ -2203,6 +2322,8 @@ def build_quota_should_run(
             "plan_summary": plan.get("summary"),
             "todo_write_hint": build_todo_write_hint(safe_goal_id),
         }
+        if subagent_orchestration_contract:
+            payload["subagent_orchestration_contract"] = subagent_orchestration_contract
         autonomous_replan_decision = goal_frontier_projection.get("autonomous_replan_decision")
         if isinstance(autonomous_replan_decision, dict):
             payload["autonomous_replan_decision"] = autonomous_replan_decision
