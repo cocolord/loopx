@@ -81,12 +81,13 @@ Forbidden in this probe:
 The first dry-run-only `finance_market_snapshot` canary is:
 
 ```bash
-loopx value-connectors finance-market-snapshot --symbol sh600519 --format json
+loopx value-connectors finance-market-snapshot --symbol 0700.HK --format json
 ```
 
 It runs before any live adapter:
 
-1. accept a tiny symbol allowlist such as `sh600519` and `sz000001`;
+1. accept a tiny starter catalog across A-share, Hong Kong, and US examples
+   such as `sh600519`, `0700.HK`, `09988.HK`, `AAPL`, and `BABA`;
 2. call only the public Eastmoney quote endpoint with explicit timeout and user
    agent;
 3. emit only compact allowlisted fields and field-presence metadata, not raw

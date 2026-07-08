@@ -177,14 +177,14 @@ def _source_profiles() -> list[dict[str, Any]]:
             route_type="public market snapshot probe",
             boundary="public_no_login",
             safe_uses=[
-                "run a tiny dry-run Eastmoney quote canary for allowlisted symbols",
+                "run a tiny dry-run Eastmoney quote canary for cataloged A-share, Hong Kong, or US examples",
                 "plan finance information pulls as public/reference snapshots",
                 "compare public source availability such as official docs, public APIs, or OSS wrappers",
                 "surface a user gate before credentials, paid feeds, trading, or portfolio reads",
             ],
             commands=[
-                "loopx value-connectors finance-market-snapshot --symbol sh600519 --format json",
-                "loopx value-connectors finance-market-snapshot --symbol sz000001 --fetch-metadata --format json",
+                "loopx value-connectors finance-market-snapshot --symbol 0700.HK --format json",
+                "loopx value-connectors finance-market-snapshot --symbol AAPL --fetch-metadata --format json",
                 "loopx value-connectors plan --connector-id finance_market_snapshot --connector-kind custom_connector --channel 'public finance snapshot' --stage observe --target-ref '<market or symbol scope>' --external-read --money-metric '<research or decision-support value>' --success-metric '<fresh public snapshot with source warnings>' --kill-condition '<stale source, paid gate, credential need, or trading intent>' --format json",
             ],
             evidence_schema="finance_market_snapshot_canary_packet_v0",

@@ -125,6 +125,70 @@ def main() -> int:
     assert quote["raw_provider_payload_recorded"] is False, quote
     assert_public_safe(snapshot)
 
+    hk_payload = {
+        "data": {
+            "f57": "00700",
+            "f58": "腾讯控股",
+            "f43": 47740,
+            "f169": 1620,
+            "f170": 351,
+            "f47": 55418434,
+            "f48": 25938000000,
+            "f60": 46120,
+            "f86": 1783480845,
+            "f116": 4340000000000,
+            "cookie": "sensitive-value",
+        }
+    }
+    with tempfile.TemporaryDirectory() as tmpdir:
+        payload_path = Path(tmpdir) / "hk00700.json"
+        payload_path.write_text(json.dumps(hk_payload), encoding="utf-8")
+        hk_snapshot = json.loads(
+            run_cli(
+                [
+                    "--format",
+                    "json",
+                    "value-connectors",
+                    "finance-market-snapshot",
+                    "--symbol",
+                    "0700.HK",
+                    "--metadata-json",
+                    str(payload_path),
+                ]
+            ).stdout
+        )
+    assert hk_snapshot["ok"] is True, hk_snapshot
+    hk_quote = hk_snapshot["snapshots"][0]
+    assert hk_quote["symbol"] == "hk00700", hk_quote
+    assert hk_quote["market"] == "hk", hk_quote
+    assert hk_quote["source_url"] == "https://quote.eastmoney.com/hk/00700.html", hk_quote
+    assert hk_quote["quote_fields"]["latest_price"] == 477.4, hk_quote
+    assert hk_snapshot["validation"]["gated_provider_field_count"] == 1, hk_snapshot
+    assert_public_safe(hk_snapshot)
+
+    us_snapshot = json.loads(
+        run_cli(
+            [
+                "--format",
+                "json",
+                "value-connectors",
+                "finance-market-snapshot",
+                "--symbol",
+                "AAPL",
+            ]
+        ).stdout
+    )
+    assert us_snapshot["ok"] is True, us_snapshot
+    us_quote = us_snapshot["snapshots"][0]
+    assert us_quote["symbol"] == "us_aapl", us_quote
+    assert us_quote["market"] == "us", us_quote
+    assert us_quote["source_url"] == "https://quote.eastmoney.com/us/AAPL.html", us_quote
+    assert any(
+        "no provider metadata supplied" in warning
+        for warning in us_snapshot["validation"]["warnings"]
+    ), us_snapshot
+    assert_public_safe(us_snapshot)
+
     markdown = run_cli(
         [
             "value-connectors",

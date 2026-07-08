@@ -44,7 +44,7 @@ Run the dry-run finance market snapshot canary:
 
 ```bash
 loopx value-connectors finance-market-snapshot \
-  --symbol sh600519 \
+  --symbol 0700.HK \
   --format json
 ```
 
@@ -86,7 +86,7 @@ loopx value-connectors plan \
 | `github_public_reply_monitor_packet_v0` | Starter connector output for public maintainer reply detection after a LoopX comment. |
 | `finance_market_snapshot_profile_v0` | Candidate profile for quote/fund/news/announcement pulls with source, freshness, uncertainty, and no-investment-advice gates. |
 | `finance_market_snapshot_probe_packet_v0` | No-credential public-source probe packet for Eastmoney/Futu/GitHub OSS source readiness, gates, and fallback decisions. |
-| `finance_market_snapshot_canary_packet_v0` | Dry-run public quote canary for allowlisted symbols, compact quote fields, source warnings, and human thesis-review context. |
+| `finance_market_snapshot_canary_packet_v0` | Dry-run public quote canary for a tiny cross-market symbol catalog, compact quote fields, source warnings, and human thesis-review context. |
 | `value_connector_install_check_packet_v0` | Local install/use checklist for connector starters. |
 
 ## Boundaries
@@ -125,8 +125,8 @@ returns `prepare_public_triage_note`; otherwise it returns `wait_no_bump`.
 ## Finance Market Snapshot Profile
 
 `finance_market_snapshot` is a planned finance profile for bounded market-fact
-pulls. The v0 surface includes a tiny dry-run public quote canary plus the plan
-and gate contract. It is not a live trading adapter and not an
+pulls. The v0 surface includes a tiny cross-market dry-run public quote canary
+plus the plan and gate contract. It is not a live trading adapter and not an
 investment-advice engine.
 
 Supported pull intents:

@@ -192,7 +192,7 @@ def register_value_connector_commands(
     finance_parser.add_argument(
         "--symbol",
         required=True,
-        help="Allowlisted market symbol such as sh600519 or sz000001.",
+        help="Cataloged market symbol such as sh600519, 0700.HK, AAPL, or BABA.",
     )
     finance_parser.add_argument(
         "--source",
@@ -208,7 +208,7 @@ def register_value_connector_commands(
     finance_parser.add_argument(
         "--fetch-metadata",
         action="store_true",
-        help="Perform the bounded public Eastmoney quote read for the allowlisted symbol.",
+        help="Perform the bounded public Eastmoney quote read for the cataloged symbol.",
     )
     finance_parser.add_argument(
         "--timeout-seconds",

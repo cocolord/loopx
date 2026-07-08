@@ -48,7 +48,9 @@ def main() -> int:
     assert "account login" in packet and "credentials" in packet
     assert "trading, order placement" in packet
     assert "no-credential probe packet" in readme
-    assert "finance-market-snapshot" in readme and "--symbol sh600519" in readme
+    assert "finance-market-snapshot" in readme
+    assert "--symbol 0700.HK" in readme and "--symbol AAPL" in readme
+    assert "`sh600519`" in readme and "`09988.HK`" in readme
     assert "finance_market_snapshot_probe_packet_v0" in protocol
     assert "finance_market_snapshot_canary_packet_v0" in protocol
 

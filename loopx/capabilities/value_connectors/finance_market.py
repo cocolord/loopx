@@ -24,14 +24,46 @@ FINANCE_MARKET_SNAPSHOT_SOURCES = {
 }
 GATED_FINANCE_SOURCES = FINANCE_MARKET_SNAPSHOT_SOURCES - {EASTMONEY_SOURCE_ID}
 
-ALLOWED_SYMBOLS = {
+SYMBOL_CATALOG = {
     "sh600519": {
         "secid": "1.600519",
+        "market": "cn_a",
         "human_url": "https://quote.eastmoney.com/sh600519.html",
     },
     "sz000001": {
         "secid": "0.000001",
+        "market": "cn_a",
         "human_url": "https://quote.eastmoney.com/sz000001.html",
+    },
+    "hk00700": {
+        "secid": "116.00700",
+        "market": "hk",
+        "human_url": "https://quote.eastmoney.com/hk/00700.html",
+    },
+    "hk09988": {
+        "secid": "116.09988",
+        "market": "hk",
+        "human_url": "https://quote.eastmoney.com/hk/09988.html",
+    },
+    "us_aapl": {
+        "secid": "105.AAPL",
+        "market": "us",
+        "human_url": "https://quote.eastmoney.com/us/AAPL.html",
+    },
+    "us_baba": {
+        "secid": "106.BABA",
+        "market": "us",
+        "human_url": "https://quote.eastmoney.com/us/BABA.html",
+    },
+    "us_msft": {
+        "secid": "105.MSFT",
+        "market": "us",
+        "human_url": "https://quote.eastmoney.com/us/MSFT.html",
+    },
+    "us_nvda": {
+        "secid": "105.NVDA",
+        "market": "us",
+        "human_url": "https://quote.eastmoney.com/us/NVDA.html",
     },
 }
 
@@ -100,9 +132,21 @@ def _plain_number(value: Any) -> int | float | str | None:
 
 
 def _normalise_symbol(symbol: str) -> str:
-    text = str(symbol or "").strip().lower()
-    if text not in ALLOWED_SYMBOLS:
-        raise ValueError(f"symbol must be one of {sorted(ALLOWED_SYMBOLS)}")
+    text = str(symbol or "").strip().lower().replace("-", "_")
+    if text in SYMBOL_CATALOG:
+        return text
+    if text.startswith("hk") and text[2:].isdigit():
+        text = f"hk{text[2:].zfill(5)}"
+    elif text.endswith(".hk") and text[:-3].isdigit():
+        text = f"hk{text[:-3].zfill(5)}"
+    elif text in {"aapl", "baba", "msft", "nvda"}:
+        text = f"us_{text}"
+    elif text.endswith(".us") and text[:-3].isalpha():
+        text = f"us_{text[:-3]}"
+    elif text.startswith("us") and text[2:].isalpha():
+        text = f"us_{text[2:]}"
+    if text not in SYMBOL_CATALOG:
+        raise ValueError(f"symbol must be one of {sorted(SYMBOL_CATALOG)}")
     return text
 
 
@@ -125,7 +169,7 @@ def _gated_provider_keys(provider_data: Mapping[str, Any]) -> list[str]:
 
 def _quote_fields(provider_data: Mapping[str, Any], *, requested_symbol: str) -> dict[str, Any]:
     return {
-        "symbol": str(provider_data.get("f57") or requested_symbol.removeprefix("sh").removeprefix("sz"))[:32],
+        "symbol": str(provider_data.get("f57") or requested_symbol)[:32],
         "name": str(provider_data.get("f58"))[:80] if provider_data.get("f58") else None,
         "latest_price": _scaled(provider_data.get("f43")),
         "price_change": _scaled(provider_data.get("f169")),
@@ -138,7 +182,7 @@ def _quote_fields(provider_data: Mapping[str, Any], *, requested_symbol: str) ->
 
 
 def _fetch_eastmoney_quote(symbol: str, *, timeout_seconds: float) -> Mapping[str, Any]:
-    secid = ALLOWED_SYMBOLS[symbol]["secid"]
+    secid = SYMBOL_CATALOG[symbol]["secid"]
     fields = ",".join(EASTMONEY_FIELDS)
     url = f"https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields={fields}"
     request = Request(
@@ -149,7 +193,7 @@ def _fetch_eastmoney_quote(symbol: str, *, timeout_seconds: float) -> Mapping[st
         },
         method="GET",
     )
-    with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 - secid is allowlisted above.
+    with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 - secid is cataloged above.
         payload = json.loads(response.read().decode("utf-8"))
     if not isinstance(payload, Mapping):
         raise RuntimeError("Eastmoney response must be a JSON object")
@@ -169,7 +213,8 @@ def _snapshot_from_provider(
         {
             "symbol": symbol,
             "source_id": EASTMONEY_SOURCE_ID,
-            "source_url": ALLOWED_SYMBOLS[symbol]["human_url"],
+            "source_url": SYMBOL_CATALOG[symbol]["human_url"],
+            "market": SYMBOL_CATALOG[symbol]["market"],
             "access_mode": "public_metadata_only",
             "freshness_label": "source_unverified",
             "observed_at": observed_at,
@@ -239,7 +284,7 @@ def build_finance_market_snapshot_packet(
         "channel": "public finance metadata snapshot",
         "stage": "observe",
         "target_ref": normalised_symbol,
-        "target_url": ALLOWED_SYMBOLS[normalised_symbol]["human_url"],
+        "target_url": SYMBOL_CATALOG[normalised_symbol]["human_url"],
         "access_mode": "public_metadata_only",
         "external_reads_allowed": True,
         "external_writes_allowed": False,
@@ -280,7 +325,7 @@ def build_finance_market_snapshot_packet(
             "ok": not validation_errors,
             "errors": validation_errors,
             "warnings": validation_warnings,
-            "symbol_allowlist": sorted(ALLOWED_SYMBOLS),
+            "symbol_catalog": sorted(SYMBOL_CATALOG),
             "source": source,
             "gated_provider_field_count": gated_field_count,
         },

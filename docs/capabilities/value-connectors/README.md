@@ -187,7 +187,7 @@ Run the first public quote canary without a live network read:
 
 ```bash
 loopx value-connectors finance-market-snapshot \
-  --symbol sh600519 \
+  --symbol 0700.HK \
   --format json
 ```
 
@@ -195,13 +195,15 @@ Run the same canary with a bounded public Eastmoney quote read:
 
 ```bash
 loopx value-connectors finance-market-snapshot \
-  --symbol sh600519 \
+  --symbol AAPL \
   --fetch-metadata \
   --format json
 ```
 
-The canary is intentionally tiny. It only accepts `sh600519` and `sz000001`,
-emits compact allowlisted quote fields, labels the source as
+The canary is intentionally tiny, but it is not A-share-only. The starter
+catalog covers a few public examples across A-share, Hong Kong, and US markets
+such as `sh600519`, `sz000001`, `0700.HK`, `09988.HK`, `AAPL`, `BABA`, `MSFT`,
+and `NVDA`. It emits compact allowlisted quote fields, labels the source as
 `source_unverified`, and carries a `research_context` that keeps humans as the
 decision owner. Treat the packet as thesis-review evidence, not advice.
 
