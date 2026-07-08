@@ -21,6 +21,7 @@ def main() -> int:
         "finance_market_snapshot_probe_packet_v0",
         "finance_value_discovery_research_packet_v0",
         "human_decision_owner",
+        "judgment_loop",
         "value_drivers",
         "industry_chain_position",
         "mispricing_hypothesis",
@@ -60,6 +61,7 @@ def main() -> int:
     assert "trading, order placement" in packet
     assert "no-credential probe packet" in readme
     assert "value discovery" in readme.lower()
+    assert "judgment building" in readme.lower()
     assert "quotes, volume, and short-term moves are out of scope" in readme
     assert "finance-market-snapshot --symbol" not in readme
     assert "finance_market_snapshot_probe_packet_v0" in protocol

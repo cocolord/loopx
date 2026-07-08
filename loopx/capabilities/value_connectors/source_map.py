@@ -177,6 +177,7 @@ def _source_profiles() -> list[dict[str, Any]]:
             route_type="public value discovery research profile",
             boundary="public_no_login",
             safe_uses=[
+                "help a person build domain judgment through repeated thesis and evidence updates",
                 "turn a human-owned finance thesis into a falsifiable value-discovery packet",
                 "map value drivers, industry-chain position, catalysts, and mispricing hypotheses",
                 "surface disconfirming evidence, missing evidence, and verification windows",
@@ -186,7 +187,7 @@ def _source_profiles() -> list[dict[str, Any]]:
                 "loopx value-connectors plan --connector-id finance_market_snapshot --connector-kind custom_connector --channel 'public finance value discovery' --stage observe --target-ref '<company or industry thesis>' --external-read --money-metric '<research or decision-support value>' --success-metric '<value drivers, catalyst chain, disconfirming evidence, missing evidence, and verification window>' --kill-condition '<price-action thesis, stale source, paid gate, credential need, or trading intent>' --format json",
             ],
             evidence_schema="finance_value_discovery_research_packet_v0",
-            maturity_hint="Treat public sources as evidence for or against a business-value thesis, not as price-action or trading signals.",
+            maturity_hint="Optimize for judgment iteration: public sources should help update a business-value thesis, not compete on information speed or price-action signals.",
             stop_conditions=[
                 "request needs account credentials, AK/SK, portfolio data, paid provider data, or trading action",
                 "the thesis depends on price action, volume, or momentum instead of business value",

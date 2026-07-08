@@ -89,6 +89,7 @@ thesis:
   "human_decision_owner": true,
   "investment_advice": false,
   "autotrade_allowed": false,
+  "judgment_loop": "thesis -> evidence -> disconfirmation -> thesis update",
   "thesis": "The market may be underestimating a durable business value driver.",
   "value_drivers": ["business quality", "reinvestment runway"],
   "industry_chain_position": "where the company captures value in the chain",

@@ -166,6 +166,12 @@ value discovery, not for market-timing, price action, or trade automation. Its
 job is to help a person turn a broad investment idea into a falsifiable research
 packet before any decision is made.
 
+The purpose is judgment building. Retail users usually cannot win by having
+faster information access than professional investors, so the connector should
+help a person repeatedly practice the same domain loop: state a thesis, inspect
+business-value evidence, confront disconfirming facts, update the thesis, and
+record what changed in their judgment.
+
 The profile is useful when the user asks for:
 
 - a company value-discovery thesis from public business facts;
@@ -185,6 +191,7 @@ The core packet shape is `finance_value_discovery_research_packet_v0`:
   "human_decision_owner": true,
   "investment_advice": false,
   "autotrade_allowed": false,
+  "judgment_loop": "thesis -> evidence -> disconfirmation -> thesis update",
   "thesis": "<human-provided or agent-drafted value-discovery thesis>",
   "value_drivers": ["business quality", "reinvestment runway", "margin durability"],
   "industry_chain_position": "<where the company captures value in the chain>",

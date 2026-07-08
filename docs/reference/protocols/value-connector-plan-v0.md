@@ -120,6 +120,12 @@ returns `prepare_public_triage_note`; otherwise it returns `wait_no_bump`.
 discovery. The v0 surface is a plan and gate contract, not a live trading
 adapter, not a price-action engine, and not an investment-advice engine.
 
+The value proposition is judgment iteration. The connector should help a person
+build domain judgment by repeatedly turning a thesis into evidence, confronting
+disconfirming facts, recording missing evidence, and updating what would change
+their view. It is not meant to compete with professional investors on resource
+access or information speed.
+
 Supported research intents:
 
 - company value-discovery thesis review from public business facts;
@@ -134,6 +140,7 @@ Supported research intents:
 Every finance value-discovery packet should project:
 
 - `human_decision_owner=true`;
+- `judgment_loop`;
 - a thesis and value-driver list;
 - industry-chain position and catalyst chain;
 - mispricing hypothesis;
