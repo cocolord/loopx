@@ -1,0 +1,23 @@
+examples/control_plane/task-lease-runtime-smoke.py
+  s_32e2a9a204a8e4::t_58b1cdf656c687 7,22,71-85,112-137,140,185-208,287-316,340-344,346-392,403,405,407
+examples/control_plane/todo-user-gate-scope-smoke.py
+  s_32e2a9a204a8e4::t_23ee2f8ecbfbe1 384-386,408-411
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e143ac6ec8e7e850d32be9a3e98fdd7e873735c1",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
