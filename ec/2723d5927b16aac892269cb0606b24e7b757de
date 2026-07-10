@@ -1,0 +1,25 @@
+loopx/control_plane/work_items/interaction_contract.py
+  s_32e2a9a204a8e4::t_5a24921c42f0e1 69-95,145,645-647
+loopx/heartbeat_prompt.py
+  s_32e2a9a204a8e4::t_a70629d3f107f9 902-906,914
+loopx/upgrade.py
+  s_32e2a9a204a8e4::t_e609bba42ed670 24,48-50,238-243,282-284,312-325,649-654,668,727
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ec2723d5927b16aac892269cb0606b24e7b757de",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
