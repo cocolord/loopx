@@ -1,0 +1,23 @@
+examples/issue-fix-pr-lifecycle-smoke.py
+  s_9a5a2bd944fdcb::t_b3b5b097a728e4 6,239,257,259-263,279-295
+loopx/capabilities/issue_fix/cli.py
+  s_9a5a2bd944fdcb::t_534cde5f20646e 12,156-170,269,356,433,511,573,662,742,766,790,856,867,888,927,944,978,999,1037,1125,1149,1184,1192,1200,1215
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "15c9b47e89461bc8a0aebbbd0760aabccf624ddf",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
