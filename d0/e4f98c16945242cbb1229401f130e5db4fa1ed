@@ -1,0 +1,25 @@
+examples/control_plane/review-packet-smoke.py
+  s_32e2a9a204a8e4::t_ef834a64768a8c 114,187,314,322
+loopx/cli_commands/explore.py
+  s_32e2a9a204a8e4::t_14fa8024bc8a6a 50,156-159
+loopx/cli_commands/explore_planning_commands.py
+  s_32e2a9a204a8e4::t_60ed03f97aec6f 1-132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d0e4f98c16945242cbb1229401f130e5db4fa1ed",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
