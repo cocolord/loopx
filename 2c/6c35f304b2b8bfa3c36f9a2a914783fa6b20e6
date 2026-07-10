@@ -1,0 +1,23 @@
+examples/state-backup-smoke.py
+  s_32e2a9a204a8e4::t_0af8be980b2ce3 18-22,120-123,167-179,209
+loopx/state_backup.py
+  s_32e2a9a204a8e4::t_e65732abaece62 19,295-360,385-386,410-415,489-495,504-511,524-526,529-536,548
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2c6c35f304b2b8bfa3c36f9a2a914783fa6b20e6",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
