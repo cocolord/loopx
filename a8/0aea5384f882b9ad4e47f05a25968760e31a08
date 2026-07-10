@@ -1,0 +1,29 @@
+docs/capabilities/issue-fix/protocols/issue-fix-reviewer-notification-sinks-v0.md
+  s_9a5a2bd944fdcb::t_05ead075dc2dad 75-77
+examples/issue-fix-reviewer-notification-sink-smoke.py
+  s_9a5a2bd944fdcb::t_b678825c84df53 219-221,228
+examples/issue-fix-reviewer-request-smoke.py
+  s_9a5a2bd944fdcb::t_2de45c2e18cc4e 93,100-102,314-333
+loopx/capabilities/issue_fix/reviewer_notification.py
+  s_9a5a2bd944fdcb::t_fb9630d481dea8 294,302-303,323
+loopx/capabilities/issue_fix/reviewer_request.py
+  s_9a5a2bd944fdcb::t_ea6cdb616b3235 681-687,715-717
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a80aea5384f882b9ad4e47f05a25968760e31a08",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
