@@ -1,0 +1,21 @@
+loopx/capabilities/explore/result_log.py
+  s_32e2a9a204a8e4::t_551a8eb8f98908 673-760
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "415dff76e85f642faf89e301469547f6a59603f3",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
