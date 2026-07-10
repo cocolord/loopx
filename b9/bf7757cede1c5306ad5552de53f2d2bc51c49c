@@ -1,0 +1,35 @@
+examples/control_plane/todo-deferred-capacity-cli-smoke.py
+  s_e3f612788718c1::t_ccbcdf0141c988 1-210
+loopx/canary/planner.py
+  s_e3f612788718c1::t_667f17e805cfbe 720-724
+loopx/cli_commands/todo.py
+  s_e3f612788718c1::t_d91f590036d1b1 73,190-192,399
+loopx/control_plane/todos/contract.py
+  s_e3f612788718c1::t_55a702aee13e6e 20-25,257-283
+loopx/control_plane/todos/quota_summary.py
+  s_e3f612788718c1::t_905a3d8704b4c5 20,603,605-612
+loopx/control_plane/todos/todo_summary.py
+  s_e3f612788718c1::t_ec81b920c1c10b 8,741-748
+loopx/quota.py
+  s_e3f612788718c1::t_764632c5a597b6 1305-1309,1315,1321,1394
+loopx/todos.py
+  s_e3f612788718c1::t_e48b1d758a3d76 26,46,49,742,767-770,793,804,817,822-823,832,834-835,860-861,876-877,882,923,953-957,1018-1020,1030,1049,1052,1054,1063,1069,1090,1147,1174,1216-1217,1367,1387,1408-1413
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b9bf7757cede1c5306ad5552de53f2d2bc51c49c",
+  "prompts": {},
+  "sessions": {
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
