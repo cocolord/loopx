@@ -1,0 +1,31 @@
+docs/capabilities/value-connectors/README.md
+  s_01aa1d91cba6fc::t_a71b1f245a0c5d 175-180,210-215,238-242,274-276
+docs/capabilities/value-connectors/finance-market-snapshot-probe.md
+  s_01aa1d91cba6fc::t_74f3c26ba42139 17,98-103,130-134,146-150
+docs/reference/protocols/value-connector-plan-v0.md
+  s_01aa1d91cba6fc::t_2550dcc4eacb3f 147-152,163-164,176-177
+examples/value-connectors-finance-probe-doc-smoke.py
+  s_01aa1d91cba6fc::t_47f1a85fce27dd 38-45,83-84,90-92
+loopx/capabilities/value_connectors/github_public.py
+  s_01aa1d91cba6fc::t_9258e7ec240ebf 627
+loopx/capabilities/value_connectors/source_map.py
+  s_01aa1d91cba6fc::t_569924002f5a51 185,190,193,198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "427b4d91aeee2f0a5da4f9e9e5030abb547363a6",
+  "prompts": {},
+  "sessions": {
+    "s_01aa1d91cba6fc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f44e1-dec7-7683-8ff7-6da3f9d70313",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
