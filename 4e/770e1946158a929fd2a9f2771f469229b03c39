@@ -1,0 +1,25 @@
+docs/capabilities/explore/README.md
+  s_9a5a2bd944fdcb::t_b86b6b53c402ac 68-70,79,89-110
+loopx/capabilities/explore/result_log.py
+  s_9a5a2bd944fdcb::t_25d3bac94f717d 686-688
+skills/loopx-project/SKILL.md
+  s_9a5a2bd944fdcb::t_91bfc60f9c8e59 150-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4e770e1946158a929fd2a9f2771f469229b03c39",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
