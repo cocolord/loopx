@@ -1,0 +1,27 @@
+loopx/cli_commands/project_lifecycle.py
+  s_32e2a9a204a8e4::t_3728e0e4b4d623 8-10,55,189-196
+loopx/control_plane/goals/goal_frontier.py
+  s_32e2a9a204a8e4::t_b2010dcfe45729 20,431-436,990,993-998,1067,1083
+loopx/control_plane/goals/goal_vision.py
+  s_32e2a9a204a8e4::t_66f9677af51507 10,16,21,181-182
+loopx/control_plane/goals/goal_vision_policy.py
+  s_32e2a9a204a8e4::t_3685fd325ee491 1-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cd197409b180e0814b741106f454b054e5a483e3",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
