@@ -1,0 +1,23 @@
+loopx/capabilities/explore/worker_branch_plan.py
+  s_9a5a2bd944fdcb::t_e9d1d26c5b1068 222,224-228,234-236,239,241-243,245-247,251-252,255-258,262-265,316-327,354
+tests/test_explore_worker_topic_affinity.py
+  s_9a5a2bd944fdcb::t_e0d3eba26ddc17 1-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "30e961ee16514a0b2b5001ea8cb61987822e6ec0",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
