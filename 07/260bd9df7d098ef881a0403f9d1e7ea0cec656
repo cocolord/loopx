@@ -1,0 +1,25 @@
+loopx/capabilities/issue_fix/cli.py
+  s_9a5a2bd944fdcb::t_af96a5d5a387a0 322-330,822
+loopx/capabilities/issue_fix/pr_lifecycle.py
+  s_9a5a2bd944fdcb::t_f2425d35f86216 10,167,179-181,186,378,401
+loopx/cli_commands/lark_kanban.py
+  s_9a5a2bd944fdcb::t_b711a83b2389db 123-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "07260bd9df7d098ef881a0403f9d1e7ea0cec656",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
