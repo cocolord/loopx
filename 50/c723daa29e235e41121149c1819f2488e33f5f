@@ -1,0 +1,21 @@
+docs/capabilities/issue-fix/README.zh-CN.md
+  s_32e2a9a204a8e4::t_b451b0b5c0e4c7 10-32,38-65,68-70,75,87-90,104,108-111,124,126,138-145,164,167-168,172-174,336-339,351,354-356,496,499-500,513-517
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "50c723daa29e235e41121149c1819f2488e33f5f",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
