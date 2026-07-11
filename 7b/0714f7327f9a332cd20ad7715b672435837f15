@@ -1,0 +1,35 @@
+docs/capabilities/explore/README.md
+  s_9a5a2bd944fdcb::t_c6cf65286427b3 201-238
+examples/explore-result-layer-smoke.py
+  s_9a5a2bd944fdcb::t_4b791271e42576 827,829,958-977
+loopx/capabilities/explore/resource_portfolio.py
+  s_9a5a2bd944fdcb::t_b56fc0cbddfb89 1-173
+loopx/capabilities/explore/todo_branch_plan.py
+  s_9a5a2bd944fdcb::t_eea20806407f0f 34-39,327-328,344,364,372,374-380,433-466,468-505,507-564,588,603,624-627
+loopx/capabilities/explore/worker_branch_plan.py
+  s_9a5a2bd944fdcb::t_5a8790f591476e 19-24,397,405,407,480-484,517,661,663-667,670,673-674,685-687,691,693-694,700-702,846-847,869,981-1075,1077-1106,1167,1214,1229-1232
+loopx/cli_commands/explore.py
+  s_9a5a2bd944fdcb::t_f23165aca308bd 25,555-562,575-576,601-602,610-617,632-633,673-674
+loopx/cli_commands/explore_planning_commands.py
+  s_9a5a2bd944fdcb::t_0dddd8906ea481 12-34,52,104
+tests/test_explore_resource_portfolio.py
+  s_9a5a2bd944fdcb::t_89dfd499156b13 1-216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7b0714f7327f9a332cd20ad7715b672435837f15",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
