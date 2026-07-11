@@ -1,0 +1,33 @@
+docs/heartbeat-automation-prompt.md
+  s_e3f612788718c1::t_bdb517ce50a55c 153-159
+examples/control_plane/heartbeat-prompt-smoke.py
+  s_76ee28abb3c3a4::t_8ab5022f634895 137-138,364-365
+loopx/heartbeat_prompt.py
+  s_e3f612788718c1::t_0d9aaa96659cb1 47-49,54,920
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "24f0e5cb6b7c00f71cc4ae10501aa805c4ab4ba4",
+  "prompts": {},
+  "sessions": {
+    "s_76ee28abb3c3a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0dc3-1b68-7ce3-9ec0-f36f03f3030e",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
