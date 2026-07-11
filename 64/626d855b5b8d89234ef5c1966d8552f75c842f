@@ -1,0 +1,23 @@
+examples/control_plane/quota-material-monitor-spend-smoke.py
+  s_e3f612788718c1::t_41bf149d45b6ab 19,35,62-65,68,86,102,107-126,129
+loopx/control_plane/quota/slot_accounting.py
+  s_e3f612788718c1::t_9f9632fce6ea8b 108-113,116,130-132,188-192,298-300,427
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "64626d855b5b8d89234ef5c1966d8552f75c842f",
+  "prompts": {},
+  "sessions": {
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
