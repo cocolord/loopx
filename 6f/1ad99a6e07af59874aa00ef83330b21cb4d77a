@@ -1,0 +1,31 @@
+docs/quota-allocation.md
+  s_01aa1d91cba6fc::t_8bf316269981c8 541-546
+docs/status-data-contract.md
+  s_01aa1d91cba6fc::t_09a63e64283589 653-657
+examples/control_plane/status-goal-filter-smoke.py
+  s_01aa1d91cba6fc::t_62fdb2496d30c0 22-28,40-42,62-67,106-112,127-129,140-173,215-240
+loopx/contract.py
+  s_01aa1d91cba6fc::t_e56a2e438ff7de 272-276,281-282,591,628-631,693-706,718-719
+loopx/control_plane/status_collection.py
+  s_01aa1d91cba6fc::t_956fa16148f13e 61,96-97
+loopx/quota.py
+  s_01aa1d91cba6fc::t_db1b7e3db2d9db 63,1284,1299-1300,1302,1339,1342,1382,1519,1844-1845
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6f1ad99a6e07af59874aa00ef83330b21cb4d77a",
+  "prompts": {},
+  "sessions": {
+    "s_01aa1d91cba6fc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f44e1-dec7-7683-8ff7-6da3f9d70313",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
