@@ -1,0 +1,25 @@
+examples/capability-gate-smoke.py
+  s_32e2a9a204a8e4::t_fef438acf87683 282-284
+examples/control_plane/heartbeat-prompt-smoke.py
+  s_32e2a9a204a8e4::t_2e15d8285ee97d 241-245
+examples/upgrade-plan-smoke.py
+  s_32e2a9a204a8e4::t_f4c7b1caef452e 373,383-392
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6765ad6570c2339292c5ad4e79eb11de6ec318e5",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

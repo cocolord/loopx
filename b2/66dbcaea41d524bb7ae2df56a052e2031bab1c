@@ -1,0 +1,25 @@
+docs/capabilities/issue-fix/README.md
+  s_9a5a2bd944fdcb::t_7485282e3589fb 515-533,598,610,664
+docs/capabilities/issue-fix/README.zh-CN.md
+  s_9a5a2bd944fdcb::t_a76220610e3c09 457-471,526,538,592
+examples/issue-fix-repository-memory-smoke.py
+  s_9a5a2bd944fdcb::t_52027277d928db 1-232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b266dbcaea41d524bb7ae2df56a052e2031bab1c",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

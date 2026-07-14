@@ -1,0 +1,23 @@
+examples/control_plane/agent-scope-work-lane-consistency-smoke.py
+  s_e3f612788718c1::t_bbbb32dab0c979 14,21,148-209
+loopx/control_plane/work_items/work_lane.py
+  s_e3f612788718c1::t_ed40c6f75bf26c 14-16,91-97,233,247-259
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "16fb16cb6b058ea88557966879fe0f9c83c01e6d",
+  "prompts": {},
+  "sessions": {
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

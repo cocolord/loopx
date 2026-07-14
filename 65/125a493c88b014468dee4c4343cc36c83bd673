@@ -1,0 +1,23 @@
+examples/skillsbench-codex-cli-goal-route-smoke.py
+  s_9a5a2bd944fdcb::t_a1fb89bd02a4da 608,615,620,1379,1381,1399-1409,1432,1440,1448,1492-1497,1533-1538,1566-1567,1589,1596-1597
+loopx/codex_cli_goal_tui.py
+  s_9a5a2bd944fdcb::t_18de1ddd25be4b 23-27,79-80,363-448
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "65125a493c88b014468dee4c4343cc36c83bd673",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

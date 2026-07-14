@@ -1,0 +1,27 @@
+examples/explore-result-layer-smoke.py
+  s_9a5a2bd944fdcb::t_c24ba9281d0f99 1267,1278-1284,1286-1289
+loopx/cli_commands/explore.py
+  s_9a5a2bd944fdcb::t_36e801f4b22224 234-243,802
+loopx/presentation/explore_views.py
+  s_9a5a2bd944fdcb::t_a0e907772674ee 11,85-217,693-698,749-763
+tests/test_explore_presentation_views.py
+  s_9a5a2bd944fdcb::t_904ad9a816c487 458-466,567,575-579,799-867
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0af86beb4cc57cd5cca33b9ad35ecfe3f6ecab46",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

@@ -1,0 +1,27 @@
+docs/project-agent-todo-contract.md
+  s_9a5a2bd944fdcb::t_2087b1bd1d35f2 474
+examples/control_plane/peer-agent-hard-cut-boundary-smoke.py
+  s_9a5a2bd944fdcb::t_ee99c596e27809 16,23,34,36,40
+examples/control_plane/work-lane-contract-smoke.py
+  s_9a5a2bd944fdcb::t_ea719079978905 1901-1903,1906-1907,1915,1921,1931-1932,1934,1945,1949,1957,1960-1962,1965-1966,1974,1980,1990-1991,2013-2015,2018-2019,2027,2033,2043-2044,2059,2237-2239
+examples/fixtures/global-manager-command.public.json
+  s_9a5a2bd944fdcb::t_04016bf10262e4 30,80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "68024b6ac6278ea31faca26c7589c85f32a5347d",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

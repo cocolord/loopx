@@ -1,0 +1,31 @@
+examples/skillsbench-benchmark-egress-policy-smoke.py
+  s_9a5a2bd944fdcb::t_d69f6a81c3fe09 279-320,442
+examples/skillsbench-failure-attribution-smoke.py
+  s_9a5a2bd944fdcb::t_f52146326e53af 57-75,165
+loopx/benchmark_adapters/skillsbench.py
+  s_9a5a2bd944fdcb::t_fb0821ab87e7d6 1657-1663
+loopx/benchmark_adapters/skillsbench_failure_signals.py
+  s_9a5a2bd944fdcb::t_36457a03c627fe 8,18,254-256
+loopx/benchmark_adapters/skillsbench_proxy_runtime.py
+  s_9a5a2bd944fdcb::t_4a82fe25039dc1 67,69-70,72,74-77,112-117,132-140
+scripts/skillsbench_automation_loop.py
+  s_9a5a2bd944fdcb::t_24eadd8012aab2 2724-2725
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d2b4a2c000e064e996f8a396da4c49991f2812e4",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

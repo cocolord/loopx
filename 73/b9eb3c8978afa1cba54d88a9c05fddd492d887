@@ -1,0 +1,26 @@
+loopx/benchmark_adapters/skillsbench_acp_relay.py
+  s_9a5a2bd944fdcb::t_b6e3a62824cd36 119-123,1110-1111,1288-1343,1370-1372,1544-1546,1789,1850,1906-1909
+examples/skillsbench-codex-cli-goal-route-smoke.py
+  s_9a5a2bd944fdcb::t_221e9cbed26611 1379,1399-1409,1468-1469,1494-1499,1536
+  s_9a5a2bd944fdcb::t_4a8f5a9cead035 1564-1565,1587,1594-1595
+loopx/codex_cli_goal_tui.py
+  s_9a5a2bd944fdcb::t_817e915dbb3fbb 74-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "73b9eb3c8978afa1cba54d88a9c05fddd492d887",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

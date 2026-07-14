@@ -1,0 +1,23 @@
+examples/skillsbench-benchmark-egress-policy-smoke.py
+  s_9a5a2bd944fdcb::t_209005941eae92 211-212
+scripts/skillsbench-launch-goal-xhigh.sh
+  s_9a5a2bd944fdcb::t_c7d19591307cfc 231-232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "52cfc56f048c6d7a15ee1cbb6f180ee4fe5aca79",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

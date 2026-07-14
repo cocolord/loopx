@@ -1,0 +1,23 @@
+scripts/skillsbench_docker_command_file_bridge.py
+  s_32e2a9a204a8e4::t_020f72cd5b3470 15,19-20,23,41,139-264,306-308,310-312,315-319,323-356,359,361,376-378,381-384,387,389-390,441,455-457,464,482,485
+tests/test_skillsbench_docker_command_file_bridge.py
+  s_32e2a9a204a8e4::t_01cebd78ec2e58 1-103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e06d7a16f6ecb3bf063eef79b463d709e93a8e17",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

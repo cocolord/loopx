@@ -1,0 +1,27 @@
+docs/capabilities/issue-fix/README.md
+  s_9a5a2bd944fdcb::t_3a28d7a80c7495 205-206,212-215
+docs/capabilities/issue-fix/README.zh-CN.md
+  s_9a5a2bd944fdcb::t_e56cacfe70984e 237-239,243-246
+docs/capabilities/issue-fix/protocols/issue-fix-reviewer-request-v0.md
+  s_9a5a2bd944fdcb::t_aca0ed56ed6e67 146-147,149-153,188-191
+skills/loopx-self-repair/references/repair-patterns.md
+  s_9a5a2bd944fdcb::t_d30c2fe2da3a3e 38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "32ae56764cd6235c8d1ca2de4d7b953a34bde068",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

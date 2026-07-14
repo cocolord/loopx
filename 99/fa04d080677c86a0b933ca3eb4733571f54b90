@@ -1,0 +1,27 @@
+examples/control_plane/event-sourced-downstream-read-path-smoke.py
+  s_9a5a2bd944fdcb::t_a82dec8966d716 19,22-24,37-40,124-202,386-451,456
+examples/control_plane/event-sourced-markdown-backfill-smoke.py
+  s_9a5a2bd944fdcb::t_96517477b26146 123-147,152
+loopx/control_plane/todos/contract.py
+  s_9a5a2bd944fdcb::t_844ab9b7234e59 651-654,731,796-812
+loopx/event_sourced_state.py
+  s_9a5a2bd944fdcb::t_e37a047bd4d78c 23,269-271,283-284,570-573,598-600,633-652,661-662,798
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "99fa04d080677c86a0b933ca3eb4733571f54b90",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
