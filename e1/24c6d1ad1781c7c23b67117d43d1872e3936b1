@@ -1,0 +1,29 @@
+examples/reward-memory-architecture-smoke.py
+  s_9a5a2bd944fdcb::t_659ef9f575c201 102-111
+examples/reward-memory-candidate-review-smoke.py
+  s_9a5a2bd944fdcb::t_060912d246720d 1-215
+loopx/capabilities/catalog.py
+  s_9a5a2bd944fdcb::t_521eeb3acafd87 290,322-326,349-363,368,384-385,388-390
+loopx/capabilities/reward_memory/candidate_review.py
+  s_9a5a2bd944fdcb::t_f03ed12ec0508d 1-480
+loopx/capabilities/reward_memory/cli.py
+  s_9a5a2bd944fdcb::t_66188216a362d1 11-14,24-30,88-105,156-180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e124c6d1ad1781c7c23b67117d43d1872e3936b1",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
