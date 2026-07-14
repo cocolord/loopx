@@ -1,0 +1,23 @@
+examples/skillsbench-goal-start-product-mode-route-smoke.py
+  s_9a5a2bd944fdcb::t_6384aa2cf406b0 646-686,864
+scripts/skillsbench_automation_loop.py
+  s_9a5a2bd944fdcb::t_5101dec03db8e3 11445-11447,11510-11541
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d0993127a92300c3492364480dc07fd41398b3e3",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
