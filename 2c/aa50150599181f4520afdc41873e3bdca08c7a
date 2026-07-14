@@ -1,0 +1,41 @@
+docs/capabilities/issue-fix/README.md
+  s_9a5a2bd944fdcb::t_e29181318810ef 397
+docs/capabilities/semantic-preference/README.md
+  s_9a5a2bd944fdcb::t_49fc577125beac 157-165
+docs/reference/protocols/reward-memory-architecture-v0.md
+  s_e3f612788718c1::t_971b4b0ea836e1 283-286,294-323
+docs/reference/protocols/reward-memory-architecture-v0.zh-CN.md
+  s_e3f612788718c1::t_163e8da25511b1 239-242,249-273
+docs/reference/protocols/reward-memory-corpus-registry-v0.md
+  s_e3f612788718c1::t_facf078e80ddda 137-138
+examples/reward-memory-architecture-smoke.py
+  s_9a5a2bd944fdcb::t_87da0c33b02a70 112-120
+examples/reward-memory-recall-application-smoke.py
+  s_9a5a2bd944fdcb::t_64ff4d8db85a88 1-457
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2caa50150599181f4520afdc41873e3bdca08c7a",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
