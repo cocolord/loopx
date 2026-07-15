@@ -1,0 +1,35 @@
+docs/product/core-control-plane/state-machine.md
+  s_42fbdc57cfce7c::t_db9aecc9379ce4 285,294,316
+docs/quota-allocation.md
+  s_42fbdc57cfce7c::t_97c944490d9fea 451-459
+examples/control_plane/quota-terminal-no-followup-smoke.py
+  s_42fbdc57cfce7c::t_6fd7757ff6fa12 1-172
+loopx/control_plane/goals/goal_frontier.py
+  s_42fbdc57cfce7c::t_aef9eb1fad1bfd 34,59-115
+loopx/control_plane/scheduler/automation_liveness.py
+  s_42fbdc57cfce7c::t_a89ecb0548ddf2 39-55
+loopx/control_plane/scheduler/scheduler_hint.py
+  s_42fbdc57cfce7c::t_7b8da2d5c99396 833-860
+loopx/quota.py
+  s_42fbdc57cfce7c::t_12e4aee9d8c396 51,1504-1505,1507-1510,1513,1516,1527-1537
+skills/loopx-self-repair/references/repair-patterns.md
+  s_42fbdc57cfce7c::t_a59731eed2f4da 41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c30c9c242dfaf01a3f3007d9931bbc5103447662",
+  "prompts": {},
+  "sessions": {
+    "s_42fbdc57cfce7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5a46-ca0c-70f0-b873-5cd5d22ab245",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
