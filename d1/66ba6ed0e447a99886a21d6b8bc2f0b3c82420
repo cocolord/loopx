@@ -1,0 +1,25 @@
+examples/reward-memory-architecture-smoke.py
+  s_9a5a2bd944fdcb::t_1333f32f285525 38,47-51,53-56,58-62,78-80,92-101,111,114-117
+loopx/capabilities/catalog.py
+  s_9a5a2bd944fdcb::t_6b7d2e42095bf4 297-298,309-310,354-356,359,365-367
+loopx/capabilities/reward_memory/architecture.py
+  s_9a5a2bd944fdcb::t_9a5d83f59874c2 31,40-43,49,52-53,56-59,61,65-90,151-154,195-196,210-211,297-319,336-337,341-342,346-361,394-397,438,442,446,539-540
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d166ba6ed0e447a99886a21d6b8bc2f0b3c82420",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

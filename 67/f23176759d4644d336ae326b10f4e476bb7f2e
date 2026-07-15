@@ -1,0 +1,31 @@
+loopx/benchmark_adapters/skillsbench_codex_runtime.py
+  s_9a5a2bd944fdcb::t_e62c6cb8ed0d09 163
+loopx/benchmark_adapters/skillsbench_failure_signals.py
+  s_9a5a2bd944fdcb::t_8427b9673b28de 4,95-117,139
+loopx/benchmark_adapters/skillsbench_setup_preflight.py
+  s_9a5a2bd944fdcb::t_21f5a63a6d33d2 1-177
+scripts/skillsbench-launch-goal-xhigh.sh
+  s_9a5a2bd944fdcb::t_39050990946a25 38-41,151,165-166,171,306-308,401,444,496
+scripts/skillsbench_automation_loop.py
+  s_9a5a2bd944fdcb::t_b8316a9429c283 143-145,1145-1146,2003-2004,8093-8095,8357-8360,9247-9264,13227-13230,13966-13968,13972,13982,13994,14003,14006-14009,14039-14040,14045-14046,14183,14185-14201,14240-14241,15825-15833,16210-16218,16267-16270,16287,16353,16467,16486,16504,16508-16540,16703,16989,17016,17068,17138,17175,17219
+tests/test_skillsbench_setup_preflight.py
+  s_9a5a2bd944fdcb::t_ff5a04d5528d01 1-208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "67f23176759d4644d336ae326b10f4e476bb7f2e",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

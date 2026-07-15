@@ -1,0 +1,31 @@
+examples/reward-memory-corpus-registry-smoke.py
+  s_9a5a2bd944fdcb::t_0d6a1434d06aa4 1-187
+loopx/capabilities/catalog.py
+  s_9a5a2bd944fdcb::t_43a3abafc9d8cf 290-294,311-320,333-350,358-359,362-363
+loopx/capabilities/reward_memory/__init__.py
+  s_9a5a2bd944fdcb::t_f518ba4adba35e 8-16,20-21,23,25-26
+loopx/capabilities/reward_memory/cli.py
+  s_9a5a2bd944fdcb::t_f84c6044d57855 11-15,20,26-27,49-77,123-127,139-140
+loopx/capabilities/reward_memory/health.py
+  s_9a5a2bd944fdcb::t_edfdb2d19961a1 1-222
+loopx/capabilities/reward_memory/registry.py
+  s_9a5a2bd944fdcb::t_7588ba2e0b6de2 1-596
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "35cf5a12c78e1c5f9d898357a6f4ef101385bd57",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

@@ -1,0 +1,25 @@
+examples/control_plane/todo-cli-smoke.py
+  s_9a5a2bd944fdcb::t_21d9eb6678dba6 752-761,813
+loopx/todos.py
+  s_9a5a2bd944fdcb::t_5d20c414bc08d4 564-572,574
+skills/loopx-self-repair/references/repair-patterns.md
+  s_9a5a2bd944fdcb::t_d699ba346da16b 44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "05d7f2b7a5897ce22cea7af0d008a4e37d6c0f69",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

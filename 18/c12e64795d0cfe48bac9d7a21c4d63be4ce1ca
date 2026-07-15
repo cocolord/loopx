@@ -1,0 +1,43 @@
+loopx/capabilities/catalog.py
+  s_9a5a2bd944fdcb::t_4c952134e8ad6d 290-291,364-393,399,417-420,423-425
+loopx/capabilities/issue_fix/__init__.py
+  s_9a5a2bd944fdcb::t_b9970ce6ef1482 4,6-9
+loopx/capabilities/issue_fix/reward_memory.py
+  s_9a5a2bd944fdcb::t_1f75a9729242eb 1-86
+loopx/capabilities/reward_memory/__init__.py
+  s_9a5a2bd944fdcb::t_020fba0e1c7665 8-15,34-37,43-44
+loopx/capabilities/reward_memory/application.py
+  s_e3f612788718c1::t_34b24c62ea38a2 1-735
+loopx/capabilities/reward_memory/architecture.py
+  s_9a5a2bd944fdcb::t_30ed46436121f6 375-384,422-425
+loopx/capabilities/semantic_preference/__init__.py
+  s_9a5a2bd944fdcb::t_fae82b048df81d 4,6-12
+loopx/capabilities/semantic_preference/reward_memory.py
+  s_9a5a2bd944fdcb::t_c6ef5c3cdb45e2 1-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "18c12e64795d0cfe48bac9d7a21c4d63be4ce1ca",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
