@@ -1,0 +1,33 @@
+loopx/control_plane/goals/goal_frontier.py
+  s_42fbdc57cfce7c::t_a65deba59d882c 34-35,60-65,67-106,109,142-183,185-193,1459,1479-1487
+loopx/control_plane/scheduler/automation_liveness.py
+  s_42fbdc57cfce7c::t_1ec03399a1b376 50-51
+loopx/control_plane/scheduler/scheduler_hint.py
+  s_42fbdc57cfce7c::t_b92074f55e9571 840-841,848-851
+loopx/control_plane/todos/quota_summary.py
+  s_42fbdc57cfce7c::t_50ee035480b9c6 138-186,318,348-349,369-370,522-523
+loopx/control_plane/todos/todo_summary.py
+  s_42fbdc57cfce7c::t_0c3afd468e23aa 67-68,1057-1063,1138-1151
+loopx/heartbeat_prompt.py
+  s_42fbdc57cfce7c::t_bea062e2c9462c 34-36,39-40,43-44,762,779-782,831-832,836,845-846,849-850,963-964
+loopx/quota.py
+  s_42fbdc57cfce7c::t_cce96f8282bf3e 1527,1530,1535-1536
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a92b636dcd2558115ed835c8eeac37b3bf03946f",
+  "prompts": {},
+  "sessions": {
+    "s_42fbdc57cfce7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5a46-ca0c-70f0-b873-5cd5d22ab245",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
