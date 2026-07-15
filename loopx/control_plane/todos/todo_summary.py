@@ -66,6 +66,7 @@ TODO_ITEM_SCHEMA_VERSION = "todo_item_v0"
 TODO_SUCCESSION_WARNING_SCHEMA_VERSION = "todo_succession_warning_v0"
 TODO_SOURCE_PROOF_SCHEMA_VERSION = "todo_source_proof_v0"
 TODO_CLOSURE_INTENT_SCHEMA_VERSION = "todo_closure_intent_v0"
+TODO_TERMINAL_CLOSURE_PROOF_SCHEMA_VERSION = "todo_terminal_closure_proof_v0"
 TODO_ARCHIVE_STATE_ACTIVE = "active"
 AttentionItemBuilder = Callable[..., dict[str, Any]]
 GoalLifecycleFields = Callable[[dict[str, Any], Optional[dict[str, Any]]], dict[str, Any]]
@@ -1065,6 +1066,11 @@ def compact_todo_group(
         lanes.done_items,
         all_items=items,
     )
+    handoff_gates = build_todo_handoff_gate_states(items)
+    route_replan_required = any(
+        item.get("route_continuation_replan_required") is True
+        for item in [*items, *handoff_gates]
+    )
     summary = {
         "schema_version": "todo_summary_v0",
         "source_section": source_section,
@@ -1142,6 +1148,25 @@ def compact_todo_group(
             "item_count": len(items),
             "derived": source_valid,
         }
+    if (
+        source_valid
+        and len(lanes.done_items) == len(items)
+        and not lanes.monitor_items
+        and not successor_gap_items
+        and not route_replan_required
+    ):
+        summary["terminal_closure_proof"] = {
+            "schema_version": TODO_TERMINAL_CLOSURE_PROOF_SCHEMA_VERSION,
+            "role": role,
+            "source_section": source_section,
+            "item_count": len(items),
+            "all_todos_done": True,
+            "monitor_open_count": 0,
+            "successor_gap_count": 0,
+            "route_replan_count": 0,
+            "no_followup_count": len(no_followup_items),
+            "derived": True,
+        }
     if no_followup_items:
         summary["closure_intent"] = {
             "schema_version": TODO_CLOSURE_INTENT_SCHEMA_VERSION,
@@ -1155,7 +1180,6 @@ def compact_todo_group(
             compact_todo_item(item)
             for item in lanes.resume_blocked_items[:MAX_DEFERRED_TODO_VISIBILITY_ITEMS]
         ]
-    handoff_gates = build_todo_handoff_gate_states(items)
     if handoff_gates:
         summary["handoff_gates"] = handoff_gates
     if successor_gap_items:

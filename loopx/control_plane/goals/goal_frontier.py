@@ -75,6 +75,7 @@ def _terminal_todo_source_state(
         and completeness.get("status") == "valid"
         and completeness.get("source") == "structured_todo_projection"
         and completeness.get("role") == role
+        and completeness.get("terminal_closure") == "valid"
     ):
         return "invalid", False
     total = summary.get("total_count")

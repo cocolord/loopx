@@ -23,12 +23,12 @@ GOAL_ID = "terminal-no-followup-fixture"
 AGENT_ID = "codex-main-control"
 
 
-def completed_todos(*, role: str) -> dict:
+def completed_todos(*, role: str, count: int = 1) -> dict:
     summary = compact_todo_group(
         [
             {
-                "index": 1,
-                "todo_id": f"todo_completed_{role}",
+                "index": index,
+                "todo_id": f"todo_completed_{role}_{index}",
                 "text": "Complete the bounded fixture work.",
                 "role": role,
                 "status": "done",
@@ -38,6 +38,7 @@ def completed_todos(*, role: str) -> dict:
                 "no_followup": True,
                 "claimed_by": AGENT_ID if role == "agent" else None,
             }
+            for index in range(1, count + 1)
         ],
         source_section="Agent Todo" if role == "agent" else "User Todo",
         role=role,
@@ -142,6 +143,15 @@ def assert_terminal_guard_stops_recurring_automation() -> None:
     assert scheduler["unchanged_poll"]["codex_cli_tui"] == "exit", guard
 
 
+def assert_truncated_display_uses_full_source_proof() -> None:
+    payload = status_payload()
+    agent_todos = completed_todos(role="agent", count=13)
+    assert len(agent_todos["items"]) < agent_todos["total_count"], agent_todos
+    payload["attention_queue"]["items"][0]["agent_todos"] = agent_todos
+    guard = build_quota_should_run(payload, goal_id=GOAL_ID, agent_id=AGENT_ID)
+    assert guard["effective_action"] == "terminal_no_followup", guard
+
+
 def assert_not_terminal(payload: dict, *, label: str) -> None:
     guard = build_quota_should_run(payload, goal_id=GOAL_ID, agent_id=AGENT_ID)
     assert guard.get("effective_action") != "terminal_no_followup", (label, guard)
@@ -159,6 +169,96 @@ def assert_missing_or_malformed_sources_fail_closed() -> None:
         payload = status_payload()
         payload["attention_queue"]["items"][0]["agent_todos"]["open_count"] = malformed
         assert_not_terminal(payload, label=f"malformed-open-count-{malformed!r}")
+
+
+def assert_contradictory_source_contracts_fail_closed() -> None:
+    for field in ("schema_version", "items", "terminal_closure_proof"):
+        payload = status_payload()
+        del payload["attention_queue"]["items"][0]["agent_todos"][field]
+        assert_not_terminal(payload, label=f"missing-agent-{field}")
+
+    payload = status_payload()
+    payload["attention_queue"]["items"][0]["agent_todos"]["monitor_open_items"] = "bad"
+    assert_not_terminal(payload, label="malformed-monitor-open-items")
+
+    payload = status_payload()
+    payload["attention_queue"]["items"][0]["agent_todos"]["items"][0]["status"] = "open"
+    payload["attention_queue"]["items"][0]["agent_todos"]["items"][0]["done"] = False
+    assert_not_terminal(payload, label="open-item-behind-closed-counts")
+
+    payload = status_payload()
+    payload["attention_queue"]["items"][0]["agent_todos"]["items"][0][
+        "status"
+    ] = "deferred"
+    assert_not_terminal(payload, label="deferred-item-behind-closed-counts")
+
+    payload = status_payload()
+    agent_todos = payload["attention_queue"]["items"][0]["agent_todos"]
+    agent_todos["completed_without_successor_count"] = 1
+    agent_todos["completed_without_successor_items"] = []
+    assert_not_terminal(payload, label="inconsistent-successor-gap")
+
+    payload = status_payload()
+    payload["attention_queue"]["items"][0]["agent_todos"][
+        "route_continuation_replan_count"
+    ] = 1
+    assert_not_terminal(payload, label="inconsistent-route-replan")
+
+
+def assert_semantic_successor_and_replan_gaps_fail_closed() -> None:
+    payload = status_payload()
+    agent_todos = compact_todo_group(
+        [
+            {
+                "index": 1,
+                "todo_id": "todo_closed_slice",
+                "text": "Close one bounded fixture slice.",
+                "status": "done",
+                "done": True,
+                "task_class": "advancement_task",
+                "claimed_by": AGENT_ID,
+                "no_followup": True,
+            },
+            {
+                "index": 2,
+                "todo_id": "todo_successor_gap",
+                "text": "Finish tracked work without recording a successor.",
+                "status": "done",
+                "done": True,
+                "task_class": "advancement_task",
+                "claimed_by": AGENT_ID,
+            },
+        ],
+        source_section="Agent Todo",
+        role="agent",
+    )
+    assert agent_todos is not None
+    assert "terminal_closure_proof" not in agent_todos, agent_todos
+    payload["attention_queue"]["items"][0]["agent_todos"] = agent_todos
+    assert_not_terminal(payload, label="semantic-successor-gap")
+
+    payload = status_payload()
+    agent_todos = compact_todo_group(
+        [
+            {
+                "index": 1,
+                "todo_id": "todo_route_replan",
+                "text": "Replan the stale route before closeout.",
+                "status": "done",
+                "done": True,
+                "task_class": "advancement_task",
+                "claimed_by": AGENT_ID,
+                "no_followup": True,
+                "route_continuation_replan_required": True,
+            }
+        ],
+        source_section="Agent Todo",
+        role="agent",
+    )
+    assert agent_todos is not None
+    assert "terminal_closure_proof" not in agent_todos, agent_todos
+    payload["attention_queue"]["items"][0]["agent_todos"] = agent_todos
+    assert_not_terminal(payload, label="semantic-route-replan")
 
 
 def assert_open_work_and_frontier_dimensions_fail_closed() -> None:
@@ -271,7 +371,10 @@ def assert_open_work_and_frontier_dimensions_fail_closed() -> None:
 
 def main() -> int:
     assert_terminal_guard_stops_recurring_automation()
+    assert_truncated_display_uses_full_source_proof()
     assert_missing_or_malformed_sources_fail_closed()
+    assert_contradictory_source_contracts_fail_closed()
+    assert_semantic_successor_and_replan_gaps_fail_closed()
     assert_open_work_and_frontier_dimensions_fail_closed()
     print("quota-terminal-no-followup-smoke ok")
     return 0

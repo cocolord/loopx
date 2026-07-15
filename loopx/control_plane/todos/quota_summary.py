@@ -141,6 +141,46 @@ def _strict_non_negative_int(value: Any) -> int | None:
     return value
 
 
+def _terminal_closure_proof_is_valid(
+    value: dict[str, Any],
+    *,
+    counts: dict[str, int | None],
+    source_proof: dict[str, Any],
+) -> bool:
+    proof = value.get("terminal_closure_proof")
+    items = value.get("items")
+    return bool(
+        value.get("schema_version") == "todo_summary_v0"
+        and isinstance(items, list)
+        and 0 < len(items) <= counts["total_count"]
+        and all(
+            isinstance(item, dict)
+            and item.get("status") == "done"
+            and item.get("done") is True
+            and item.get("route_continuation_replan_required") is not True
+            for item in items
+        )
+        and value.get("monitor_open_items") == []
+        and value.get("deferred_items") == []
+        and value.get("deferred_resume_candidates") == []
+        and _strict_non_negative_int(value.get("monitor_due_count")) == 0
+        and _strict_non_negative_int(value.get("monitor_schedule_gap_count")) == 0
+        and _strict_non_negative_int(value.get("completed_without_successor_count", 0)) == 0
+        and _strict_non_negative_int(value.get("route_continuation_replan_count", 0)) == 0
+        and isinstance(proof, dict)
+        and proof.get("schema_version") == "todo_terminal_closure_proof_v0"
+        and proof.get("role") == source_proof.get("role")
+        and proof.get("source_section") == value.get("source_section")
+        and proof.get("item_count") == counts["total_count"]
+        and proof.get("all_todos_done") is True
+        and _strict_non_negative_int(proof.get("monitor_open_count")) == 0
+        and _strict_non_negative_int(proof.get("successor_gap_count")) == 0
+        and _strict_non_negative_int(proof.get("route_replan_count")) == 0
+        and _strict_non_negative_int(proof.get("no_followup_count")) is not None
+        and proof.get("derived") is True
+    )
+
+
 def _validated_todo_source_contract(
     value: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
@@ -164,22 +204,35 @@ def _validated_todo_source_contract(
         and type(proof.get("item_count")) is int
         and proof.get("item_count") == counts["total_count"]
     )
+    valid_terminal_closure = bool(
+        valid_counts
+        and valid_proof
+        and _terminal_closure_proof_is_valid(
+            value,
+            counts=counts,
+            source_proof=proof,
+        )
+    )
     completeness = {
         "schema_version": "todo_source_completeness_v0",
-        "status": "valid" if valid_counts and valid_proof else "invalid",
+        "status": "valid" if valid_terminal_closure else "invalid",
         "source": "structured_todo_projection",
         "role": proof.get("role") if isinstance(proof, dict) else None,
+        "terminal_closure": "valid" if valid_terminal_closure else "invalid",
     }
 
     intent = value.get("closure_intent")
+    terminal_proof = value.get("terminal_closure_proof")
     valid_intent = bool(
-        valid_counts
+        valid_terminal_closure
         and isinstance(intent, dict)
         and intent.get("schema_version") == "todo_closure_intent_v0"
         and intent.get("kind") == "no_followup"
         and intent.get("derived") is True
         and type(intent.get("count")) is int
         and 0 < intent.get("count") <= counts["done_count"]
+        and isinstance(terminal_proof, dict)
+        and intent.get("count") == terminal_proof.get("no_followup_count")
     )
     return completeness, {**intent, "source": "todo_no_followup"} if valid_intent else None
 
