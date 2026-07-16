@@ -297,6 +297,23 @@ def install_slash_commands(
         for spec in specs:
             skill_path = skill_dir / str(spec["name"]) / "SKILL.md"
             metadata_path = skill_path.parent / "agents" / "openai.yaml"
+            if spec["command"] == "/loopx":
+                for path, mechanism in (
+                    (skill_path, "retired_codex_project_command_facade"),
+                    (metadata_path, "retired_codex_project_command_metadata"),
+                ):
+                    installed.append(
+                        {
+                            "surface": "codex",
+                            "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
+                            "mechanism": mechanism,
+                            "command": spec["command"],
+                            "path": str(path),
+                            "status": _retire_status(path, execute=execute),
+                            "invoke_as": [],
+                        }
+                    )
+                continue
             if uninstall:
                 skill_status = _retire_status(skill_path, execute=execute)
                 installed.append(
@@ -377,6 +394,19 @@ def install_slash_commands(
                         }
                     )
         for spec in specs:
+            if spec["command"] == "/loopx":
+                fallback = (
+                    "Use the `LoopX` workflow skill in `/skills`; for the visible TUI loop, "
+                    "run `loopx codex-cli-bootstrap-message --project .`, paste the setup "
+                    "message, then set `/goal <thin task_body>`."
+                )
+            else:
+                fallback = (
+                    f"Use `${spec['name']}` or `/skills` to explicitly invoke the LoopX "
+                    "command skill; for the visible TUI loop, run "
+                    "`loopx codex-cli-bootstrap-message --project .`, paste the setup "
+                    "message, then set `/goal <thin task_body>`."
+                )
             installed.append(
                 {
                     "surface": "codex",
@@ -392,7 +422,7 @@ def install_slash_commands(
                     ),
                     "native_registry_supported": False,
                     "failure_policy": "fail_closed_to_explicit_skill",
-                    "fallback": "Use `$loopx` or `/skills` to explicitly invoke the LoopX skill; for the visible TUI loop, run `loopx codex-cli-bootstrap-message --project .`, paste the setup message, then set `/goal <thin task_body>`.",
+                    "fallback": fallback,
                 }
             )
 
@@ -463,8 +493,8 @@ def install_slash_commands(
         },
         "installed": installed,
         "notes": [
-            "Codex does not currently support user-defined native top-level slash commands; use explicit skill invocation through `$loopx` or `/skills`.",
-            "Only explicit LoopX command-facade skills are installed with agents/openai.yaml policy allow_implicit_invocation=false; richer workflow skills stay implicit.",
+            "Codex routes the project-local /loopx fallback through the LoopX workflow skill; upgrades retire the older managed $loopx command facade.",
+            "Other explicit LoopX command-facade skills are installed with agents/openai.yaml policy allow_implicit_invocation=false; richer workflow skills stay implicit.",
             "Claude Code discovers user skills from CLAUDE_HOME/skills and exposes each skill name as a slash command.",
             "Uninstall is fail-closed: it retires only files carrying the LoopX managed marker and leaves user-owned files in place.",
         ],
