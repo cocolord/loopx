@@ -1,0 +1,31 @@
+loopx/slash_command_install.py
+  s_7e7438a57a53a0::t_d3073d52fa04b7 300-316,397-409,425,496-497
+skills/loopx-project/agents/openai.yaml
+  s_ef81bf90a7bbe1::t_52f9c538e97acd 1-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "88229e55db0fdc7c05c9d834cbd6a55d4d63216d",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    },
+    "s_ef81bf90a7bbe1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6904-d3a4-7a11-ad33-e90555eeec98",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
