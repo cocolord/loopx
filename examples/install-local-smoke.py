@@ -338,6 +338,10 @@ def main() -> int:
         )
         doc_registry_skill = codex_home / "skills" / "loopx-doc-registry" / "SKILL.md"
         doc_registry_text = " ".join(doc_registry_skill.read_text(encoding="utf-8").split())
+        doc_registry_metadata = doc_registry_skill.parent / "agents" / "openai.yaml"
+        doc_registry_metadata_text = doc_registry_metadata.read_text(encoding="utf-8")
+        assert 'display_name: "LoopX Doc Registry"' in doc_registry_metadata_text
+        assert 'display_name: "Loopx' not in doc_registry_metadata_text
         for phrase in (
             "Use even when the user does not mention LoopX or doc registry",
             "use `.loopx/registry.json` as the project-local doc registry",
