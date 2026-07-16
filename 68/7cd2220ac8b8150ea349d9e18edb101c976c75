@@ -1,0 +1,27 @@
+loopx/capabilities/value_connectors/cli.py
+  s_7e7438a57a53a0::t_1988d335fa7444 9-12,227-239,301-311,314-315,379-398
+loopx/capabilities/value_connectors/finance_discovery.py
+  s_7e7438a57a53a0::t_34310fceb3981f 1-516
+loopx/capabilities/value_connectors/planner.py
+  s_7e7438a57a53a0::t_1e3aa942746e95 95,170,575
+loopx/capabilities/value_connectors/source_map.py
+  s_7e7438a57a53a0::t_c27c7041eb4c77 20,181,189-192,199-223,256
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "687cd2220ac8b8150ea349d9e18edb101c976c75",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
