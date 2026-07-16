@@ -1,0 +1,23 @@
+loopx/capabilities/catalog.py
+  s_7e7438a57a53a0::t_e2deb8abf673ea 3-4,7-9,15,18-20,220-222,300-302,500-502,588-590,689-691,698-700,709-737,740-748,752-755,759-760,764-768,786-787,808-809
+loopx/cli_commands/capability.py
+  s_7e7438a57a53a0::t_8f94c0c19c9df3 22-34,52,62,73-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9a9adc631426617d51c280b05908f0ba4f5e69a1",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
