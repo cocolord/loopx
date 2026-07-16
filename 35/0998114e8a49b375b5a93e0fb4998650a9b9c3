@@ -1,0 +1,27 @@
+examples/capability-extension-placement-doc-smoke.py
+  s_7e7438a57a53a0::t_cc7962d4d0aee9 26
+examples/finance-value-discovery-extension-smoke.py
+  s_7e7438a57a53a0::t_852330206c4af6 2,7,16-20,24,33-36,40-58,129-131,168-174,177,246-265
+tests/capabilities/test_capability_extension_registry.py
+  s_7e7438a57a53a0::t_5fa69ece84a408 120,123
+tests/extensions/test_finance_value_discovery_extension.py
+  s_7e7438a57a53a0::t_e0b913e58d89f1 1-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "350998114e8a49b375b5a93e0fb4998650a9b9c3",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
