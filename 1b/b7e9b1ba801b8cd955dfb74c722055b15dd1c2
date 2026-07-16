@@ -1,0 +1,25 @@
+examples/canary/canary-promotion-no-write-contract-smoke.py
+  s_ef81bf90a7bbe1::t_34c58335fa3a7e 33-34
+examples/canary/canary-promotion-readiness-smoke.py
+  s_ef81bf90a7bbe1::t_db30a5c4249c41 29,74-81,120,132-134,144,232
+examples/canary/canary-promotion-readiness-writeback-smoke.py
+  s_ef81bf90a7bbe1::t_0c677995be3a5c 22,162-166,209
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1bb7e9b1ba801b8cd955dfb74c722055b15dd1c2",
+  "prompts": {},
+  "sessions": {
+    "s_ef81bf90a7bbe1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6904-d3a4-7a11-ad33-e90555eeec98",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
