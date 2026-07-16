@@ -1,0 +1,21 @@
+tests/test_slash_command_install.py
+  s_ef81bf90a7bbe1::t_b4196701674fa6 1-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "593a0715ab37147899cbb805c6e3934e9f22a253",
+  "prompts": {},
+  "sessions": {
+    "s_ef81bf90a7bbe1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6904-d3a4-7a11-ad33-e90555eeec98",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
