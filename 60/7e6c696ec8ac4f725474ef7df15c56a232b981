@@ -1,0 +1,25 @@
+examples/install-local-smoke.py
+  s_ef81bf90a7bbe1::t_84443f7a77ed30 341-344
+skills/loopx-doc-registry/agents/openai.yaml
+  s_ef81bf90a7bbe1::t_168144e24e94ca 1-4
+tests/test_packaged_skill_metadata.py
+  s_ef81bf90a7bbe1::t_c914ffacf27702 1-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "607e6c696ec8ac4f725474ef7df15c56a232b981",
+  "prompts": {},
+  "sessions": {
+    "s_ef81bf90a7bbe1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6904-d3a4-7a11-ad33-e90555eeec98",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
