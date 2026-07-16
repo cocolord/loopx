@@ -1,0 +1,31 @@
+CONTRIBUTOR_TASKS.md
+  s_7e7438a57a53a0::t_7462d649fe05bb 113
+docs/capabilities/README.md
+  s_7e7438a57a53a0::t_66c7009c781363 14-15
+docs/capabilities/value-connectors/README.md
+  s_7e7438a57a53a0::t_88cc0b2f28a809 1,3-7,33-34,92,219-220,232-233
+docs/capabilities/value-connectors/finance-value-discovery.md
+  s_7e7438a57a53a0::t_963ee473f2091b 1,3-7,9,12
+docs/extensions.md
+  s_7e7438a57a53a0::t_8a3aa268663e34 100-122
+docs/reference/protocols/value-connector-plan-v0.md
+  s_7e7438a57a53a0::t_f356830f72fa70 57,172-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "925ef1913f267c377409c35fad82cee3887712f5",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
