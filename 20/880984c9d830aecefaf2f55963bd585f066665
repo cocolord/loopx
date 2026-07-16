@@ -1,0 +1,35 @@
+docs/guides/getting-started.md
+  s_ef81bf90a7bbe1::t_50b510e97d0e21 72-78,88
+docs/product/codex-cli-packaged-install.md
+  s_ef81bf90a7bbe1::t_99f13da38ec2f4 32-35
+docs/reference/protocols/codex-app-host-command-registry-v0.md
+  s_ef81bf90a7bbe1::t_4cca9336133428 222-224
+examples/install-local-smoke.py
+  s_ef81bf90a7bbe1::t_be0c9ab2972a64 319-325,328-329
+examples/slash-command-install-smoke.py
+  s_ef81bf90a7bbe1::t_5c17c93c8ffcd3 82,85,87-90,93,95,105-117,192,236-237
+loopx/slash_command_install.py
+  s_ef81bf90a7bbe1::t_4b154f8b5ee6ea 395-400,471-472
+skills/loopx-project/agents/openai.yaml
+  s_ef81bf90a7bbe1::t_5190867172e143 2
+tests/test_slash_command_install.py
+  s_ef81bf90a7bbe1::t_0bb58967e68ad8 24,39-40,42-46,53,73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "20880984c9d830aecefaf2f55963bd585f066665",
+  "prompts": {},
+  "sessions": {
+    "s_ef81bf90a7bbe1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6904-d3a4-7a11-ad33-e90555eeec98",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
