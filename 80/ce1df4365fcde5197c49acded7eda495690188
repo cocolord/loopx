@@ -1,0 +1,51 @@
+extensions/finance-value-discovery/README.md
+  s_7e7438a57a53a0::t_5a18bda97bc8c9 1-89
+extensions/finance-value-discovery/extension.toml
+  s_7e7438a57a53a0::t_a9e81e0dd33422 1-23
+extensions/finance-value-discovery/pyproject.toml
+  s_7e7438a57a53a0::t_33e1c679d573fb 1-17
+extensions/finance-value-discovery/src/loopx_finance_value_discovery/__init__.py
+  s_7e7438a57a53a0::t_eca4a14295c188 1-21
+extensions/finance-value-discovery/src/loopx_finance_value_discovery/cli.py
+  s_7e7438a57a53a0::t_7cb21ded591067 1-82
+extensions/finance-value-discovery/src/loopx_finance_value_discovery/reducer.py
+  s_7e7438a57a53a0::t_2b8183e15242bd 1-553
+loopx/capabilities/value_connectors/cli.py
+  s_7e7438a57a53a0::t_602af00d816401 1,3-5,8
+loopx/capabilities/value_connectors/finance_discovery.py
+  s_7e7438a57a53a0::t_44ea2579ca2330 1-9
+loopx/capabilities/value_connectors/github_public.py
+  s_7e7438a57a53a0::t_8f5053c2252d5c 1,3
+loopx/capabilities/value_connectors/planner.py
+  s_7e7438a57a53a0::t_5f9c03fcfc293a 1,3
+loopx/capabilities/value_connectors/source_map.py
+  s_7e7438a57a53a0::t_a0c611def70e0b 1,3
+loopx/extensions/external_provider_runtime/__init__.py
+  s_7e7438a57a53a0::t_8c8517d8fb29fe 1-5
+loopx/extensions/external_provider_runtime/compatibility_cli.py
+  s_7e7438a57a53a0::t_e37d010bd952b2 1-453
+loopx/extensions/external_provider_runtime/github_public.py
+  s_7e7438a57a53a0::t_34cad67a7c3833 1-899
+loopx/extensions/external_provider_runtime/planner.py
+  s_7e7438a57a53a0::t_659704e438c312 1-770
+loopx/extensions/external_provider_runtime/source_map.py
+  s_7e7438a57a53a0::t_683bd7105c021a 1-399
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "80ce1df4365fcde5197c49acded7eda495690188",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
