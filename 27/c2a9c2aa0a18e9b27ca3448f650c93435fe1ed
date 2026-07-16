@@ -1,0 +1,23 @@
+AGENTS.md
+  s_7e7438a57a53a0::t_a1bba94dd817c7 137-162
+docs/extensions.md
+  s_7e7438a57a53a0::t_76bf3c1be1d7b2 56-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "27c2a9c2aa0a18e9b27ca3448f650c93435fe1ed",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
