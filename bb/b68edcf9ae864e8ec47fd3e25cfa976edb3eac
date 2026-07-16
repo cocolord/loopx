@@ -1,0 +1,31 @@
+docs/guides/getting-started.md
+  s_ef81bf90a7bbe1::t_7628c0e521e422 75,88
+docs/reference/protocols/codex-app-host-command-registry-v0.md
+  s_ef81bf90a7bbe1::t_80458732803e77 223
+examples/install-local-smoke.py
+  s_ef81bf90a7bbe1::t_fa55bea0597aef 324-325,330
+examples/slash-command-install-smoke.py
+  s_ef81bf90a7bbe1::t_1ace3cc97b82e8 115-116
+loopx/slash_command_install.py
+  s_ef81bf90a7bbe1::t_65561b4f442a22 348-350,353
+tests/test_slash_command_install.py
+  s_ef81bf90a7bbe1::t_2780d12508649e 43-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bbb68edcf9ae864e8ec47fd3e25cfa976edb3eac",
+  "prompts": {},
+  "sessions": {
+    "s_ef81bf90a7bbe1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6904-d3a4-7a11-ad33-e90555eeec98",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
