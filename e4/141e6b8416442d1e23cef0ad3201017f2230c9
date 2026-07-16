@@ -1,0 +1,23 @@
+docs/architecture.md
+  s_7e7438a57a53a0::t_bc5c4fc16bf73b 60-64
+docs/extensions.md
+  s_7e7438a57a53a0::t_2a6165b1f5a358 1-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e4141e6b8416442d1e23cef0ad3201017f2230c9",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
