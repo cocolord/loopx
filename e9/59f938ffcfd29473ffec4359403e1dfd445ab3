@@ -1,0 +1,31 @@
+examples/install-local-smoke.py
+  s_ef81bf90a7bbe1::t_dd3558fbf96498 167-178,312-316
+examples/slash-command-install-smoke.py
+  s_7e7438a57a53a0::t_89ccb16bbadf36 82,85,87-89,92,94-95,105-106,108-109,184,211,228-250
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e959f938ffcfd29473ffec4359403e1dfd445ab3",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    },
+    "s_ef81bf90a7bbe1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6904-d3a4-7a11-ad33-e90555eeec98",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

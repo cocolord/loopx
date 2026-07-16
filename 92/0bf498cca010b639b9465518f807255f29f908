@@ -1,0 +1,25 @@
+docs/guides/getting-started.md
+  s_ef81bf90a7bbe1::t_dfeeeea90e8839 72-77,87
+docs/product/codex-cli-packaged-install.md
+  s_ef81bf90a7bbe1::t_95e93628c84d7a 32-35
+docs/reference/protocols/codex-app-host-command-registry-v0.md
+  s_ef81bf90a7bbe1::t_caa7467ca8caf1 222-224
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "920bf498cca010b639b9465518f807255f29f908",
+  "prompts": {},
+  "sessions": {
+    "s_ef81bf90a7bbe1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6904-d3a4-7a11-ad33-e90555eeec98",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
