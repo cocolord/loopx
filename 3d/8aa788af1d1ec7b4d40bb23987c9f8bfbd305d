@@ -1,0 +1,29 @@
+loopx/control_plane/quota/turn_envelope.py
+  s_76ee28abb3c3a4::t_7aacd86bad962c 24,289,615,644-647,666,671-673
+loopx/control_plane/testing/actual_default_model_behavior_portfolio.py
+  s_76ee28abb3c3a4::t_4a9b44d963006e 7,10,13,16,30,43-44,143-347
+loopx/control_plane/testing/doubao_model_behavior_actor.py
+  s_76ee28abb3c3a4::t_fb0667dc862380 231-235
+loopx/control_plane/testing/model_behavior_qualification.py
+  s_76ee28abb3c3a4::t_929c35a24a230e 269,547
+loopx/control_plane/work_items/interaction_contract.py
+  s_76ee28abb3c3a4::t_735f5e2f161424 870
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3d8aa788af1d1ec7b4d40bb23987c9f8bfbd305d",
+  "prompts": {},
+  "sessions": {
+    "s_76ee28abb3c3a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0dc3-1b68-7ce3-9ec0-f36f03f3030e",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
