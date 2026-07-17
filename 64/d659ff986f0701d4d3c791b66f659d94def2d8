@@ -1,0 +1,57 @@
+loopx/capabilities/issue_fix/pr_gate_reconcile.py
+  s_e3f612788718c1::t_6c5145b9921080 117
+loopx/cli_commands/todo.py
+  s_e3f612788718c1::t_26d64d50d9679e 182-189,425-428,516,607-610,705,731-734,783-786
+loopx/control_plane/todos/contract.py
+  s_e3f612788718c1::t_599c0f399028f9 50-51,70-71,521-535,603-664,801-811,872-873,1004-1026,1107,1126-1129,1206-1213
+loopx/control_plane/todos/decision_scope.py
+  s_32e2a9a204a8e4::t_2731d3d06f0bb0 14,135,160-186,217
+loopx/control_plane/todos/summary_item.py
+  s_32e2a9a204a8e4::t_33fbb80488bfda 7,9,41-42,129-140
+loopx/control_plane/todos/todo_summary.py
+  s_e3f612788718c1::t_52f9297f59fe46 24,26,344-351,405-406
+loopx/control_plane/todos/unblock_resume.py
+  s_6be2fecabadd38::t_8fdca445f6d0d1 8,10,12,16,28-56,188,196,203,213-223,231,243-298
+loopx/todos.py
+  s_e3f612788718c1::t_ab00f7b6bd02f4 40,83-86,1076-1077,1172-1175,1244-1247,1529,1578-1582,1667,1682,1773-1774
+tests/control_plane/test_todo_decision_scope_cli_validation.py
+  s_32e2a9a204a8e4::t_976179b38acc6f 192-317
+tests/control_plane/test_todo_decision_scope_consistency.py
+  s_e3f612788718c1::t_84cfa9db9dd236 187-239
+tests/control_plane/test_todo_decision_scope_lifecycle.py
+  s_e3f612788718c1::t_2711a579d40ebf 6-7,18,80,99,119,176,217-309
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "64d659ff986f0701d4d3c791b66f659d94def2d8",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_6be2fecabadd38": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f71c1-e0fe-7631-ac7d-5008f1591bf0",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
