@@ -1,0 +1,31 @@
+examples/issue-fix-reviewer-request-smoke.py
+  s_76ee28abb3c3a4::t_67cc36349618e4 1640-1647,1660-1665,1691,1728-1732,1734-1761,1766,1771,1786-1798,1801,1809
+loopx/capabilities/issue_fix/reviewer_notification_drain.py
+  s_e3f612788718c1::t_273f2c02f84b90 108,169-172,193,196,244-245,275-279
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9f921ae742d65c7c7294f3f4bbe0f482c5561a96",
+  "prompts": {},
+  "sessions": {
+    "s_76ee28abb3c3a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0dc3-1b68-7ce3-9ec0-f36f03f3030e",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
