@@ -1,0 +1,23 @@
+README.md
+  s_e3f612788718c1::t_e2d0d0ce7484d9 660-663,667-668
+README.zh-CN.md
+  s_e3f612788718c1::t_49d7cdfe8e008d 276-277,281-282
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1fa19fc00e4cf6ce3de3fdcde2c8f5f0656e9ce5",
+  "prompts": {},
+  "sessions": {
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
