@@ -1,0 +1,33 @@
+docs/new-project-codex-prompt.md
+  s_9a5a2bd944fdcb::t_7bdc4bd0ab814b 138
+examples/agent-diagnose-packet-smoke.py
+  s_9a5a2bd944fdcb::t_b9d06d05397e7d 399-408
+examples/control_plane/quota-spend-agent-identity-smoke.py
+  s_9a5a2bd944fdcb::t_6a9e2d70a1598e 23-32,109-111,115-116
+examples/project/project-prompt-smoke.py
+  s_9a5a2bd944fdcb::t_2681ad7f4599d4 107,164-165
+examples/skillsbench-benchmark-run-smoke.py
+  s_9a5a2bd944fdcb::t_29929628402a1c 1583,2961,3716
+tests/control_plane/test_goal_vision_blocked_successor.py
+  s_9a5a2bd944fdcb::t_ecc486530bf617 11-13,116-123
+tests/control_plane/test_scheduler_execution_context.py
+  s_9a5a2bd944fdcb::t_02c32622e7165f 9,12-13,18-20,164-195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "84839e81e46f3a01b6f75d3d08a332eacea27e39",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
