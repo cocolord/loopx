@@ -1,0 +1,43 @@
+docs/capabilities/issue-fix/protocols/issue-fix-workflow-contract-v0.md
+  s_76ee28abb3c3a4::t_346c872f2c257e 103-109,212
+examples/bootstrap-command-pack-smoke.py
+  s_76ee28abb3c3a4::t_a868aff0a48c90 211-212
+examples/issue-fix-pr-lifecycle-smoke.py
+  s_76ee28abb3c3a4::t_c79323f90be30f 113-118,145-147,165,179-181,198-200,216,238-279
+examples/issue-fix-workflow-e2e-smoke.py
+  s_76ee28abb3c3a4::t_58f5563bbc8104 151-155
+examples/issue-fix-workflow-plan-smoke.py
+  s_76ee28abb3c3a4::t_a3205326923cf5 112-118,261-262
+loopx/bootstrap_command_pack.py
+  s_9a5a2bd944fdcb::t_e4c5c1c5817d32 647-648,682
+loopx/capabilities/issue_fix/pr_lifecycle.py
+  s_76ee28abb3c3a4::t_f379ff571df522 23-25,573-633,985-987,1145-1176,1251-1266
+loopx/capabilities/issue_fix/workflow_plan.py
+  s_76ee28abb3c3a4::t_bced4435d59787 107,112-119,684-697,980-986
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d3be96abb18985b4fa9b23bbe3883c37180e179b",
+  "prompts": {},
+  "sessions": {
+    "s_76ee28abb3c3a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0dc3-1b68-7ce3-9ec0-f36f03f3030e",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
