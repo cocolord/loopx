@@ -1,0 +1,25 @@
+docs/capabilities/issue-fix/protocols/issue-fix-reviewer-notification-sinks-v0.md
+  s_e3f612788718c1::t_c30bac81219663 175-177
+examples/issue-fix-reviewer-request-smoke.py
+  s_e3f612788718c1::t_e800e3c67dba89 1642,1694,1706-1714,1754,1805,1820-1843
+loopx/capabilities/issue_fix/reviewer_notification_drain.py
+  s_e3f612788718c1::t_24932f841e9f11 4,7,64-101,115-116,183,241-248,250-255,361-369,446-447,466
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8913a91323ac91a8902bd146a2cf54b453ef8ca5",
+  "prompts": {},
+  "sessions": {
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
