@@ -1,0 +1,29 @@
+tests/control_plane/test_actual_default_model_behavior_portfolio.py
+  s_76ee28abb3c3a4::t_e85a8d1b7a2eec 161-172,360-410
+tests/control_plane/test_doubao_model_behavior_actor.py
+  s_76ee28abb3c3a4::t_54d7e9c052761e 124-125
+tests/control_plane/test_model_behavior_corpus.py
+  s_76ee28abb3c3a4::t_74a71217672d40 8-12,104-124,129,131-132
+tests/control_plane/test_user_gate_lane_progress.py
+  s_76ee28abb3c3a4::t_78dcc7c350d4ce 3,76,93-102
+tests/fixtures/turn_envelope_state_matrix.json
+  s_76ee28abb3c3a4::t_34b4ae3fc92e8e 113-124,172-180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f1f889bb5657dd114105080250efbed88cf6ee26",
+  "prompts": {},
+  "sessions": {
+    "s_76ee28abb3c3a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0dc3-1b68-7ce3-9ec0-f36f03f3030e",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
