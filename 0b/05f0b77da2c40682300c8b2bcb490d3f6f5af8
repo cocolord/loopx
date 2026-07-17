@@ -1,0 +1,25 @@
+loopx/cli_commands/quota.py
+  s_9a5a2bd944fdcb::t_97a8ad8721533f 583-586
+loopx/cli_commands/turn.py
+  s_9a5a2bd944fdcb::t_8b03fb2cba870f 326-329
+loopx/control_plane/quota/turn_envelope.py
+  s_9a5a2bd944fdcb::t_40c52a154f28af 8-13,694-700,703-715,718-721,736-742,759
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0b05f0b77da2c40682300c8b2bcb490d3f6f5af8",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
