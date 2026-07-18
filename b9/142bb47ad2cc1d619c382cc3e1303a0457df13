@@ -1,0 +1,45 @@
+examples/capability-extension-registry-smoke.py
+  s_32e2a9a204a8e4::t_c766f14d086945 14,16-25,35,59,66-67,72,81-84,87,96,98-106,108,115
+loopx/capabilities/catalog.py
+  s_32e2a9a204a8e4::t_95604bd2431b58 8,700-806,821,835-836,843-844,846,851-854,867,869-872,882,884-887,895-896,898-901,913-914,916-920,939,963
+loopx/capabilities/context_providers/__init__.py
+  s_32e2a9a204a8e4::t_75bc99f3ab471b 11-15,21-23,30
+loopx/capabilities/context_providers/factory.py
+  s_32e2a9a204a8e4::t_3f05bd2f3b21c7 3,7-22,29-32
+loopx/capabilities/context_providers/openviking.py
+  s_32e2a9a204a8e4::t_25173a7c5b0f8e 691-702
+loopx/capabilities/registry.py
+  s_32e2a9a204a8e4::t_14608d9b03ed93 28,50-67,141-145,148-157
+loopx/capabilities/semantic_preference/contract.py
+  s_32e2a9a204a8e4::t_c8b420c829c723 14-15,149-153,157,160-173,183-198,261,265,463
+loopx/cli.py
+  s_32e2a9a204a8e4::t_6b5083aa7a39ee 339
+loopx/cli_commands/capability.py
+  s_32e2a9a204a8e4::t_0a11c0dfef8937 12,29-30,69,76,79-82,88
+loopx/extensions/manifest.py
+  s_32e2a9a204a8e4::t_1093db3a9770fa 220-223
+loopx/extensions/runtime.py
+  s_32e2a9a204a8e4::t_4e6a2716de0f4c 3,474-569,585,682-702
+tests/capabilities/test_capability_extension_registry.py
+  s_32e2a9a204a8e4::t_4b992f8d728c7b 5,14-17,19-23,32-33,37-55,63,102-109,113,130-133,138-143,193,200-201,218-219,231-315
+tests/extensions/test_extension_runtime.py
+  s_32e2a9a204a8e4::t_1ee5dc7904ca0a 14-17,29-30,509-531,583-586,593-598,603-634
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b9142bb47ad2cc1d619c382cc3e1303a0457df13",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
