@@ -1,0 +1,23 @@
+loopx/capabilities/lark/event_inbox.py
+  s_32e2a9a204a8e4::t_6358a7c9c4f2b6 10,201
+loopx/control_plane/quota/goal_boundary.py
+  s_32e2a9a204a8e4::t_bf0017bebfe7a2 19,177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d9304b20d3f8cfb90028c72cf8d877c9ba58fa73",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
