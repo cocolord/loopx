@@ -1,0 +1,31 @@
+examples/capability-extension-registry-smoke.py
+  s_32e2a9a204a8e4::t_4b2c420000e339 79-89
+examples/lark-event-collector-lifecycle-smoke.py
+  s_32e2a9a204a8e4::t_f9e341d0ec1f53 95-116,128-132,144,156,170-174,277,453-454
+examples/lark-event-inbox-smoke.py
+  s_32e2a9a204a8e4::t_120136cd675d62 453-476,484-485,539-540,566-567
+examples/lark-extension-activation-smoke.py
+  s_32e2a9a204a8e4::t_d735f14f661f03 1-189
+tests/architecture/test_control_plane_import_boundaries.py
+  s_32e2a9a204a8e4::t_9bd5c8b786ace6 13,140,142-143
+tests/extensions/test_extension_runtime.py
+  s_32e2a9a204a8e4::t_36cc7b249079b4 25,105-124,141-145,355-359
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8967d71a83d818ada0643a80dba9c31e0020f44a",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
