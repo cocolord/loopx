@@ -1,0 +1,23 @@
+scripts/install-local.sh
+  s_32e2a9a204a8e4::t_2e95271eea928f 15,65-91,413-414,470
+scripts/loopx
+  s_32e2a9a204a8e4::t_8ddaddab9f9630 52-54,58-62,71-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5dd33c2d6cbc14cb584b70bc63f917f51d39fd3b",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
