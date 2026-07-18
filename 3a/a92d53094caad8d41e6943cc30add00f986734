@@ -1,0 +1,25 @@
+loopx/control_plane/runtime/run_compaction.py
+  s_e3f612788718c1::t_34b477f6d2fd84 67-74,208-226,256-259
+loopx/control_plane/scheduler/monitor_poll_policy.py
+  s_e3f612788718c1::t_5dfa17d6cfc9ed 22
+tests/control_plane/test_goal_vision_blocked_successor.py
+  s_e3f612788718c1::t_37216ef3784c20 25,235-276
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3aa92d53094caad8d41e6943cc30add00f986734",
+  "prompts": {},
+  "sessions": {
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
