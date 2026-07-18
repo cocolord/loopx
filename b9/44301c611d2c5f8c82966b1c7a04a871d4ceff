@@ -1,0 +1,31 @@
+examples/control_plane/lark-inbox-priority-smoke.py
+  s_32e2a9a204a8e4::t_883bdb78de9411 9,19-22,153,157-175
+loopx/capabilities/lark/event_inbox.py
+  s_32e2a9a204a8e4::t_fd9f15f52cc78e 9-13,188-207,216-217,221-224,226
+loopx/control_plane/quota/goal_boundary.py
+  s_32e2a9a204a8e4::t_99683a34985c45 81,171,173,176-178,180-184
+loopx/control_plane/work_items/operator_inbox.py
+  s_32e2a9a204a8e4::t_a5a2fb6e341214 1-234
+loopx/quota.py
+  s_32e2a9a204a8e4::t_e2b3f947247556 96,1320
+tests/architecture/test_control_plane_import_boundaries.py
+  s_32e2a9a204a8e4::t_fb38f6e6bb21e5 11,99-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b944301c611d2c5f8c82966b1c7a04a871d4ceff",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
