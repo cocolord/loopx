@@ -1,0 +1,33 @@
+docs/project-agent-todo-contract.md
+  s_32e2a9a204a8e4::t_ed2130545cd0b3 476-480
+examples/control_plane/todo-lifecycle-cli-smoke.py
+  s_9a5a2bd944fdcb::t_eeb27636979d75 43-46,465-485,537-542,549-554,570-571
+examples/control_plane/todo-list-event-projection-smoke.py
+  s_9a5a2bd944fdcb::t_a2ffbf06328bb5 34-37,247-261,284-336
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f792112f2307a967f0758fc5b59c5fd2668ce460",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
