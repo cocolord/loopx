@@ -1,0 +1,23 @@
+examples/control_plane/heartbeat-quota-flow-smoke.py
+  s_e3f612788718c1::t_81b35dcc64042b 629,705,738,765,844,916,941,963,981,1004,1050,1090,1143,1172,1194,1225,1264
+examples/control_plane/interaction-contract-state-machine-smoke.py
+  s_e3f612788718c1::t_aeda6610b4f200 15-17,35-37,184-187,192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "08d7dc469de392ad69d76fc4e48907ee032ecd3d",
+  "prompts": {},
+  "sessions": {
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
