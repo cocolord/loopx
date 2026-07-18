@@ -1,0 +1,33 @@
+loopx/capabilities/issue_fix/reward_memory.py
+  s_ce78287262030e::t_6970388bdcb901 46-48,76-146,218-219,226-228,274,299-301,669,728,838
+loopx/capabilities/reward_memory/ingestion.py
+  s_76ee28abb3c3a4::t_03e722713e90b5 443
+tests/capabilities/test_reward_memory_ingestion.py
+  s_ce78287262030e::t_b890b49a6d31ab 281-291,317-320
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d1b76db198515ae24642d8a99a35187bf886ad06",
+  "prompts": {},
+  "sessions": {
+    "s_76ee28abb3c3a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0dc3-1b68-7ce3-9ec0-f36f03f3030e",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_ce78287262030e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f7515-a03a-7322-9902-2e203d31cc54",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
