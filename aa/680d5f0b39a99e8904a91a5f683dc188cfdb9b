@@ -1,0 +1,41 @@
+examples/canary/catalog-planner-smoke.py
+  s_76ee28abb3c3a4::t_7c870a2a3cbd7a 214
+examples/canary/catalog-run-e2e-smoke.py
+  s_76ee28abb3c3a4::t_0493e7e2bc7bc5 128
+examples/canary/premerge-validation-gate-smoke.py
+  s_76ee28abb3c3a4::t_3b50b334596e0c 417,425-429,449-453,470-474,480,501
+examples/canary/smoke-suite-runner-smoke.py
+  s_76ee28abb3c3a4::t_19018ce83ec71d 138,232,252
+examples/control_plane/control-plane-maintainability-ratchet-smoke.py
+  s_76ee28abb3c3a4::t_0558b564e9abc6 5-6,10-12,14-17,21-23,25-28,33,35-40,44
+loopx/canary/maintainability_ratchet.py
+  s_76ee28abb3c3a4::t_cdb173f1274cc2 1-587
+loopx/canary/planner.py
+  s_76ee28abb3c3a4::t_dd44e62d03c6d1 355,357-358,364-367,379,382-383
+loopx/canary/premerge.py
+  s_76ee28abb3c3a4::t_021e248baccc87 82
+loopx/canary/runner.py
+  s_76ee28abb3c3a4::t_e27148335d974b 28-30
+loopx/canary/smoke_profiles.py
+  s_76ee28abb3c3a4::t_df5acdcaef3da9 99,114
+tests/canary/test_maintainability_ratchet.py
+  s_76ee28abb3c3a4::t_3fc4515e43c23f 1-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "aa680d5f0b39a99e8904a91a5f683dc188cfdb9b",
+  "prompts": {},
+  "sessions": {
+    "s_76ee28abb3c3a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0dc3-1b68-7ce3-9ec0-f36f03f3030e",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
