@@ -1,0 +1,25 @@
+docs/capabilities/semantic-preference/openviking-project-peer.md
+  s_32e2a9a204a8e4::t_ef28a9430c711c 121-126
+docs/reference/extensions.md
+  s_32e2a9a204a8e4::t_4ad78f742f3e46 69,79-85
+examples/openviking-extension-runtime-smoke.py
+  s_32e2a9a204a8e4::t_dd6fb26fd897e2 160-184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a8b243897ba4d848281ca551dcca7f14c5219a60",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
