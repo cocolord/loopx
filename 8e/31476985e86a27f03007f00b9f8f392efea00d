@@ -1,0 +1,53 @@
+examples/explore-feishu-singleflight-smoke.py
+  s_32e2a9a204a8e4::t_1a428263e2b3a5 18,22-25,43-47,131
+examples/explore-result-layer-smoke.py
+  s_32e2a9a204a8e4::t_a1790a78708664 41-43,1215-1223
+examples/explore-visual-cross-role-integrity-smoke.py
+  s_32e2a9a204a8e4::t_14631a91979b12 16
+examples/issue-fix-explore-projection-smoke.py
+  s_32e2a9a204a8e4::t_6c093441ebaf5f 41,175-183
+examples/issue-fix-metrics-projection-smoke.py
+  s_32e2a9a204a8e4::t_f4689565138e88 17,22-24,42-49,449-452
+examples/issue-fix-outcome-projection-smoke.py
+  s_32e2a9a204a8e4::t_d04f8b52d58bc5 31
+examples/lark-capability-layout-smoke.py
+  s_32e2a9a204a8e4::t_d30e35acdbd5f9 2,14,24-27
+examples/lark-explore-source-runtime-route-smoke.py
+  s_32e2a9a204a8e4::t_9e5094f66e37f6 30,34,37,40-42,155-160,183-186,216
+examples/lark-extension-activation-smoke.py
+  s_32e2a9a204a8e4::t_f09f22ec7775b9 118-119,135-148,164,181-190,215-228,241,245,267-271,286-290
+examples/lark-kanban-control-plane-smoke.py
+  s_32e2a9a204a8e4::t_bf95db31b80286 17-18,43-45,50-54,275-282,284-293
+examples/lark-message-card-smoke.py
+  s_32e2a9a204a8e4::t_c51c701905c9d9 15
+examples/lark-projection-source-reconcile-smoke.py
+  s_32e2a9a204a8e4::t_01779feb10ab7c 16
+examples/lark_extension_test_support.py
+  s_32e2a9a204a8e4::t_5216cf47cb72a4 1-40
+tests/architecture/test_control_plane_import_boundaries.py
+  s_32e2a9a204a8e4::t_9915a39c78a205 21,153-170
+tests/control_plane/test_contract_quality.py
+  s_32e2a9a204a8e4::t_54b6850d2305e0 12
+tests/control_plane/test_explore_source_runtime_route.py
+  s_32e2a9a204a8e4::t_074f22649bcd46 17,21-29,152
+tests/test_explore_presentation_views.py
+  s_32e2a9a204a8e4::t_351dad516eba7c 17,1241,1312,1382
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8e31476985e86a27f03007f00b9f8f392efea00d",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
