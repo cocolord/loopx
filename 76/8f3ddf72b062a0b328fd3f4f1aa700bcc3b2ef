@@ -1,0 +1,27 @@
+examples/control_plane/lark-inbox-priority-smoke.py
+  s_32e2a9a204a8e4::t_3c24a0da80dddd 17
+examples/lark-event-collector-lifecycle-smoke.py
+  s_32e2a9a204a8e4::t_9e8ae2cb40a46f 16,21,26
+examples/lark-event-inbox-smoke.py
+  s_32e2a9a204a8e4::t_05ef948efd50c2 16,23
+tests/architecture/test_control_plane_import_boundaries.py
+  s_32e2a9a204a8e4::t_76a0a71f484795 12-13,108-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "768f3ddf72b062a0b328fd3f4f1aa700bcc3b2ef",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
