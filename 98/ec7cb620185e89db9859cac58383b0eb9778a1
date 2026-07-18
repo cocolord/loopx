@@ -1,0 +1,33 @@
+docs/quota-allocation.md
+  s_76ee28abb3c3a4::t_9c6b164e0616e2 684-694,724-726
+docs/state-interaction-model.md
+  s_76ee28abb3c3a4::t_3ffdad30fc50b0 142-151,311-312
+examples/control_plane/agent-scope-projection-characterization-smoke.py
+  s_76ee28abb3c3a4::t_d4b0f656523c59 22,206,228
+examples/control_plane/todo-user-gate-readmodel-smoke.py
+  s_76ee28abb3c3a4::t_f1d38e7046087b 34,57-78,118-119,121-126
+examples/control_plane/todo-user-gate-scope-smoke.py
+  s_76ee28abb3c3a4::t_e384e8a4221069 184-207,214,217-260,300,303-314,320,349,359,371,405-422,444,446,457,459,482,536-604
+examples/project/goal-channel-frontstage-fixture-smoke.py
+  s_76ee28abb3c3a4::t_d97549e8d5779e 26,54-58
+skills/loopx-self-repair/references/repair-patterns.md
+  s_76ee28abb3c3a4::t_0e79fea0bf8a6f 26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "98ec7cb620185e89db9859cac58383b0eb9778a1",
+  "prompts": {},
+  "sessions": {
+    "s_76ee28abb3c3a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0dc3-1b68-7ce3-9ec0-f36f03f3030e",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
