@@ -1,0 +1,65 @@
+docs/development/control-plane-course/09-extension-layer.md
+  s_32e2a9a204a8e4::t_b115dfcbe7750b 342,759
+docs/product/core-control-plane/bounded-context-layout.md
+  s_32e2a9a204a8e4::t_69f37594202e40 17,21,59-69
+docs/reference/protocols/multi-agent-three-layer-minimality-v0.md
+  s_32e2a9a204a8e4::t_feaa74cb32e761 25,91
+docs/reference/protocols/multi-agent-visible-launcher-v0.md
+  s_32e2a9a204a8e4::t_600371bdccfdb7 27
+examples/auto-research-demo-e2e-worker-loop-smoke.py
+  s_32e2a9a204a8e4::t_a1e30a0bb8a83d 44
+examples/auto-research-dev-thin-preset-smoke.py
+  s_32e2a9a204a8e4::t_04c5755f413962 17,26-28
+examples/auto-research-user-contract-entry-smoke.py
+  s_32e2a9a204a8e4::t_60577fdf9cee39 31
+examples/auto-research-visible-launch-policy-smoke.py
+  s_32e2a9a204a8e4::t_a37e022b353f1d 12
+examples/auto-research-worker-turn-smoke.py
+  s_32e2a9a204a8e4::t_52048c5dba0290 32-34
+examples/canary/catalog-planner-smoke.py
+  s_32e2a9a204a8e4::t_f63f8fdcb29b2d 617
+examples/control_plane/bounded-context-namespace-smoke.py
+  s_32e2a9a204a8e4::t_5b1ef7f652fafe 26-30,118-148,182
+examples/cross-runtime-impl-review-demo-smoke.py
+  s_32e2a9a204a8e4::t_ac986364ad9ef7 16
+examples/generic-multi-agent-one-command-smoke.py
+  s_32e2a9a204a8e4::t_3fdf56798a599a 459-461
+examples/generic-multi-agent-runner-kernel-smoke.py
+  s_32e2a9a204a8e4::t_9887b0fa694de6 14,26,148-153
+examples/generic-multi-agent-spec-contract-smoke.py
+  s_32e2a9a204a8e4::t_c4d5e64e58a87c 25
+examples/multi-agent-collective-round-ledger-smoke.py
+  s_32e2a9a204a8e4::t_d847231efb761c 15
+examples/multi-agent-role-successor-todos-smoke.py
+  s_32e2a9a204a8e4::t_ac0923c8cb4df2 16
+examples/multi-agent-visible-launcher-protocol-smoke.py
+  s_32e2a9a204a8e4::t_5341f1ebdd1468 79
+examples/visible-codex-executable-resolution-smoke.py
+  s_32e2a9a204a8e4::t_4280251524c172 16
+examples/visible-multi-agent-launcher-smoke.py
+  s_32e2a9a204a8e4::t_5f321e76fcaf4c 19,86,89-91
+examples/visible-multi-agent-state-aware-wake-smoke.py
+  s_32e2a9a204a8e4::t_6b5ffa8f3377d7 16-19
+loopx/canary/planner.py
+  s_32e2a9a204a8e4::t_25a38fac7aa183 914
+tests/capabilities/test_review_batch.py
+  s_32e2a9a204a8e4::t_de570faea592b5 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "172db1f86d3b83ac4f2345fed1002d4a36ce7590",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
