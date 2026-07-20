@@ -29,6 +29,7 @@ from loopx.extensions.runtime import (  # noqa: E402
     default_extension_state_file,
     install_extension,
 )
+from loopx.extensions.manifest import load_extension_manifest  # noqa: E402
 from loopx_finance_value_discovery.reducer import (  # noqa: E402
     build_finance_value_discovery_packet,
 )
@@ -45,14 +46,12 @@ def main() -> int:
     assert direct["boundary"]["continuous_watch_allowed"] is False
 
     catalog = build_capability_catalog_packet([MANIFEST])
-    finance = next(
-        item
-        for item in catalog["capabilities"]
-        if item["id"] == "finance-value-discovery"
-    )
-    assert finance["origin"] == "extension"
-    assert finance["provider_id"] == "loopx-finance-value-discovery"
-    assert finance["provider_state"]["installed"] is False
+    assert "finance-value-discovery" not in {
+        item["id"] for item in catalog["capabilities"]
+    }
+    manifest = load_extension_manifest(MANIFEST)
+    assert manifest["capabilities"] == []
+    assert manifest["implementations"] == []
 
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
@@ -101,8 +100,10 @@ def main() -> int:
     source_map = build_value_connector_source_map_packet(
         connector="finance_market_snapshot"
     )["source_profiles"][0]
-    assert source_map["provider_binding_state"] == "migrated"
-    assert source_map["provider_id"] == "loopx-finance-value-discovery"
+    assert "outcome_capability_id" not in source_map
+    assert source_map["delivery_type"] == "standalone_extension"
+    assert source_map["extension_binding_state"] == "migrated"
+    assert source_map["extension_id"] == "loopx-finance-value-discovery"
 
     print("finance-value-discovery-extension-smoke: ok")
     return 0

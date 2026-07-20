@@ -30,6 +30,7 @@ from loopx.extensions.runtime import (
     resolve_capability_extension_id,
     resolve_extension_activation,
     resolve_extension_binding,
+    resolve_extension_runtime_binding,
     rollback_extension,
 )
 from loopx.extensions.openviking_semantic_preference.provider import (
@@ -165,6 +166,46 @@ def test_python_module_runtime_uses_current_interpreter_without_console_script(
         resolve_extension_activation(
             "test-lark-module-extension",
             state_file=state_file,
+        )
+
+
+def test_standalone_runtime_does_not_require_a_capability_contract(
+    tmp_path: Path,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest = _manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+        version="1.0.0",
+        extension_id="test-standalone-extension",
+    )
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "\n[[implements]]\n"
+            'capability_id = "semantic-preference"\n'
+            'protocol = "semantic_preference_provider_v0"\n',
+            "\n",
+        ),
+        encoding="utf-8",
+    )
+    state_file = tmp_path / "extensions.json"
+
+    install_extension(manifest, state_file=state_file, execute=True)
+    binding = resolve_extension_runtime_binding(
+        "test-standalone-extension",
+        state_file=state_file,
+        protocol="semantic_preference_provider_v0",
+        permission="semantic_preference.read",
+    )
+
+    assert binding["extension_id"] == "test-standalone-extension"
+    assert binding["argv"] == [str(provider)]
+    with pytest.raises(ValueError, match="does not expose runtime protocol"):
+        resolve_extension_runtime_binding(
+            "test-standalone-extension",
+            state_file=state_file,
+            protocol="different_protocol_v0",
+            permission="semantic_preference.read",
         )
 
 

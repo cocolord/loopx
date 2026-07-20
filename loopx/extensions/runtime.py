@@ -681,6 +681,52 @@ def resolve_extension_binding(
     }
 
 
+def resolve_extension_runtime_binding(
+    extension_id: str,
+    *,
+    state_file: str | Path,
+    protocol: str,
+    permission: str,
+) -> dict[str, Any]:
+    """Resolve a standalone extension runtime without a capability contract."""
+
+    active_revision, verified_entrypoint, manifest = _resolved_active_extension(
+        extension_id,
+        state_file=state_file,
+    )
+    provider = manifest.get("provider")
+    runtime = _runtime(manifest)
+    if not isinstance(provider, Mapping):
+        raise ValueError("extension active manifest is incomplete")
+    if permission not in (provider.get("permissions") or []):
+        raise ValueError(
+            f"extension `{extension_id}` does not declare permission `{permission}`"
+        )
+    if permission not in (runtime.get("required_permissions") or []):
+        raise ValueError(
+            f"extension `{extension_id}` runtime does not require permission "
+            f"`{permission}`"
+        )
+    if runtime.get("protocol") != protocol:
+        raise ValueError(
+            f"extension `{extension_id}` does not expose runtime protocol `{protocol}`"
+        )
+    return {
+        "schema_version": EXTENSION_BINDING_SCHEMA_VERSION,
+        "extension_id": extension_id,
+        "provider_version": provider.get("version"),
+        "revision": active_revision,
+        "protocol": protocol,
+        "argv": [*verified_entrypoint.argv_prefix, *(runtime.get("args") or [])],
+        "doctor_argv": [
+            *verified_entrypoint.argv_prefix,
+            *(runtime.get("args") or []),
+            *(runtime.get("doctor_args") or []),
+        ],
+        "timeout_seconds": runtime["timeout_seconds"],
+    }
+
+
 def resolve_capability_binding(
     *,
     state_file: str | Path,

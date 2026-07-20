@@ -8,12 +8,12 @@ from typing import Any
 
 from ...extensions.runtime import (
     default_extension_state_file,
-    resolve_capability_binding,
+    resolve_extension_runtime_binding,
 )
 
 
-FINANCE_VALUE_DISCOVERY_CAPABILITY_ID = "finance-value-discovery"
-FINANCE_VALUE_DISCOVERY_PROVIDER_PROTOCOL = "finance_value_discovery_provider_v0"
+FINANCE_VALUE_DISCOVERY_EXTENSION_ID = "loopx-finance-value-discovery"
+FINANCE_VALUE_DISCOVERY_EXTENSION_PROTOCOL = "finance_value_discovery_extension_v0"
 FINANCE_VALUE_DISCOVERY_PERMISSION = "finance.discovery.reduce"
 FINANCE_VALUE_DISCOVERY_PACKET_SCHEMA_VERSION = "finance_value_discovery_packet_v0"
 FINANCE_VALUE_DISCOVERY_ERROR_SCHEMA_VERSION = "finance_value_discovery_error_v0"
@@ -27,10 +27,10 @@ def invoke_finance_value_discovery_extension(
 ) -> dict[str, Any]:
     """Dispatch the compatibility command through the verified extension binding."""
 
-    binding = resolve_capability_binding(
+    binding = resolve_extension_runtime_binding(
+        FINANCE_VALUE_DISCOVERY_EXTENSION_ID,
         state_file=default_extension_state_file(runtime_root),
-        capability_id=FINANCE_VALUE_DISCOVERY_CAPABILITY_ID,
-        protocol=FINANCE_VALUE_DISCOVERY_PROVIDER_PROTOCOL,
+        protocol=FINANCE_VALUE_DISCOVERY_EXTENSION_PROTOCOL,
         permission=FINANCE_VALUE_DISCOVERY_PERMISSION,
     )
     try:

@@ -8,14 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from loopx.capabilities.catalog import (
-    build_capability_catalog_packet,
-    build_capability_detail_packet,
-)
+from loopx.capabilities.catalog import build_capability_catalog_packet
 from loopx.capabilities.value_connectors.source_map import (
     build_value_connector_source_map_packet,
 )
 from loopx.cli import main
+from loopx.extensions.manifest import load_extension_manifest
 from loopx.extensions.runtime import default_extension_state_file, install_extension
 
 
@@ -74,34 +72,15 @@ def _installed_manifest(
 
 
 def test_manifest_and_paypal_example_preserve_extension_boundary() -> None:
-    catalog = build_capability_catalog_packet([MANIFEST])
-    finance = next(
-        item
-        for item in catalog["capabilities"]
-        if item["id"] == "finance-value-discovery"
-    )
+    manifest = load_extension_manifest(MANIFEST)
+    assert manifest["capabilities"] == []
+    assert manifest["implementations"] == []
+    assert manifest["runtime"]["protocol"] == "finance_value_discovery_extension_v0"
 
-    assert finance["origin"] == "extension"
-    assert finance["provider_id"] == "loopx-finance-value-discovery"
-    assert finance["implementation_provider_count"] == 1
-    detail = build_capability_detail_packet(
-        "finance-value-discovery",
-        [MANIFEST],
-    )["capability"]
-    assert detail["implementation_providers"] == [
-        {
-            "capability_id": "finance-value-discovery",
-            "protocol": "finance_value_discovery_provider_v0",
-            "provider_id": "loopx-finance-value-discovery",
-            "provider_version": "0.2.0",
-            "provider_state": {
-                "declared": True,
-                "installed": False,
-                "enabled": False,
-                "ready": False,
-            },
-        }
-    ]
+    catalog = build_capability_catalog_packet([MANIFEST])
+    assert "finance-value-discovery" not in {
+        item["id"] for item in catalog["capabilities"]
+    }
 
     packet = build_finance_value_discovery_packet(_example())
     assert packet["projection"]["next_action"] == "select_at_most_one_b_successor"
@@ -212,6 +191,7 @@ def test_value_connectors_delegates_through_verified_runtime(
         connector="finance_market_snapshot"
     )
     binding = source_map["source_profiles"][0]
-    assert binding["outcome_capability_id"] == "finance-value-discovery"
-    assert binding["provider_binding_state"] == "migrated"
-    assert binding["provider_id"] == "loopx-finance-value-discovery"
+    assert "outcome_capability_id" not in binding
+    assert binding["delivery_type"] == "standalone_extension"
+    assert binding["extension_binding_state"] == "migrated"
+    assert binding["extension_id"] == "loopx-finance-value-discovery"

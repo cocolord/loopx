@@ -16,7 +16,7 @@ FINANCE_VALUE_DISCOVERY_PROJECTION_SCHEMA_VERSION = (
     "finance_value_discovery_projection_v0"
 )
 FINANCE_VALUE_DISCOVERY_ERROR_SCHEMA_VERSION = "finance_value_discovery_error_v0"
-FINANCE_VALUE_DISCOVERY_PROVIDER_PROTOCOL = "finance_value_discovery_provider_v0"
+FINANCE_VALUE_DISCOVERY_EXTENSION_PROTOCOL = "finance_value_discovery_extension_v0"
 
 ALLOWED_ROUTES = {"de_beta_mispricing", "long_compounder"}
 ALLOWED_ROLES = {"candidate", "control"}

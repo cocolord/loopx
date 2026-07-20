@@ -93,14 +93,16 @@ commands delegate to those providers.
 | `github_public_reply_monitor` | `issue-fix` | migrated | yes | none |
 | `content_ops_public_handle` | `content-ops` | native | public-handle observation | none |
 | `social_browser_x` | `content-ops` | migrated | install-check, public-handle packet, and gated plan | exact profile/post/reply gate required |
-| `finance_market_snapshot` | `finance-value-discovery` | mapped | plan, user prompt surface, and [no-credential probe packet](finance-market-snapshot-probe.md) | account, private portfolio, trading, and paid-data gates required |
+| `finance_market_snapshot` | standalone extension `loopx-finance-value-discovery` | migrated | extension runtime, compatibility delegate, and [no-credential probe packet](finance-market-snapshot-probe.md) | account, private portfolio, trading, and paid-data gates required |
 | `agent_reach_ops_source_map` | `content-ops` | mapped | `loopx value-connectors source-map --connector agent_reach_ops_source_map --format json`; [profile note](agent-reach-ops-source-map.md) | publish/audit record required for every external write |
 | `botmail_identity` | `content-ops` | mapped | install-check only | exact send gate required |
 | `community_channel` | `content-ops` | mapped | install-check and plan | exact account/message gate required |
 
 `migrated` means the implementation module is owned by the outcome capability.
 `native` means the command already lived there. `mapped` records the intended
-owner without pretending that the implementation has moved.
+owner without pretending that the implementation has moved. A standalone
+extension owns its command and packet contract without adding a LoopX
+capability.
 
 ## Why This Is Not Just A Plan
 

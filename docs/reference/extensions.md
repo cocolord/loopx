@@ -150,23 +150,25 @@ Use this placement map after answering the questions:
 | Existing built-in capability behavior | `loopx/capabilities/<capability-id>/` |
 | Built-in catalog and registration contract | `loopx/capabilities/catalog.py` or `registry.py` |
 | Generic extension runtime | `loopx/extensions/` |
-| Co-located optional provider | `extensions/<extension-id>/` |
-| Separately distributed provider | provider-owned package or repository |
+| Co-located optional extension/provider | `extensions/<extension-id>/` |
+| Separately distributed extension/provider | owner package or repository |
 | Internal implementation helper | nearest owning module |
 
-Some work belongs on both axes. Finance research should expose the outcome
-capability `finance-value-discovery`; public-market, filing, and news sources
-can be extension providers of that capability. Shared connector intent,
-permission, and approval logic is internal runtime machinery, not another
-public capability. The extension directory owns delivery and lifecycle;
-capability registration owns the caller-visible promise.
+Some work belongs on both axes, but an optional workflow does not need a
+capability merely because it is user-visible. Create a capability only when
+LoopX callers need a provider-neutral contract, catalog identity, and routing
+surface. An extension-owned command and packet contract may remain a
+standalone extension runtime. Finance value discovery uses this standalone
+shape; public-market, filing, and news collection can stay inside that
+extension until a real cross-provider LoopX contract exists.
 
 `value-connectors` is an existing compatibility CLI and protocol surface. Do
-not use it as the public capability owner for new work. Migrate each profile to
-the outcome capability it serves, such as `finance-value-discovery`,
-`issue-fix`, or `content-ops`, before retiring the compatibility surface. This
-keeps the migration behavior-preserving instead of replacing one broad bucket
-with another broad bucket.
+not use it as the public capability owner for new work. Migrate each profile
+to an existing outcome capability such as `issue-fix` or `content-ops`, or to
+a standalone extension such as `loopx-finance-value-discovery`, before
+retiring the compatibility surface. This keeps the migration
+behavior-preserving instead of replacing one broad bucket with another broad
+bucket.
 
 Before editing, record a compact rationale in the active todo or plan:
 
@@ -178,16 +180,20 @@ placement: <target-directory-or-package>
 reason: <why the nearest existing owner is or is not sufficient>
 ```
 
-Do not create a new capability directory merely because no current directory
-has the feature name. Do not create an extension merely because an external
-service is involved: a built-in connector can still belong to an existing
-capability when it shares the core release and lifecycle.
+Use `capability_id: none` for a standalone extension. Do not create a new
+capability directory merely because no current directory has the feature name
+or because the manifest needs a lifecycle anchor. Do not create an extension
+merely because an external service is involved: a built-in connector can still
+belong to an existing capability when it shares the core release and
+lifecycle.
 
 ## Manifest Contract
 
-An extension manifest is declarative TOML. `[[provides]]` records add new
-capability contracts to the catalog. `[[implements]]` binds a provider runtime
-to an existing core-owned capability without duplicating that capability id.
+An extension manifest is declarative TOML. An executable `[runtime]` is enough
+for a standalone extension. `[[provides]]` records add new capability contracts
+to the catalog. `[[implements]]` binds a provider runtime to an existing
+core-owned capability without duplicating that capability id. Do not add either
+table solely to make a runtime installable.
 The v0 runtime exposes integer extension API version `1` and accepts bounded
 integer constraints such as `>=1,<2`; incompatible manifests fail closed.
 
@@ -253,11 +259,11 @@ facts do not belong in the generic extension manifest or lifecycle state.
 
 ### Finance value-discovery sample
 
-`extensions/loopx-finance-value-discovery/` is a co-located, independently packaged
-outcome provider. Its manifest provides the `finance-value-discovery`
-capability and implements `finance_value_discovery_provider_v0`. After an
-explicit install and successful doctor probe, the legacy command remains a
-lifecycle-checked delegate:
+`extensions/loopx-finance-value-discovery/` is a co-located, independently
+packaged standalone workflow. Its manifest registers only the
+`finance_value_discovery_extension_v0` runtime; it does not create a capability
+catalog entry. After an explicit install and successful doctor probe, the
+legacy command remains a lifecycle-checked delegate:
 
 ```bash
 loopx extension install \

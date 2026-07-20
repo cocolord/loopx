@@ -131,13 +131,13 @@ def main() -> int:
         == "loopx.capabilities.content_ops.social_browser_x"
     )
     assert profiles["agent_reach_ops_source_map"]["outcome_capability_id"] == "content-ops"
+    assert "outcome_capability_id" not in profiles["finance_market_snapshot"]
     assert (
-        profiles["finance_market_snapshot"]["outcome_capability_id"]
-        == "finance-value-discovery"
+        profiles["finance_market_snapshot"]["delivery_type"] == "standalone_extension"
     )
-    assert profiles["finance_market_snapshot"]["provider_binding_state"] == "migrated"
+    assert profiles["finance_market_snapshot"]["extension_binding_state"] == "migrated"
     assert (
-        profiles["finance_market_snapshot"]["provider_id"]
+        profiles["finance_market_snapshot"]["extension_id"]
         == "loopx-finance-value-discovery"
     )
     action_ids = {item["connector_id"] for item in source_map["action_gated_profiles"]}

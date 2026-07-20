@@ -245,7 +245,7 @@ def register_value_connector_commands(
         "finance-discovery",
         help=(
             "Compatibility delegate for an installed, enabled, doctor-ready "
-            "finance-value-discovery extension."
+            "loopx-finance-value-discovery extension."
         ),
     )
     add_subcommand_format(finance_parser)

@@ -4,16 +4,15 @@ Status: co-located optional LoopX extension sample.
 
 ## Placement
 
-- capability id: `finance-value-discovery`
-- provider id: `loopx-finance-value-discovery`
-- origin: `extension`
+- extension id: `loopx-finance-value-discovery`
+- capability registration: none
 - placement: `extensions/loopx-finance-value-discovery/`
 
-The caller-visible outcome is a finite, falsifiable public-finance research
-packet. The implementation has its own package, dependencies, installation,
-doctor, enablement, and upgrade lifecycle, so it is extension-delivered rather
-than a built-in `loopx/capabilities/` implementation. `value-connectors`
-retains only a compatibility delegate during migration.
+This optional workflow owns its command and packet contract. LoopX does not
+need a provider-neutral finance capability, so installing the extension must
+not add `finance-value-discovery` to the capability catalog. The package owns
+its dependencies, installation, doctor, enablement, and upgrade lifecycle.
+`value-connectors` retains only a compatibility delegate during migration.
 
 ## Contract
 
@@ -76,7 +75,7 @@ view on PayPal or any control company.
 
 ## Install And Run
 
-Install the provider package, then register its manifest with the LoopX
+Install the extension package, then register its manifest with the LoopX
 extension runtime:
 
 ```bash
@@ -87,7 +86,7 @@ loopx extension install \
   --format json
 ```
 
-Run the provider directly:
+Run the extension directly:
 
 ```bash
 loopx-finance-value-discovery reduce \
@@ -96,7 +95,7 @@ loopx-finance-value-discovery reduce \
 ```
 
 The migration compatibility route resolves the installed, enabled,
-doctor-ready provider by capability and protocol:
+doctor-ready runtime directly by extension id and protocol:
 
 ```bash
 loopx value-connectors finance-discovery \
