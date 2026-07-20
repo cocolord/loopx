@@ -1,0 +1,25 @@
+loopx/capabilities/periodic_report/archive.py
+  s_e3f612788718c1::t_4bbfa7f5a31cde 8,84-94
+loopx/presentation/sinks/lark/periodic_report.py
+  s_e3f612788718c1::t_ea89edc22c480a 11,45,60-62,65-66,86,92
+loopx/presentation/sinks/openviking_periodic_report.py
+  s_e3f612788718c1::t_55b6b99d0ce193 47,111,117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ffd2d738f055d771dcd157bed820f6ad1153fd83",
+  "prompts": {},
+  "sessions": {
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

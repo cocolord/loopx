@@ -1,0 +1,31 @@
+examples/reward-memory-recall-application-smoke.py
+  s_32e2a9a204a8e4::t_2509b83f0c4749 25,407-426
+loopx/capabilities/issue_fix/reward_memory.py
+  s_ce78287262030e::t_7bd381fba65298 93-107,110,112-115,121,124,129,139-140,156,162-163
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3d296ce58a7522503329fc74828fd8a7ae44b40d",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_ce78287262030e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f7515-a03a-7322-9902-2e203d31cc54",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

@@ -1,0 +1,59 @@
+docs/guides/getting-started.md
+  s_e3f612788718c1::t_79bb93fe8ac851 126-133
+docs/guides/newcomer-command-path.md
+  s_e3f612788718c1::t_5c86a051004de5 62-67
+docs/reference/protocols/codex-app-host-command-registry-v0.md
+  s_e3f612788718c1::t_1c2e6eaa69a8a1 168-176,213
+examples/control_plane/agent-onboard-host-loop-activation-smoke.py
+  s_76ee28abb3c3a4::t_6c50549a1d7761 46,53,56-57,61,116,262-273
+loopx/agent_onboarding.py
+  s_e3f612788718c1::t_d68c750002c8c0 26,45,73-74
+loopx/bootstrap_command_pack.py
+  s_e3f612788718c1::t_c2a80c5122c9cd 39,247,272
+loopx/cli_commands/slash_commands.py
+  s_e3f612788718c1::t_cd38c67b980808 53
+loopx/cli_commands/starter_bootstrap.py
+  s_e3f612788718c1::t_69056339877535 18-22,75
+loopx/cli_commands/starter_bootstrap_registration.py
+  s_e3f612788718c1::t_de2e11dd235f7e 22,69,115
+loopx/control_plane/testing/onboarding_model_behavior_qualification.py
+  s_e3f612788718c1::t_bfaaf488c182f5 244
+loopx/host_loop_activation.py
+  s_e3f612788718c1::t_c415c4ccebfd3f 29,39,66-68,71-73,77-78,106-108,146-147,176-177,269,433,524
+loopx/slash_command_install.py
+  s_e3f612788718c1::t_e6f620e8a0598d 88,92,95,239,274,288,306,318,340,361,375
+tests/control_plane/test_onboarding_model_behavior_qualification.py
+  s_76ee28abb3c3a4::t_e3f06911c87271 60
+tests/control_plane/test_start_goal_compact_projection.py
+  s_76ee28abb3c3a4::t_2680d8df0de4a5 306,311-312,315,324,338,343-351
+tests/test_host_loop_activation.py
+  s_76ee28abb3c3a4::t_55ff64a819b4ca 15-22,25,33,50,99
+tests/test_slash_command_install.py
+  s_76ee28abb3c3a4::t_f1ba4e5b0b2b29 42-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "254d1617f977327a3ac9f9bebf45f0e5c4384082",
+  "prompts": {},
+  "sessions": {
+    "s_76ee28abb3c3a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0dc3-1b68-7ce3-9ec0-f36f03f3030e",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

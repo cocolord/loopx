@@ -1,0 +1,23 @@
+docs/reference/protocols/README.md
+  s_ce78287262030e::t_54a363ea440a9a 20
+docs/reference/protocols/agent-material-frontier-v0.md
+  s_ce78287262030e::t_139c534b5aac71 1-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d1ea3ba7600b2288ce47787fa2460670d6933b8a",
+  "prompts": {},
+  "sessions": {
+    "s_ce78287262030e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f7515-a03a-7322-9902-2e203d31cc54",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

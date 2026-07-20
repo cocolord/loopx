@@ -1,0 +1,33 @@
+examples/periodic-report-adapters-smoke.py
+  s_76ee28abb3c3a4::t_e3b55cedf3227e 4-5,8-12,15,21,24,27
+loopx/capabilities/periodic_report/adapters.py
+  s_76ee28abb3c3a4::t_7c7eb6599211e0 398,424-437,545
+loopx/capabilities/periodic_report/core.py
+  s_76ee28abb3c3a4::t_c37f9d31c30b1e 147-149
+loopx/capabilities/periodic_report/triggers.py
+  s_76ee28abb3c3a4::t_581f4e9ca1538e 244-246
+tests/capabilities/test_periodic_report.py
+  s_76ee28abb3c3a4::t_f4ae9222436ab8 122-132
+tests/capabilities/test_periodic_report_adapters.py
+  s_76ee28abb3c3a4::t_065148d0fc7191 18-21,309-346
+tests/capabilities/test_periodic_report_triggers.py
+  s_76ee28abb3c3a4::t_201634ab1ca032 6-7,140-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ec91ac969c5277618241021aebc5c8c9cf9a57c9",
+  "prompts": {},
+  "sessions": {
+    "s_76ee28abb3c3a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0dc3-1b68-7ce3-9ec0-f36f03f3030e",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

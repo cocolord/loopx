@@ -1,0 +1,31 @@
+docs/development/control-plane-course/01-first-real-loop.md
+  s_e3f612788718c1::t_ca8777b7d2594e 534-536
+docs/development/control-plane-course/02-state-substrate.md
+  s_e3f612788718c1::t_389352450deb36 38-40,48-49
+docs/development/control-plane-course/03-work-graph-and-peers.md
+  s_e3f612788718c1::t_a2852286e682f4 151-153,157-160,169-170,174,203-205
+docs/development/control-plane-course/07-engineering-a-control-plane-rule.md
+  s_e3f612788718c1::t_4a6ab1ebc64625 349-350
+docs/development/control-plane-course/08-autonomous-agent-quality-gates.md
+  s_e3f612788718c1::t_196223c4cc751a 268-271
+docs/development/control-plane-course/09-extension-layer.md
+  s_e3f612788718c1::t_8f2a2c42bb1993 44,52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "45ac2e727ef26744cc19b9f51ba9c9f9915d3147",
+  "prompts": {},
+  "sessions": {
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

@@ -1,0 +1,49 @@
+docs/project-agent-todo-contract.md
+  s_e3f612788718c1::t_583c53a11f4b6a 155-190
+examples/control_plane/control-plane-configure-api-smoke.py
+  s_e3f612788718c1::t_f783809a080574 200-206,244-246,314-316,354-356
+loopx/cli_commands/registry_admin.py
+  s_e3f612788718c1::t_b3adaa31aadcfa 362-380,670-673,697-700
+loopx/cli_commands/todo.py
+  s_e3f612788718c1::t_c73a5cfe7344a1 82-89,673,743,803
+loopx/cli_commands/todo_argument_validation.py
+  s_e3f612788718c1::t_9ae567d136f7cb 16,90-98
+loopx/configure_goal.py
+  s_e3f612788718c1::t_b30ea4e9ff7105 36-38,194-196,213-217,405-406,533-535,625-637,838-839,857,874-889,907-933
+loopx/control_plane/todos/mutation_authority.py
+  s_e3f612788718c1::t_7d6da4816806ca 7,23-113,181-182,239-243,245-273
+loopx/status_server.py
+  s_32e2a9a204a8e4::t_ca9d15826f41fe 63-64,359-374,405-410,455-458
+loopx/todos.py
+  s_e3f612788718c1::t_4d4b2a14e5ffb4 80,1227,1292-1308,1315-1316,1494,1558,1774,1803
+tests/control_plane/test_todo_lifecycle_authority_config.py
+  s_e3f612788718c1::t_890e5ed88a42ff 1-233
+tests/control_plane/test_todo_mutation_authority.py
+  s_32e2a9a204a8e4::t_837b1fd97b1c1f 23,27-32,51-61,74,204,388-540
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "925b4bde8f3fe33c4ded91cce612720eae30ae32",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

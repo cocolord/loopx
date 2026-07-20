@@ -1,0 +1,25 @@
+loopx/capabilities/periodic_report/adapters.py
+  s_ce78287262030e::t_5e5d097c39140c 90-95,208-210,219,254,463-464,476-479,492-493,495,526-527,537-538,562-563
+loopx/capabilities/periodic_report/cli.py
+  s_ce78287262030e::t_c16a798e98ee79 33
+tests/capabilities/test_periodic_report_adapters.py
+  s_ce78287262030e::t_3e812808fe5177 457-512
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "45d24187ab1e6a5c46a44f1fa440816adfd00025",
+  "prompts": {},
+  "sessions": {
+    "s_ce78287262030e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f7515-a03a-7322-9902-2e203d31cc54",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

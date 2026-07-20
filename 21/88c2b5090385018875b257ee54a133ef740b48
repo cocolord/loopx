@@ -1,0 +1,31 @@
+examples/control_plane/control-plane-integrated-canary-smoke.py
+  s_9a5a2bd944fdcb::t_04c2646436f334 387-388,686-687
+examples/control_plane/todo-concurrent-write-lock-smoke.py
+  s_9a5a2bd944fdcb::t_7dff41eb4b1050 185-186
+examples/control_plane/todo-deferred-capacity-cli-smoke.py
+  s_9a5a2bd944fdcb::t_caa371a49c165f 29,175-176,193-194
+examples/control_plane/todo-list-event-projection-smoke.py
+  s_9a5a2bd944fdcb::t_4b8e5b60655074 253-254
+examples/control_plane/todo-write-correctness-smoke.py
+  s_9a5a2bd944fdcb::t_99ad761b3ac12e 275-276
+examples/issue-fix-capability-gap-metrics-smoke.py
+  s_9a5a2bd944fdcb::t_3ec930410901f3 25-26,81-82,102-103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2188c2b5090385018875b257ee54a133ef740b48",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

@@ -1,0 +1,23 @@
+loopx/doctor.py
+  s_76ee28abb3c3a4::t_06425169579f39 8,64-77,398-399,456-457
+tests/test_doctor_install_freshness.py
+  s_76ee28abb3c3a4::t_cf5e53fe62ba56 40,51-54,155-192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8bf9ad1f89d46fac191fce572e921a798e3c6d71",
+  "prompts": {},
+  "sessions": {
+    "s_76ee28abb3c3a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0dc3-1b68-7ce3-9ec0-f36f03f3030e",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

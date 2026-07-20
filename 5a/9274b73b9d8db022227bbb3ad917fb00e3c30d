@@ -1,0 +1,49 @@
+examples/canary/catalog-planner-smoke.py
+  s_e3f612788718c1::t_6f5c358575adca 120
+examples/control_plane/quota-scheduler-state-ack-smoke.py
+  s_76ee28abb3c3a4::t_e0be2a08f30014 1023,1057
+loopx/canary/qualification_profiles.py
+  s_e3f612788718c1::t_07b4979d2f1346 158,162,175-179
+loopx/canary/quality_surface_catalog.py
+  s_32e2a9a204a8e4::t_8c78c7480dd6b9 98,100,116-117,122
+loopx/control_plane/scheduler/scheduler_hint.py
+  s_32e2a9a204a8e4::t_88e6bf4425a9be 31-34,783-796,827-834,836-839
+loopx/control_plane/scheduler/state_transition_rules.py
+  s_e3f612788718c1::t_81ac69329b6edc 1-174
+tests/control_plane/test_scheduler_state_transition_rules.py
+  s_e3f612788718c1::t_c8090cd042a3c7 1-255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5a9274b73b9d8db022227bbb3ad917fb00e3c30d",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_76ee28abb3c3a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0dc3-1b68-7ce3-9ec0-f36f03f3030e",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

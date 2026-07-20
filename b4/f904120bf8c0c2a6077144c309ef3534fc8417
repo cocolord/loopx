@@ -1,0 +1,29 @@
+docs/capabilities/periodic-report/README.md
+  s_e3f612788718c1::t_ba3c170a608498 40-54
+docs/reference/protocols/periodic-report-v0.md
+  s_e3f612788718c1::t_e8d9b8a1b78c81 122-127
+examples/periodic-report-adapters-smoke.py
+  s_e3f612788718c1::t_28507b7744afa8 24-26,73,121,148-150
+loopx/presentation/renderers/__init__.py
+  s_e3f612788718c1::t_dd7642a2b42375 3-6,13,15
+tests/presentation/test_periodic_report_html.py
+  s_e3f612788718c1::t_5c8939c3ba5f16 1-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b4f904120bf8c0c2a6077144c309ef3534fc8417",
+  "prompts": {},
+  "sessions": {
+    "s_e3f612788718c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eefa3-dc14-7660-a19e-e1d386d7f467",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

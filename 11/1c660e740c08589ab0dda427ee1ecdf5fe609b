@@ -1,0 +1,39 @@
+loopx/capabilities/issue_fix/cli.py
+  s_32e2a9a204a8e4::t_3881b10accf0c8 63,875-877,889
+loopx/capabilities/issue_fix/provider_hooks.py
+  s_32e2a9a204a8e4::t_6bb2053d6b2851 10,14,20,24
+loopx/capabilities/issue_fix/reviewer_cli.py
+  s_32e2a9a204a8e4::t_c3827f1be4a0e7 21-24,409-411,413,415-418,420,422-423,482,543,576-580,689,776,778-780,800,818-819
+loopx/capabilities/issue_fix/reviewer_notification.py
+  s_32e2a9a204a8e4::t_1a92843f1049ad 93,388,404,435,451-452,733,749,756,766,805
+loopx/cli.py
+  s_32e2a9a204a8e4::t_25641b13a5ea17 85,420-421
+loopx/cli_commands/__init__.py
+  s_32e2a9a204a8e4::t_9a208b772de525 91
+loopx/cli_commands/lark_inbox.py
+  s_32e2a9a204a8e4::t_f669c47424b2fa 15,24-26,37,194,196,204,207,211
+loopx/extensions/lark/__init__.py
+  s_32e2a9a204a8e4::t_0956ad374ee581 8
+loopx/extensions/lark/extension.toml
+  s_32e2a9a204a8e4::t_c7c2ae96a29585 3,10,31-41
+loopx/extensions/lark/provider.py
+  s_32e2a9a204a8e4::t_0dc49f90baa6b2 22-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "111c660e740c08589ab0dda427ee1ecdf5fe609b",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

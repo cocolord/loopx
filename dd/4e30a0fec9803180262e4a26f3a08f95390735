@@ -1,0 +1,25 @@
+skills/loopx-project/SKILL.md
+  s_ce78287262030e::t_6c78c80b060f23 573-576
+skills/loopx-self-repair/references/repair-patterns.md
+  s_ce78287262030e::t_d1c7d18975a669 30
+tests/control_plane/test_user_gate_lane_progress.py
+  s_ce78287262030e::t_b0615bf14b7db9 75-95,118-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dd4e30a0fec9803180262e4a26f3a08f95390735",
+  "prompts": {},
+  "sessions": {
+    "s_ce78287262030e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f7515-a03a-7322-9902-2e203d31cc54",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

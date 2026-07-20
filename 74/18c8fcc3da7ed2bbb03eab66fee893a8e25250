@@ -1,0 +1,29 @@
+examples/control_plane/global-registry-health-readmodel-smoke.py
+  s_9a5a2bd944fdcb::t_2932f903f06c1b 157,166-168
+examples/control_plane/public-safety-readmodel-smoke.py
+  s_9a5a2bd944fdcb::t_accf120789d63c 27,151
+examples/control_plane/quota-todo-summary-readmodel-smoke.py
+  s_9a5a2bd944fdcb::t_71ef0ccaee8b39 120,122,137-141
+examples/control_plane/todo-readmodel-boundary-smoke.py
+  s_9a5a2bd944fdcb::t_186b5a3e61e0c1 87,114-128,140,188,192,249-250,348
+examples/control_plane/todo-suggestion-prompt-smoke.py
+  s_9a5a2bd944fdcb::t_3c090a3a265548 191-194
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7418c8fcc3da7ed2bbb03eab66fee893a8e25250",
+  "prompts": {},
+  "sessions": {
+    "s_9a5a2bd944fdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9170-0e1e-76e3-9a0f-76b55c831170",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

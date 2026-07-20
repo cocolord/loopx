@@ -1,0 +1,31 @@
+examples/issue-fix-reviewer-notification-drain-postwrite-smoke.py
+  s_32e2a9a204a8e4::t_fb55128f9bc183 28-30
+examples/issue-fix-reviewer-notification-sink-smoke.py
+  s_32e2a9a204a8e4::t_83e3a0b35da24a 20,23-25,325-340
+examples/issue-fix-reviewer-request-smoke.py
+  s_32e2a9a204a8e4::t_74bdce03325501 25,59-61,1005
+examples/issue_fix_reviewer_notification_test_support.py
+  s_32e2a9a204a8e4::t_bd3e0f8f018881 1-56
+examples/lark-extension-activation-smoke.py
+  s_32e2a9a204a8e4::t_42d84d857ec1d6 148,162,205
+tests/architecture/test_control_plane_import_boundaries.py
+  s_32e2a9a204a8e4::t_958cc13b5d91b9 16-18,161-181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a8920deb38620f3ed5a7f4a8a6b256ca2591e824",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

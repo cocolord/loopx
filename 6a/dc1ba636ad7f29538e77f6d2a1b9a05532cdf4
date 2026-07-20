@@ -1,0 +1,25 @@
+docs/capabilities/issue-fix/README.md
+  s_32e2a9a204a8e4::t_259c2b13586455 453-476
+docs/capabilities/value-connectors/README.md
+  s_32e2a9a204a8e4::t_42ddf53e700a86 74-85,88-101
+docs/reference/protocols/value-connector-plan-v0.md
+  s_32e2a9a204a8e4::t_e5a8d610bf6c36 5-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6adc1ba636ad7f29538e77f6d2a1b9a05532cdf4",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

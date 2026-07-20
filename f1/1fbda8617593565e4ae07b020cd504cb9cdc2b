@@ -1,0 +1,43 @@
+loopx/cli_commands/lark_inbox.py
+  s_32e2a9a204a8e4::t_a02f801e0be390 22,195-216
+loopx/cli_commands/quota.py
+  s_32e2a9a204a8e4::t_85586fccd7ec47 41,293-297,356,382,406,430,457,474
+loopx/cli_commands/turn.py
+  s_32e2a9a204a8e4::t_ccbd8ead57075d 30,283-287,310,469,489
+loopx/control_plane/quota/live_decision.py
+  s_32e2a9a204a8e4::t_4462eccbaf0c8b 71,98
+loopx/extensions/lark/event_inbox.py
+  s_32e2a9a204a8e4::t_ad08830722aff2 10,24-36,208
+loopx/extensions/lark/extension.toml
+  s_32e2a9a204a8e4::t_10bc57c51966de 3
+loopx/extensions/lark/provider.py
+  s_76ee28abb3c3a4::t_69e4d2349d6f9d 20
+loopx/quota.py
+  s_32e2a9a204a8e4::t_36484d74cfcefb 4,1209,1318,2221,2228,2240,2279,2288,2341,2348,2358,2382,2385,2402,2409,2432,2440
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f11fbda8617593565e4ae07b020cd504cb9cdc2b",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    },
+    "s_76ee28abb3c3a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0dc3-1b68-7ce3-9ec0-f36f03f3030e",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

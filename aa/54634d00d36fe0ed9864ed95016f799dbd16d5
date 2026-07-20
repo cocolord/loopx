@@ -1,0 +1,21 @@
+examples/project/project-agent-adoption-smoke.py
+  s_32e2a9a204a8e4::t_086d6acf669649 27-34,111-131,144,147-148,150-159,162-169,177,209,230,252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "aa54634d00d36fe0ed9864ed95016f799dbd16d5",
+  "prompts": {},
+  "sessions": {
+    "s_32e2a9a204a8e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edfef-3f29-7ed2-9863-54f553ac4387",
+        "model": "unknown"
+      },
+      "human_author": "huangrt01 <huangrt01@163.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
