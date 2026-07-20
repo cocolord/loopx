@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
+import json
 from pathlib import Path
+import sys
 
 from ..extensions.bundled import BUNDLED_EXTENSION_IDS, bundled_extension_manifest
 from ..extensions.runtime import (
@@ -13,6 +15,7 @@ from ..extensions.runtime import (
     extension_status,
     install_extension,
     rollback_extension,
+    run_standalone_extension,
 )
 
 
@@ -32,6 +35,8 @@ def _render(payload: dict[str, object]) -> str:
         "version",
         "revision",
         "status",
+        "protocol",
+        "executed",
         "enabled",
         "changed",
         "error",
@@ -113,6 +118,34 @@ def register_extension_commands(
                 help="Run the configured read-only provider probe.",
             )
 
+    run = commands.add_parser(
+        "run",
+        help="Invoke one enabled standalone extension through its managed runtime.",
+    )
+    _add_common(run, add_subcommand_format)
+    run.add_argument("extension_id")
+    run.add_argument(
+        "--input-json",
+        required=True,
+        help="Path to one provider request JSON object, or '-' for stdin.",
+    )
+    run.add_argument("--execute", action="store_true")
+
+
+def _load_json_object(path_text: str) -> dict[str, object]:
+    try:
+        raw = (
+            sys.stdin.read()
+            if path_text == "-"
+            else Path(path_text).read_text(encoding="utf-8")
+        )
+        payload = json.loads(raw)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("extension run input must be a readable JSON object") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("extension run input must be a JSON object")
+    return payload
+
 
 def handle_extension_command(
     args: argparse.Namespace,
@@ -157,6 +190,13 @@ def handle_extension_command(
                 state_file=state_file,
                 execute=args.execute,
             )
+        elif args.extension_command == "run":
+            payload = run_standalone_extension(
+                args.extension_id,
+                state_file=state_file,
+                request=_load_json_object(args.input_json),
+                execute=args.execute,
+            )
         else:
             payload = doctor_installed_extension(
                 args.extension_id,
@@ -173,4 +213,4 @@ def handle_extension_command(
         print_payload(payload, output_format(args), _render)
         return 2
     print_payload(payload, output_format(args), _render)
-    return 0
+    return 0 if payload.get("ok", True) else 1

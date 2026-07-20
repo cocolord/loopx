@@ -32,6 +32,7 @@ from loopx.extensions.runtime import (
     resolve_extension_binding,
     resolve_extension_runtime_binding,
     rollback_extension,
+    run_standalone_extension,
 )
 from loopx.extensions.openviking_semantic_preference.provider import (
     register_openviking_provider_arguments,
@@ -91,6 +92,31 @@ protocol = "semantic_preference_provider_v0"
         encoding="utf-8",
     )
     return path
+
+
+def _standalone_manifest(
+    path: Path,
+    *,
+    entrypoint: Path,
+    version: str = "1.0.0",
+    extension_id: str = "test-standalone-extension",
+) -> Path:
+    manifest = _manifest(
+        path,
+        entrypoint=entrypoint,
+        version=version,
+        extension_id=extension_id,
+    )
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "\n[[implements]]\n"
+            'capability_id = "semantic-preference"\n'
+            'protocol = "semantic_preference_provider_v0"\n',
+            "\n",
+        ),
+        encoding="utf-8",
+    )
+    return manifest
 
 
 def _python_module_manifest(path: Path, *, module_name: str) -> Path:
@@ -173,20 +199,9 @@ def test_standalone_runtime_does_not_require_a_capability_contract(
     tmp_path: Path,
 ) -> None:
     provider = _provider(tmp_path / "provider")
-    manifest = _manifest(
+    manifest = _standalone_manifest(
         tmp_path / "extension.toml",
         entrypoint=provider,
-        version="1.0.0",
-        extension_id="test-standalone-extension",
-    )
-    manifest.write_text(
-        manifest.read_text(encoding="utf-8").replace(
-            "\n[[implements]]\n"
-            'capability_id = "semantic-preference"\n'
-            'protocol = "semantic_preference_provider_v0"\n',
-            "\n",
-        ),
-        encoding="utf-8",
     )
     state_file = tmp_path / "extensions.json"
 
@@ -207,6 +222,99 @@ def test_standalone_runtime_does_not_require_a_capability_contract(
             protocol="different_protocol_v0",
             permission="semantic_preference.read",
         )
+
+
+def test_standalone_run_is_lifecycle_gated_and_returns_provider_packet(
+    tmp_path: Path,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest = _standalone_manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+    )
+    state_file = tmp_path / "extensions.json"
+    install_extension(manifest, state_file=state_file, execute=True)
+    request = {"schema_version": "test_extension_request_v0"}
+
+    preview = run_standalone_extension(
+        "test-standalone-extension",
+        state_file=state_file,
+        request=request,
+    )
+    assert preview["status"] == "ready"
+    assert preview["executed"] is False
+
+    executed = run_standalone_extension(
+        "test-standalone-extension",
+        state_file=state_file,
+        request=request,
+        execute=True,
+    )
+    assert executed["status"] == "succeeded"
+    assert executed["provider_result"]["schema_version"] == (
+        "semantic_preference_provider_response_v0"
+    )
+
+    disable_extension(
+        "test-standalone-extension",
+        state_file=state_file,
+        execute=True,
+    )
+    with pytest.raises(ValueError, match="is disabled"):
+        run_standalone_extension(
+            "test-standalone-extension",
+            state_file=state_file,
+            request=request,
+            execute=True,
+        )
+
+
+def test_standalone_run_rejects_capability_provider_bypass(tmp_path: Path) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest = _manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+        version="1.0.0",
+    )
+    state_file = tmp_path / "extensions.json"
+    install_extension(manifest, state_file=state_file, execute=True)
+
+    with pytest.raises(ValueError, match="through their capability command"):
+        run_standalone_extension(
+            "test-semantic-extension",
+            state_file=state_file,
+            request={"schema_version": "test_extension_request_v0"},
+            execute=True,
+        )
+
+
+def test_standalone_run_fails_closed_on_invalid_provider_output(
+    tmp_path: Path,
+) -> None:
+    provider = tmp_path / "provider"
+    provider.write_bytes(
+        f"#!{sys.executable}\n".encode()
+        + b"import sys\n"
+        + b"if '--doctor' in sys.argv:\n    raise SystemExit(0)\n"
+        + b"sys.stdout.buffer.write(b'\\xff')\n"
+    )
+    provider.chmod(0o755)
+    manifest = _standalone_manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+    )
+    state_file = tmp_path / "extensions.json"
+    install_extension(manifest, state_file=state_file, execute=True)
+
+    receipt = run_standalone_extension(
+        "test-standalone-extension",
+        state_file=state_file,
+        request={"schema_version": "test_extension_request_v0"},
+        execute=True,
+    )
+    assert receipt["ok"] is False
+    assert receipt["status"] == "invalid_provider_output"
+    assert receipt["failure_kind"] == "response_not_json_object"
 
 
 @pytest.mark.parametrize(
@@ -754,6 +862,64 @@ def test_extension_cli_installs_preinstalled_runtime(
     enabled = json.loads(capsys.readouterr().out)
     assert enabled["enabled"] is True
     assert enabled["doctor"]["verified"] is True
+
+
+def test_extension_cli_runs_standalone_provider_through_loopx(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest = _standalone_manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+    )
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps({"schema_version": "test_extension_request_v0"}),
+        encoding="utf-8",
+    )
+    runtime_root = tmp_path / "runtime"
+    assert (
+        main(
+            [
+                "--runtime-root",
+                str(runtime_root),
+                "--format",
+                "json",
+                "extension",
+                "install",
+                "--manifest",
+                str(manifest),
+                "--execute",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    assert (
+        main(
+            [
+                "--runtime-root",
+                str(runtime_root),
+                "--format",
+                "json",
+                "extension",
+                "run",
+                "test-standalone-extension",
+                "--input-json",
+                str(request_path),
+                "--execute",
+            ]
+        )
+        == 0
+    )
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["schema_version"] == "loopx_extension_run_receipt_v0"
+    assert receipt["status"] == "succeeded"
+    assert receipt["provider_result"]["schema_version"] == (
+        "semantic_preference_provider_response_v0"
+    )
 
 
 def test_core_does_not_import_openviking_provider_implementation() -> None:

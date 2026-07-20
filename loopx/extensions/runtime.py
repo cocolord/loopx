@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
+import tempfile
 from typing import Any
 
 from ..file_lock import exclusive_file_lock
@@ -24,7 +26,10 @@ EXTENSION_STATE_SCHEMA_VERSION = "loopx_extension_state_v0"
 EXTENSION_OPERATION_SCHEMA_VERSION = "loopx_extension_operation_v0"
 EXTENSION_BINDING_SCHEMA_VERSION = "loopx_extension_runtime_binding_v0"
 EXTENSION_ACTIVATION_SCHEMA_VERSION = "loopx_extension_activation_v0"
+EXTENSION_RUN_SCHEMA_VERSION = "loopx_extension_run_receipt_v0"
 MAX_REVISIONS = 5
+MAX_EXTENSION_REQUEST_BYTES = 1_000_000
+MAX_EXTENSION_RESPONSE_BYTES = 1_000_000
 
 
 def default_extension_state_file(runtime_root: str | Path | None = None) -> Path:
@@ -724,6 +729,149 @@ def resolve_extension_runtime_binding(
             *(runtime.get("doctor_args") or []),
         ],
         "timeout_seconds": runtime["timeout_seconds"],
+    }
+
+
+def run_standalone_extension(
+    extension_id: str,
+    *,
+    state_file: str | Path,
+    request: Mapping[str, Any],
+    execute: bool = False,
+) -> dict[str, Any]:
+    """Run one lifecycle-gated standalone extension over JSON stdin/stdout."""
+
+    active_revision, verified_entrypoint, manifest = _resolved_active_extension(
+        extension_id,
+        state_file=state_file,
+    )
+    provider = manifest.get("provider")
+    runtime = _runtime(manifest)
+    if not isinstance(provider, Mapping):
+        raise ValueError("extension active manifest is incomplete")
+    if manifest.get("capabilities") or manifest.get("implementations"):
+        raise ValueError(
+            "extension run only accepts standalone extensions; invoke capability "
+            "providers through their capability command"
+        )
+    if not isinstance(request, Mapping):
+        raise ValueError("extension run request must be a JSON object")
+
+    required_permissions = [
+        str(value) for value in runtime.get("required_permissions") or []
+    ]
+    declared_permissions = {str(value) for value in provider.get("permissions") or []}
+    missing_permissions = sorted(set(required_permissions) - declared_permissions)
+    if missing_permissions:
+        raise ValueError(
+            f"extension `{extension_id}` does not declare permissions "
+            f"{missing_permissions}"
+        )
+
+    try:
+        request_bytes = json.dumps(
+            dict(request),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("extension run request must be JSON serializable") from exc
+    if len(request_bytes) > MAX_EXTENSION_REQUEST_BYTES:
+        raise ValueError("extension run request exceeds the 1000000-byte limit")
+
+    receipt: dict[str, Any] = {
+        "ok": True,
+        "schema_version": EXTENSION_RUN_SCHEMA_VERSION,
+        "operation": "run",
+        "extension_id": extension_id,
+        "provider_version": provider.get("version"),
+        "revision": active_revision,
+        "protocol": runtime["protocol"],
+        "required_permissions": required_permissions,
+        "dry_run": not execute,
+        "executed": False,
+        "status": "ready" if not execute else "running",
+        "input_schema_version": request.get("schema_version"),
+    }
+    if not execute:
+        return receipt
+
+    argv = [*verified_entrypoint.argv_prefix, *(runtime.get("args") or [])]
+    try:
+        with (
+            tempfile.TemporaryFile() as stdout_file,
+            tempfile.TemporaryFile() as stderr_file,
+        ):
+            completed = subprocess.run(
+                argv,
+                input=request_bytes,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                timeout=int(runtime["timeout_seconds"]),
+                check=False,
+            )
+            stdout_size = stdout_file.tell()
+            stderr_size = stderr_file.tell()
+            if stdout_size > MAX_EXTENSION_RESPONSE_BYTES:
+                return {
+                    **receipt,
+                    "ok": False,
+                    "executed": True,
+                    "status": "invalid_provider_output",
+                    "failure_kind": "response_too_large",
+                    "exit_code": completed.returncode,
+                }
+            stdout_file.seek(0)
+            stdout = stdout_file.read()
+            if stderr_size > MAX_EXTENSION_RESPONSE_BYTES:
+                return {
+                    **receipt,
+                    "ok": False,
+                    "executed": True,
+                    "status": "provider_failed",
+                    "failure_kind": "stderr_too_large",
+                    "exit_code": completed.returncode,
+                }
+    except subprocess.TimeoutExpired:
+        return {
+            **receipt,
+            "ok": False,
+            "executed": True,
+            "status": "provider_failed",
+            "failure_kind": "timeout",
+            "exit_code": None,
+        }
+    except OSError:
+        return {
+            **receipt,
+            "ok": False,
+            "executed": True,
+            "status": "provider_failed",
+            "failure_kind": "execution_failed",
+            "exit_code": None,
+        }
+
+    try:
+        provider_result = json.loads(stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        provider_result = None
+    if not isinstance(provider_result, dict):
+        return {
+            **receipt,
+            "ok": False,
+            "executed": True,
+            "status": "invalid_provider_output",
+            "failure_kind": "response_not_json_object",
+            "exit_code": completed.returncode,
+        }
+    succeeded = completed.returncode == 0 and provider_result.get("ok") is not False
+    return {
+        **receipt,
+        "ok": succeeded,
+        "executed": True,
+        "status": "succeeded" if succeeded else "provider_failed",
+        "exit_code": completed.returncode,
+        "provider_result": provider_result,
     }
 
 

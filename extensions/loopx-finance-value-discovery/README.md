@@ -85,13 +85,16 @@ loopx extension install \
   --format json
 ```
 
-Run the extension directly:
+Invoke the enabled extension through LoopX's managed runtime:
 
 ```bash
-loopx-finance-value-discovery reduce \
+loopx extension run loopx-finance-value-discovery \
   --input-json extensions/loopx-finance-value-discovery/examples/paypal-debeta-discovery.json \
+  --execute \
   --format json
 ```
 
-There is no `value-connectors` compatibility route. Callers install and invoke
-this independently versioned extension through its own lifecycle and command.
+There is no `value-connectors` compatibility route. The package binary is a
+provider implementation and developer-debugging surface, not the supported
+management entrypoint. Callers install and invoke this independently versioned
+extension through `loopx extension`.

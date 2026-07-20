@@ -25,6 +25,8 @@ for anchor in (
     "An extension-owned command and packet contract may remain a",
     "`value-connectors` is an existing compatibility CLI",
     "a standalone extension such as `loopx-finance-value-discovery`",
+    "loopx extension run <extension-id>",
+    "Direct provider binaries are implementation and debugging surfaces",
     "capability_id: <existing-or-new-contract>",
     "Use `capability_id: none` for a standalone extension.",
     "reason: <why the nearest existing owner is or is not sufficient>",

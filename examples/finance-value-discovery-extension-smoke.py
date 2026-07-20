@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -23,7 +22,7 @@ from loopx.capabilities.catalog import build_capability_catalog_packet  # noqa: 
 from loopx.extensions.runtime import (  # noqa: E402
     default_extension_state_file,
     install_extension,
-    resolve_extension_runtime_binding,
+    run_standalone_extension,
 )
 from loopx.extensions.manifest import load_extension_manifest  # noqa: E402
 from loopx_finance_value_discovery.reducer import (  # noqa: E402
@@ -82,27 +81,19 @@ def main() -> int:
                 execute=True,
             )
             assert installed["doctor"]["verified"] is True
-            binding = resolve_extension_runtime_binding(
+            receipt = run_standalone_extension(
                 "loopx-finance-value-discovery",
                 state_file=state_file,
-                protocol="finance_value_discovery_extension_v0",
-                permission="finance.discovery.reduce",
-            )
-            completed = subprocess.run(
-                [str(value) for value in binding["argv"]],
-                input=json.dumps(evidence),
-                capture_output=True,
-                check=False,
-                text=True,
-                timeout=int(binding["timeout_seconds"]),
+                request=evidence,
+                execute=True,
             )
         finally:
             if previous_pythonpath is None:
                 os.environ.pop("PYTHONPATH", None)
             else:
                 os.environ["PYTHONPATH"] = previous_pythonpath
-        assert completed.returncode == 0, completed.stderr
-        assert json.loads(completed.stdout) == direct
+        assert receipt["status"] == "succeeded"
+        assert receipt["provider_result"] == direct
 
     print("finance-value-discovery-extension-smoke: ok")
     return 0

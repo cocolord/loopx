@@ -83,6 +83,24 @@ failed probe leaves the current revision untouched. Activation state contains
 validated manifest snapshots and revision ids in the private LoopX runtime
 root; it does not contain provider output or credentials.
 
+Standalone extensions use the same managed command shape as built-in
+capabilities: LoopX accepts a bounded request, previews by default, executes
+only with `--execute`, and returns a structured receipt. The v0 invocation
+contract is:
+
+```bash
+loopx extension run <extension-id> --input-json <path-or-> [--execute]
+```
+
+The active manifest fixes the executable, arguments, protocol, permissions,
+timeout, and revision. The caller supplies one JSON object over stdin and the
+provider must return one JSON object over stdout. LoopX does not accept an
+arbitrary executable path or argument passthrough. `run` never installs a
+missing extension, and it rejects extensions that implement a capability;
+those providers remain reachable only through their capability-facing LoopX
+command. Direct provider binaries are implementation and debugging surfaces,
+not the supported management API.
+
 `disable` is reversible, but `enable` never trusts an earlier readiness result:
 it reruns the configured doctor and changes the enabled bit only after that
 probe succeeds. A successful doctor binds readiness to both the active manifest
@@ -263,14 +281,15 @@ facts do not belong in the generic extension manifest or lifecycle state.
 packaged standalone workflow. Its manifest registers only the
 `finance_value_discovery_extension_v0` runtime; it does not create a capability
 catalog entry or a `value-connectors` route. After an explicit install and
-successful doctor probe, run the extension-owned command directly:
+successful doctor probe, invoke it through the managed extension command:
 
 ```bash
 loopx extension install \
   --manifest extensions/loopx-finance-value-discovery/extension.toml \
   --execute
-loopx-finance-value-discovery reduce \
+loopx extension run loopx-finance-value-discovery \
   --input-json extensions/loopx-finance-value-discovery/examples/paypal-debeta-discovery.json \
+  --execute \
   --format json
 ```
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from copy import deepcopy
 from pathlib import Path
@@ -10,11 +9,11 @@ from pathlib import Path
 import pytest
 
 from loopx.capabilities.catalog import build_capability_catalog_packet
+from loopx.cli import main
 from loopx.extensions.manifest import load_extension_manifest
 from loopx.extensions.runtime import (
     default_extension_state_file,
     install_extension,
-    resolve_extension_runtime_binding,
 )
 
 
@@ -165,23 +164,28 @@ def test_provider_doctor_is_side_effect_free() -> None:
 def test_standalone_extension_runs_through_verified_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _, runtime_root = _installed_manifest(tmp_path, monkeypatch)
-    binding = resolve_extension_runtime_binding(
-        "loopx-finance-value-discovery",
-        state_file=default_extension_state_file(runtime_root),
-        protocol="finance_value_discovery_extension_v0",
-        permission="finance.discovery.reduce",
+    assert (
+        main(
+            [
+                "--runtime-root",
+                str(runtime_root),
+                "--format",
+                "json",
+                "extension",
+                "run",
+                "loopx-finance-value-discovery",
+                "--input-json",
+                str(EXAMPLE),
+                "--execute",
+            ]
+        )
+        == 0
     )
-    completed = subprocess.run(
-        [str(value) for value in binding["argv"]],
-        input=json.dumps(_example()),
-        capture_output=True,
-        check=False,
-        text=True,
-        timeout=int(binding["timeout_seconds"]),
-    )
-    assert completed.returncode == 0, completed.stderr
-    packet = json.loads(completed.stdout)
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["status"] == "succeeded"
+    packet = receipt["provider_result"]
     assert packet["schema_version"] == "finance_value_discovery_packet_v0"
     assert packet["projection"]["next_targets"] == ["PYPL"]
