@@ -94,12 +94,19 @@ commands delegate to those providers.
 | `content_ops_public_handle` | `content-ops` | native | public-handle observation | none |
 | `social_browser_x` | `content-ops` | migrated | install-check, public-handle packet, and gated plan | exact profile/post/reply gate required |
 | `agent_reach_ops_source_map` | `content-ops` | mapped | `loopx value-connectors source-map --connector agent_reach_ops_source_map --format json`; [profile note](agent-reach-ops-source-map.md) | publish/audit record required for every external write |
+| `finance_market_snapshot` | none | migrated to standalone extension | migration packet only; no Finance execution | none |
 | `botmail_identity` | `content-ops` | mapped | install-check only | exact send gate required |
 | `community_channel` | `content-ops` | mapped | install-check and plan | exact account/message gate required |
 
 `migrated` means the implementation module is owned by the outcome capability.
 `native` means the command already lived there. `mapped` records the intended
 owner without pretending that the implementation has moved.
+
+`finance_market_snapshot` is retained only as an upgrade migration id. Its
+`source-map` and `install-check` packets point agents to the independently
+packaged `loopx-finance-value-discovery` extension and never perform Finance
+work. See the [migration packet](finance-market-snapshot-probe.md). The old id
+must not be used for new integrations.
 
 ## Why This Is Not Just A Plan
 

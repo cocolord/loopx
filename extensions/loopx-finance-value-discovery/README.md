@@ -94,7 +94,12 @@ loopx extension run loopx-finance-value-discovery \
   --format json
 ```
 
-There is no `value-connectors` compatibility route. The package binary is a
-provider implementation and developer-debugging surface, not the supported
+There is no `value-connectors` Finance execution route. The package binary is
+a provider implementation and developer-debugging surface, not the supported
 management entrypoint. Callers install and invoke this independently versioned
 extension through `loopx extension`.
+
+The retired `finance_market_snapshot` value-connector selectors remain only as
+machine-readable migration tombstones for upgrades. They point to this
+extension but cannot execute it, register a capability, or install an absent
+provider implicitly.

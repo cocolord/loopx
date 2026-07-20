@@ -7,6 +7,9 @@ from ..content_ops.social_browser_x import (
     SOCIAL_BROWSER_X_PROVIDER_MODULE,
     build_social_browser_x_provider_packet,
 )
+from .finance_extension_migration import (
+    build_finance_extension_migration_contract,
+)
 
 
 VALUE_CONNECTOR_SOURCE_MAP_PACKET_SCHEMA_VERSION = (
@@ -25,6 +28,7 @@ SOURCE_PROFILE_IDS = {
     "content_ops_public_handle",
     "social_browser_x",
     "agent_reach_ops_source_map",
+    "finance_market_snapshot",
 }
 
 OUTCOME_PROVIDER_BINDINGS: dict[str, dict[str, str | None]] = {
@@ -51,6 +55,11 @@ OUTCOME_PROVIDER_BINDINGS: dict[str, dict[str, str | None]] = {
     "agent_reach_ops_source_map": {
         "outcome_capability_id": "content-ops",
         "provider_binding_state": "mapped",
+        "provider_module": None,
+    },
+    "finance_market_snapshot": {
+        "outcome_capability_id": None,
+        "provider_binding_state": "migrated_to_extension",
         "provider_module": None,
     },
     "botmail_identity": {
@@ -117,6 +126,28 @@ def _source_profile(
 
 def _source_profiles() -> list[dict[str, Any]]:
     social_browser_x = build_social_browser_x_provider_packet()
+    finance_migration = build_finance_extension_migration_contract()
+    finance_profile = _source_profile(
+        connector_id="finance_market_snapshot",
+        status="migrated_to_extension",
+        route_type="legacy extension migration",
+        boundary="local_extension_migration",
+        safe_uses=[
+            "discover that the legacy connector moved to a standalone extension",
+            "inspect exact provider installation, registration, and run preconditions",
+            "stop when the separately distributed provider is unavailable",
+        ],
+        commands=[
+            step["command"] for step in finance_migration["agent_start_sequence"]
+        ],
+        evidence_schema="finance_market_snapshot_probe_packet_v0",
+        maturity_hint=(
+            "Migration metadata only; this compatibility profile performs no "
+            "finance reads and owns no Finance capability."
+        ),
+        stop_conditions=list(finance_migration["blocked_when"]),
+    )
+    finance_profile["migration"] = finance_migration
     return [
         _source_profile(
             connector_id="github_public_channel",
@@ -206,6 +237,7 @@ def _source_profiles() -> list[dict[str, Any]]:
                 "draft would quote raw provider bodies beyond public-safe excerpts",
             ],
         ),
+        finance_profile,
     ]
 
 
@@ -234,7 +266,7 @@ def _generic_evidence_card_schema() -> dict[str, Any]:
     return {
         "schema_version": "connector_source_signal_v0",
         "connector_id": "<source profile id>",
-        "channel": "github | x | web | rss | v2ex | bilibili | other",
+        "channel": "github | x | web | rss | v2ex | bilibili | finance | other",
         "backend": "public-safe backend name",
         "query_or_target": "public-safe query, handle, symbol, URL, or topic",
         "title": "public-safe title or compact label",
@@ -382,6 +414,16 @@ def render_value_connector_source_map_markdown(payload: dict[str, Any]) -> str:
         )
         for command in profile.get("commands") or []:
             lines.append(f"  - `{command}`")
+        migration = profile.get("migration")
+        if isinstance(migration, Mapping):
+            lines.extend(
+                [
+                    f"- replacement_extension_id: `{migration.get('replacement_extension_id')}`",
+                    "- replacement_capability_id: `none`",
+                    "- automatic_provider_install_supported: "
+                    f"`{migration.get('automatic_provider_install_supported')}`",
+                ]
+            )
         if profile.get("write_gate"):
             lines.append(f"- write_gate: {profile.get('write_gate')}")
         lines.append("")

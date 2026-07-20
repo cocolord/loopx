@@ -300,6 +300,15 @@ require dilution and terminal-risk evidence, then falsify the candidate before
 selecting at most one successor. The reducer performs no live reads, gives no
 price target or advice, and cannot trade or start a continuous watch.
 
+For upgrade compatibility, the retired
+`value-connectors ... --connector finance_market_snapshot` selectors remain as
+migration tombstones. They return `value_connector_extension_migration_v0`
+with ordered extension startup prerequisites; they do not execute Finance or
+restore a Finance capability. Source checkouts can install the co-located
+provider package before registration. Packaged LoopX users still need a
+separately distributed provider artifact, so agents must stop rather than
+claiming automatic installation when that artifact is unavailable.
+
 Runtime-required permissions must be a subset of the provider's declared
 permissions. Declaring either does not grant authority: existing LoopX goal
 boundaries, user gates, and external-write authorization still decide whether

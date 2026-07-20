@@ -94,6 +94,44 @@ def test_manifest_and_paypal_example_preserve_extension_boundary() -> None:
     assert packet["boundary"]["continuous_watch_allowed"] is False
 
 
+@pytest.mark.parametrize("legacy_command", ["source-map", "install-check"])
+def test_legacy_connector_returns_extension_migration_packet(
+    legacy_command: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert (
+        main(
+            [
+                "--format",
+                "json",
+                "value-connectors",
+                legacy_command,
+                "--connector",
+                "finance_market_snapshot",
+            ]
+        )
+        == 0
+    )
+    packet = json.loads(capsys.readouterr().out)
+    item = (
+        packet["source_profiles"][0]
+        if legacy_command == "source-map"
+        else packet["checks"][0]
+    )
+    migration = item["migration"]
+    assert item["status"] == "migrated_to_extension"
+    assert migration["replacement_extension_id"] == (
+        "loopx-finance-value-discovery"
+    )
+    assert migration["replacement_capability_id"] is None
+    assert migration["automatic_provider_install_supported"] is False
+    assert migration["packaged_loopx_only_start_supported"] is False
+    assert migration["agent_start_mode"] == (
+        "guided_when_provider_source_is_available"
+    )
+    assert migration["truth_contract"]["legacy_connector_executes_finance"] is False
+
+
 def test_group_wide_derating_or_missing_controls_cannot_advance() -> None:
     group_wide = _example()
     group_wide["cards"][0]["relative_signal"] = "group_wide"

@@ -69,6 +69,7 @@ def register_value_connector_commands(
         choices=[
             "all",
             "agent_reach_ops_source_map",
+            "finance_market_snapshot",
             "github_public_channel",
             "botmail_identity",
             "community_channel",

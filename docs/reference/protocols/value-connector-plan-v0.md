@@ -83,6 +83,9 @@ loopx value-connectors plan \
 | `github_public_channel_probe_packet_v0` | Starter connector output for public GitHub issue/PR/discussion metadata. |
 | `github_public_reply_monitor_packet_v0` | Starter connector output for public maintainer reply detection after a LoopX comment. |
 | `content_ops_social_browser_x_provider_v0` | Content-ops-owned source, install, and metadata-only trial contract behind the compatibility facade. |
+| `value_connector_extension_migration_v0` | Compatibility tombstone mapping a retired connector id to an independently managed extension without executing the retired connector. |
+| `finance_market_snapshot_profile_v0` | Retired Finance planning profile; explicit legacy requests now return extension migration metadata. |
+| `finance_market_snapshot_probe_packet_v0` | Historical Finance probe evidence id retained only for migration lineage. |
 | `value_connector_install_check_packet_v0` | Local install/use checklist for connector starters. |
 
 ## Boundaries
@@ -96,6 +99,21 @@ The contract is valid only when:
   local paths, and raw provider payloads are absent;
 - `truth_contract.plan_only=true` for plans;
 - starter probes report whether a bounded external read happened.
+
+## Retired Connector Migration
+
+`finance_market_snapshot` no longer owns Finance execution and does not map to
+a LoopX capability. To keep upgrades diagnosable, the legacy `source-map` and
+`install-check` selectors return a `value_connector_extension_migration_v0`
+record pointing to `loopx-finance-value-discovery`.
+
+The migration record is guidance, not implicit installation. It states whether
+the provider is separately distributed, names the source-checkout package and
+manifest paths, and gives an ordered inspect, install, register, and run
+sequence. An agent may execute local environment writes only when its active
+authority permits them. If the extension source or package is unavailable, it
+must stop with `provider source required` instead of recreating the old
+connector or inventing a `finance-value-discovery` capability.
 
 ## Starter Connector
 
