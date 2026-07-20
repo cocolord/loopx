@@ -253,7 +253,7 @@ facts do not belong in the generic extension manifest or lifecycle state.
 
 ### Finance value-discovery sample
 
-`extensions/finance-value-discovery/` is a co-located, independently packaged
+`extensions/loopx-finance-value-discovery/` is a co-located, independently packaged
 outcome provider. Its manifest provides the `finance-value-discovery`
 capability and implements `finance_value_discovery_provider_v0`. After an
 explicit install and successful doctor probe, the legacy command remains a
@@ -261,10 +261,10 @@ lifecycle-checked delegate:
 
 ```bash
 loopx extension install \
-  --manifest extensions/finance-value-discovery/extension.toml \
+  --manifest extensions/loopx-finance-value-discovery/extension.toml \
   --execute
 loopx value-connectors finance-discovery \
-  --input-json extensions/finance-value-discovery/examples/paypal-debeta-discovery.json \
+  --input-json extensions/loopx-finance-value-discovery/examples/paypal-debeta-discovery.json \
   --format json
 ```
 

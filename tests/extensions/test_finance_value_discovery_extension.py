@@ -20,7 +20,7 @@ from loopx.extensions.runtime import default_extension_state_file, install_exten
 
 
 ROOT = Path(__file__).resolve().parents[2]
-EXTENSION_ROOT = ROOT / "extensions" / "finance-value-discovery"
+EXTENSION_ROOT = ROOT / "extensions" / "loopx-finance-value-discovery"
 EXTENSION_SRC = EXTENSION_ROOT / "src"
 MANIFEST = EXTENSION_ROOT / "extension.toml"
 EXAMPLE = EXTENSION_ROOT / "examples" / "paypal-debeta-discovery.json"

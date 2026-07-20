@@ -7,7 +7,7 @@ Status: co-located optional LoopX extension sample.
 - capability id: `finance-value-discovery`
 - provider id: `loopx-finance-value-discovery`
 - origin: `extension`
-- placement: `extensions/finance-value-discovery/`
+- placement: `extensions/loopx-finance-value-discovery/`
 
 The caller-visible outcome is a finite, falsifiable public-finance research
 packet. The implementation has its own package, dependencies, installation,
@@ -80,9 +80,9 @@ Install the provider package, then register its manifest with the LoopX
 extension runtime:
 
 ```bash
-python3 -m pip install ./extensions/finance-value-discovery
+python3 -m pip install ./extensions/loopx-finance-value-discovery
 loopx extension install \
-  --manifest extensions/finance-value-discovery/extension.toml \
+  --manifest extensions/loopx-finance-value-discovery/extension.toml \
   --execute \
   --format json
 ```
@@ -91,7 +91,7 @@ Run the provider directly:
 
 ```bash
 loopx-finance-value-discovery reduce \
-  --input-json extensions/finance-value-discovery/examples/paypal-debeta-discovery.json \
+  --input-json extensions/loopx-finance-value-discovery/examples/paypal-debeta-discovery.json \
   --format json
 ```
 
@@ -100,6 +100,6 @@ doctor-ready provider by capability and protocol:
 
 ```bash
 loopx value-connectors finance-discovery \
-  --input-json extensions/finance-value-discovery/examples/paypal-debeta-discovery.json \
+  --input-json extensions/loopx-finance-value-discovery/examples/paypal-debeta-discovery.json \
   --format json
 ```
