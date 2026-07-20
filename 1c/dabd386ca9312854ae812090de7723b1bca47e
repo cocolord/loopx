@@ -1,0 +1,31 @@
+docs/reference/extensions.md
+  s_5ba4f4e78e5a19::t_46767ef0b28c90 254-277
+extensions/finance-value-discovery/README.md
+  s_7e7438a57a53a0::t_1c16029c6c9cb1 1-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1cdabd386ca9312854ae812090de7723b1bca47e",
+  "prompts": {},
+  "sessions": {
+    "s_5ba4f4e78e5a19": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f7e3e-ca10-7a72-b18e-42e8f11b9892",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    },
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
