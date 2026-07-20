@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Prove finance extension semantics, lifecycle binding, and compatibility."""
+"""Prove standalone finance extension semantics and lifecycle binding."""
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -19,15 +20,10 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(EXTENSION_SRC))
 
 from loopx.capabilities.catalog import build_capability_catalog_packet  # noqa: E402
-from loopx.capabilities.value_connectors.finance_extension import (  # noqa: E402
-    invoke_finance_value_discovery_extension,
-)
-from loopx.capabilities.value_connectors.source_map import (  # noqa: E402
-    build_value_connector_source_map_packet,
-)
 from loopx.extensions.runtime import (  # noqa: E402
     default_extension_state_file,
     install_extension,
+    resolve_extension_runtime_binding,
 )
 from loopx.extensions.manifest import load_extension_manifest  # noqa: E402
 from loopx_finance_value_discovery.reducer import (  # noqa: E402
@@ -86,24 +82,27 @@ def main() -> int:
                 execute=True,
             )
             assert installed["doctor"]["verified"] is True
-            delegated = invoke_finance_value_discovery_extension(
-                evidence,
-                runtime_root=runtime_root,
+            binding = resolve_extension_runtime_binding(
+                "loopx-finance-value-discovery",
+                state_file=state_file,
+                protocol="finance_value_discovery_extension_v0",
+                permission="finance.discovery.reduce",
+            )
+            completed = subprocess.run(
+                [str(value) for value in binding["argv"]],
+                input=json.dumps(evidence),
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=int(binding["timeout_seconds"]),
             )
         finally:
             if previous_pythonpath is None:
                 os.environ.pop("PYTHONPATH", None)
             else:
                 os.environ["PYTHONPATH"] = previous_pythonpath
-        assert delegated == direct
-
-    source_map = build_value_connector_source_map_packet(
-        connector="finance_market_snapshot"
-    )["source_profiles"][0]
-    assert "outcome_capability_id" not in source_map
-    assert source_map["delivery_type"] == "standalone_extension"
-    assert source_map["extension_binding_state"] == "migrated"
-    assert source_map["extension_id"] == "loopx-finance-value-discovery"
+        assert completed.returncode == 0, completed.stderr
+        assert json.loads(completed.stdout) == direct
 
     print("finance-value-discovery-extension-smoke: ok")
     return 0

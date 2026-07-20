@@ -25,10 +25,9 @@ SOURCE_PROFILE_IDS = {
     "content_ops_public_handle",
     "social_browser_x",
     "agent_reach_ops_source_map",
-    "finance_market_snapshot",
 }
 
-PROFILE_OWNER_BINDINGS: dict[str, dict[str, str | None]] = {
+OUTCOME_PROVIDER_BINDINGS: dict[str, dict[str, str | None]] = {
     "github_public_channel": {
         "outcome_capability_id": "issue-fix",
         "provider_binding_state": "migrated",
@@ -54,11 +53,6 @@ PROFILE_OWNER_BINDINGS: dict[str, dict[str, str | None]] = {
         "provider_binding_state": "mapped",
         "provider_module": None,
     },
-    "finance_market_snapshot": {
-        "delivery_type": "standalone_extension",
-        "extension_binding_state": "migrated",
-        "extension_id": "loopx-finance-value-discovery",
-    },
     "botmail_identity": {
         "outcome_capability_id": "content-ops",
         "provider_binding_state": "mapped",
@@ -72,10 +66,10 @@ PROFILE_OWNER_BINDINGS: dict[str, dict[str, str | None]] = {
 }
 
 
-def _profile_owner_binding(connector_id: str) -> dict[str, str | None]:
-    binding = PROFILE_OWNER_BINDINGS.get(connector_id)
+def _outcome_provider_binding(connector_id: str) -> dict[str, str | None]:
+    binding = OUTCOME_PROVIDER_BINDINGS.get(connector_id)
     if binding is None:
-        raise ValueError(f"connector {connector_id!r} has no owner binding")
+        raise ValueError(f"connector {connector_id!r} has no outcome provider binding")
     return dict(binding)
 
 
@@ -117,7 +111,7 @@ def _source_profile(
             "requested action would capture raw private content",
             "requested action would perform an external write without an audit gate",
         ],
-        **_profile_owner_binding(connector_id),
+        **_outcome_provider_binding(connector_id),
     }
 
 
@@ -212,27 +206,6 @@ def _source_profiles() -> list[dict[str, Any]]:
                 "draft would quote raw provider bodies beyond public-safe excerpts",
             ],
         ),
-        _source_profile(
-            connector_id="finance_market_snapshot",
-            status="probed_candidate_profile",
-            route_type="public market snapshot probe",
-            boundary="public_no_login",
-            safe_uses=[
-                "plan finance information pulls as public/reference snapshots",
-                "compare public source availability such as official docs, public APIs, or OSS wrappers",
-                "surface a user gate before credentials, paid feeds, trading, or portfolio reads",
-            ],
-            commands=[
-                "loopx value-connectors plan --connector-id finance_market_snapshot --connector-kind custom_connector --channel 'public finance snapshot' --stage observe --target-ref '<market or symbol scope>' --external-read --money-metric '<research or decision-support value>' --success-metric '<fresh public snapshot with source warnings>' --kill-condition '<stale source, paid gate, credential need, or trading intent>' --format json",
-            ],
-            evidence_schema="finance_market_snapshot_probe_v0",
-            maturity_hint="Treat market data as reference evidence, not financial advice; source freshness and license matter.",
-            stop_conditions=[
-                "request needs account credentials, AK/SK, portfolio data, paid provider data, or trading action",
-                "source freshness or license cannot be stated",
-                "user asks for investment advice instead of source-backed information retrieval",
-            ],
-        ),
     ]
 
 
@@ -244,7 +217,7 @@ def _action_gated_profiles() -> list[dict[str, Any]]:
             "purpose": "email or botmail identity for replies and outreach",
             "safe_prepare_command": "loopx value-connectors plan --connector-id botmail_identity --connector-kind botmail_identity ... --format json",
             "write_gate": "exact sender, recipient, subject, body, metric, and stop condition required",
-            **_profile_owner_binding("botmail_identity"),
+            **_outcome_provider_binding("botmail_identity"),
         },
         {
             "connector_id": "community_channel",
@@ -252,7 +225,7 @@ def _action_gated_profiles() -> list[dict[str, Any]]:
             "purpose": "community reply or post after channel-rule review",
             "safe_prepare_command": "loopx value-connectors plan --connector-id community_channel --connector-kind community_channel ... --format json",
             "write_gate": "exact channel, account identity, message, value metric, and channel-rule fit required",
-            **_profile_owner_binding("community_channel"),
+            **_outcome_provider_binding("community_channel"),
         },
     ]
 
@@ -261,7 +234,7 @@ def _generic_evidence_card_schema() -> dict[str, Any]:
     return {
         "schema_version": "connector_source_signal_v0",
         "connector_id": "<source profile id>",
-        "channel": "github | x | web | rss | v2ex | bilibili | finance | other",
+        "channel": "github | x | web | rss | v2ex | bilibili | other",
         "backend": "public-safe backend name",
         "query_or_target": "public-safe query, handle, symbol, URL, or topic",
         "title": "public-safe title or compact label",
@@ -318,7 +291,6 @@ def build_value_connector_source_map_packet(
             1
             for profile in [*profiles, *action_gated]
             if profile.get("provider_binding_state") in {"migrated", "native"}
-            or profile.get("extension_binding_state") == "migrated"
         ),
         "read_first_loop": [
             "choose source profile",
@@ -400,14 +372,6 @@ def render_value_connector_source_map_markdown(payload: dict[str, Any]) -> str:
         if profile.get("provider_binding_state"):
             lines.append(
                 f"- provider_binding_state: `{profile.get('provider_binding_state')}`"
-            )
-        if profile.get("extension_id"):
-            lines.extend(
-                [
-                    f"- delivery_type: `{profile.get('delivery_type')}`",
-                    f"- extension_id: `{profile.get('extension_id')}`",
-                    f"- extension_binding_state: `{profile.get('extension_binding_state')}`",
-                ]
             )
         lines.extend(
             [

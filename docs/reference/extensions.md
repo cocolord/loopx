@@ -262,14 +262,14 @@ facts do not belong in the generic extension manifest or lifecycle state.
 `extensions/loopx-finance-value-discovery/` is a co-located, independently
 packaged standalone workflow. Its manifest registers only the
 `finance_value_discovery_extension_v0` runtime; it does not create a capability
-catalog entry. After an explicit install and successful doctor probe, the
-legacy command remains a lifecycle-checked delegate:
+catalog entry or a `value-connectors` route. After an explicit install and
+successful doctor probe, run the extension-owned command directly:
 
 ```bash
 loopx extension install \
   --manifest extensions/loopx-finance-value-discovery/extension.toml \
   --execute
-loopx value-connectors finance-discovery \
+loopx-finance-value-discovery reduce \
   --input-json extensions/loopx-finance-value-discovery/examples/paypal-debeta-discovery.json \
   --format json
 ```

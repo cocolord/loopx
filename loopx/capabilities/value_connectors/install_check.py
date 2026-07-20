@@ -60,17 +60,6 @@ def build_value_connector_install_check_packet(
             "external_write_capability": False,
         },
         {
-            "connector_id": "finance_market_snapshot",
-            "status": "probed_candidate",
-            "install": [
-                "Use `loopx value-connectors source-map --connector finance_market_snapshot --format json` for the boundary packet.",
-                "Plan finance information pulls as public/reference snapshots, not advice or trading actions.",
-                "Stop for credentials, AK/SK, paid feeds, private portfolio data, or trading intent.",
-            ],
-            "optional_tools": [],
-            "external_write_capability": False,
-        },
-        {
             "connector_id": "botmail_identity",
             "status": "host_connector_required",
             "install": [

@@ -94,7 +94,6 @@ def main() -> int:
     connector_ids = {item["connector_id"] for item in install["checks"]}
     assert "github_public_channel" in connector_ids, connector_ids
     assert "agent_reach_ops_source_map" in connector_ids, connector_ids
-    assert "finance_market_snapshot" in connector_ids, connector_ids
     assert "botmail_identity" in connector_ids, connector_ids
     assert "social_browser_x" in connector_ids, connector_ids
     assert_public_safe(install)
@@ -113,7 +112,6 @@ def main() -> int:
     assert "content_ops_public_handle" in profile_ids, profile_ids
     assert "social_browser_x" in profile_ids, profile_ids
     assert "agent_reach_ops_source_map" in profile_ids, profile_ids
-    assert "finance_market_snapshot" in profile_ids, profile_ids
     profiles = {
         item["connector_id"]: item for item in source_map["source_profiles"]
     }
@@ -131,15 +129,6 @@ def main() -> int:
         == "loopx.capabilities.content_ops.social_browser_x"
     )
     assert profiles["agent_reach_ops_source_map"]["outcome_capability_id"] == "content-ops"
-    assert "outcome_capability_id" not in profiles["finance_market_snapshot"]
-    assert (
-        profiles["finance_market_snapshot"]["delivery_type"] == "standalone_extension"
-    )
-    assert profiles["finance_market_snapshot"]["extension_binding_state"] == "migrated"
-    assert (
-        profiles["finance_market_snapshot"]["extension_id"]
-        == "loopx-finance-value-discovery"
-    )
     action_ids = {item["connector_id"] for item in source_map["action_gated_profiles"]}
     assert "botmail_identity" in action_ids, action_ids
     assert "community_channel" in action_ids, action_ids
@@ -150,8 +139,8 @@ def main() -> int:
     assert actions["community_channel"]["outcome_capability_id"] == "content-ops"
     assert source_map["projection"]["compatibility_facade"] is True
     assert source_map["projection"]["new_profile_ownership_allowed"] is False
-    assert source_map["projection"]["mapped_profile_count"] == 8
-    assert source_map["projection"]["migrated_profile_count"] == 5
+    assert source_map["projection"]["mapped_profile_count"] == 7
+    assert source_map["projection"]["migrated_profile_count"] == 4
     assert source_map["generic_evidence_card_schema"]["operation"] == "read", source_map
     assert "loopx value-connectors plan" in source_map["agent_prompt"], source_map
     assert_public_safe(source_map)
@@ -545,7 +534,6 @@ def main() -> int:
     assert "LoopX Value Connector Source Map" in source_map_markdown, source_map_markdown
     assert "agent_can_start_without_docs: `True`" in source_map_markdown, source_map_markdown
     assert "`github_public_channel`" in source_map_markdown, source_map_markdown
-    assert "`finance_market_snapshot`" in source_map_markdown, source_map_markdown
     assert_public_safe(source_map_markdown)
 
     reply_markdown = run_cli(

@@ -12,7 +12,6 @@ This optional workflow owns its command and packet contract. LoopX does not
 need a provider-neutral finance capability, so installing the extension must
 not add `finance-value-discovery` to the capability catalog. The package owns
 its dependencies, installation, doctor, enablement, and upgrade lifecycle.
-`value-connectors` retains only a compatibility delegate during migration.
 
 ## Contract
 
@@ -94,11 +93,5 @@ loopx-finance-value-discovery reduce \
   --format json
 ```
 
-The migration compatibility route resolves the installed, enabled,
-doctor-ready runtime directly by extension id and protocol:
-
-```bash
-loopx value-connectors finance-discovery \
-  --input-json extensions/loopx-finance-value-discovery/examples/paypal-debeta-discovery.json \
-  --format json
-```
+There is no `value-connectors` compatibility route. Callers install and invoke
+this independently versioned extension through its own lifecycle and command.

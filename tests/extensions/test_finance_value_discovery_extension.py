@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from copy import deepcopy
 from pathlib import Path
@@ -9,12 +10,12 @@ from pathlib import Path
 import pytest
 
 from loopx.capabilities.catalog import build_capability_catalog_packet
-from loopx.capabilities.value_connectors.source_map import (
-    build_value_connector_source_map_packet,
-)
-from loopx.cli import main
 from loopx.extensions.manifest import load_extension_manifest
-from loopx.extensions.runtime import default_extension_state_file, install_extension
+from loopx.extensions.runtime import (
+    default_extension_state_file,
+    install_extension,
+    resolve_extension_runtime_binding,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -161,37 +162,26 @@ def test_provider_doctor_is_side_effect_free() -> None:
     assert run(["--doctor"]) == 0
 
 
-def test_value_connectors_delegates_through_verified_runtime(
+def test_standalone_extension_runs_through_verified_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _, runtime_root = _installed_manifest(tmp_path, monkeypatch)
-
-    assert (
-        main(
-            [
-                "--runtime-root",
-                str(runtime_root),
-                "--format",
-                "json",
-                "value-connectors",
-                "finance-discovery",
-                "--input-json",
-                str(EXAMPLE),
-            ]
-        )
-        == 0
+    binding = resolve_extension_runtime_binding(
+        "loopx-finance-value-discovery",
+        state_file=default_extension_state_file(runtime_root),
+        protocol="finance_value_discovery_extension_v0",
+        permission="finance.discovery.reduce",
     )
-    packet = json.loads(capsys.readouterr().out)
+    completed = subprocess.run(
+        [str(value) for value in binding["argv"]],
+        input=json.dumps(_example()),
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=int(binding["timeout_seconds"]),
+    )
+    assert completed.returncode == 0, completed.stderr
+    packet = json.loads(completed.stdout)
     assert packet["schema_version"] == "finance_value_discovery_packet_v0"
     assert packet["projection"]["next_targets"] == ["PYPL"]
-
-    source_map = build_value_connector_source_map_packet(
-        connector="finance_market_snapshot"
-    )
-    binding = source_map["source_profiles"][0]
-    assert "outcome_capability_id" not in binding
-    assert binding["delivery_type"] == "standalone_extension"
-    assert binding["extension_binding_state"] == "migrated"
-    assert binding["extension_id"] == "loopx-finance-value-discovery"

@@ -12,11 +12,6 @@ from ..issue_fix.github_public import (
     render_github_public_channel_probe_markdown,
     render_github_public_reply_monitor_markdown,
 )
-from .finance_extension import (
-    FINANCE_VALUE_DISCOVERY_ERROR_SCHEMA_VERSION,
-    invoke_finance_value_discovery_extension,
-    render_finance_value_discovery_compatibility_markdown,
-)
 from .install_check import (
     build_value_connector_install_check_packet,
     render_value_connector_install_check_markdown,
@@ -74,7 +69,6 @@ def register_value_connector_commands(
         choices=[
             "all",
             "agent_reach_ops_source_map",
-            "finance_market_snapshot",
             "github_public_channel",
             "botmail_identity",
             "community_channel",
@@ -241,21 +235,6 @@ def register_value_connector_commands(
         default=10.0,
         help="Network/tool timeout for --fetch-metadata.",
     )
-    finance_parser = sub.add_parser(
-        "finance-discovery",
-        help=(
-            "Compatibility delegate for an installed, enabled, doctor-ready "
-            "loopx-finance-value-discovery extension."
-        ),
-    )
-    add_subcommand_format(finance_parser)
-    finance_parser.add_argument(
-        "--input-json",
-        required=True,
-        help="Path to a finance_value_discovery_input_v0 object, or '-' for stdin.",
-    )
-
-
 def handle_value_connector_command(
     args: argparse.Namespace,
     *,
@@ -317,25 +296,10 @@ def handle_value_connector_command(
                 render_github_public_reply_monitor_markdown,
             )
             return 0 if payload.get("ok") else 1
-        if args.value_connectors_command == "finance-discovery":
-            evidence = _load_json_object_or_array(args.input_json)
-            if not isinstance(evidence, dict):
-                raise ValueError("finance-discovery input must be a JSON object")
-            payload = invoke_finance_value_discovery_extension(
-                evidence,
-                runtime_root=getattr(args, "runtime_root", None),
-            )
-            print_payload(
-                payload,
-                output_format(args),
-                render_finance_value_discovery_compatibility_markdown,
-            )
-            return 0 if payload.get("ok") else 1
         if args.value_connectors_command != "plan":
             raise ValueError(
                 "value-connectors requires `install-check`, `plan`, "
-                "`source-map`, `github-public-probe`, `github-reply-monitor`, "
-                "or `finance-discovery`"
+                "`source-map`, `github-public-probe`, or `github-reply-monitor`"
             )
         if args.connector_id:
             missing = [
@@ -406,24 +370,6 @@ def handle_value_connector_command(
                 payload,
                 output_format(args),
                 render_github_public_reply_monitor_markdown,
-            )
-            return 1
-        if getattr(args, "value_connectors_command", None) == "finance-discovery":
-            payload = {
-                "ok": False,
-                "schema_version": FINANCE_VALUE_DISCOVERY_ERROR_SCHEMA_VERSION,
-                "mode": "finance-value-discovery",
-                "error": str(exc),
-                "external_reads_performed": False,
-                "external_writes_performed": False,
-                "investment_advice": False,
-                "trading_allowed": False,
-                "continuous_watch_allowed": False,
-            }
-            print_payload(
-                payload,
-                output_format(args),
-                render_finance_value_discovery_compatibility_markdown,
             )
             return 1
         payload = {

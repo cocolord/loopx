@@ -102,7 +102,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run(argv)
     except Exception as exc:
         print(
-            f"finance value-discovery provider failed: {type(exc).__name__}",
+            f"finance value-discovery extension failed: {type(exc).__name__}",
             file=sys.stderr,
         )
         return 2
