@@ -1,0 +1,29 @@
+docs/reference/extensions.md
+  s_7e7438a57a53a0::t_ec81e2b625fad5 129-132,142-145
+examples/finance-value-discovery-extension-smoke.py
+  s_7e7438a57a53a0::t_91816ebad23386 25,84
+loopx/cli_commands/extension.py
+  s_7e7438a57a53a0::t_dbde18c93e729f 20,142,226
+loopx/extensions/runtime.py
+  s_7e7438a57a53a0::t_6ce399492ebab1 727,734,744-748
+tests/extensions/test_extension_runtime.py
+  s_7e7438a57a53a0::t_0076f4df6322c5 38,271,279,296,304,314-320,356,392,436,529,1086,1135,1137-1140,1143,1149,1163,1180,1186,1188-1191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "96928095c2dc60fedd4786e2e6a6c367afb3518a",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

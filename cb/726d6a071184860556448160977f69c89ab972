@@ -1,0 +1,35 @@
+docs/reference/extensions.md
+  s_7e7438a57a53a0::t_d206fa18562edb 86-103,284,290,292
+examples/capability-extension-placement-doc-smoke.py
+  s_7e7438a57a53a0::t_6ca2834a36b2b7 28-29
+examples/finance-value-discovery-extension-smoke.py
+  s_7e7438a57a53a0::t_6824530e15268d 25,84,87-88,95-96
+extensions/loopx-finance-value-discovery/README.md
+  s_7e7438a57a53a0::t_737cbca47cb1cd 88,91,93,97-100
+loopx/cli_commands/extension.py
+  s_7e7438a57a53a0::t_e7ce2eadfeb17a 5,7,18,38-39,121-148,193-199,216
+loopx/extensions/runtime.py
+  s_7e7438a57a53a0::t_2c4b7f3c1f965f 10-11,29,31-32,735-877
+tests/extensions/test_extension_runtime.py
+  s_7e7438a57a53a0::t_14bb95bf2e0d3c 35,97-121,202,227-319,867-924
+tests/extensions/test_finance_value_discovery_extension.py
+  s_7e7438a57a53a0::t_a5064da5e0a21c 12,167,170-185,187-189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cb726d6a071184860556448160977f69c89ab972",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

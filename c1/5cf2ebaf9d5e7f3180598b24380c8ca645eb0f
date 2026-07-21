@@ -1,0 +1,35 @@
+examples/finance-value-discovery-extension-smoke.py
+  s_7e7438a57a53a0::t_3513b24c89b283 1-112
+tests/extensions/test_finance_value_discovery_extension.py
+  s_5ba4f4e78e5a19::t_16d21d002bfe49 1-217
+extensions/finance-value-discovery/examples/paypal-debeta-discovery.json
+  s_7e7438a57a53a0::t_1cb8bf8cec0f9c 1-184
+examples/value-connectors-github-public-probe-smoke.py
+  s_7e7438a57a53a0::t_ef0fe1dcc6434d 138-142,154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c15cf2ebaf9d5e7f3180598b24380c8ca645eb0f",
+  "prompts": {},
+  "sessions": {
+    "s_5ba4f4e78e5a19": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f7e3e-ca10-7a72-b18e-42e8f11b9892",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    },
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

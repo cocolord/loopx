@@ -1,0 +1,35 @@
+extensions/finance-value-discovery/extension.toml
+  s_7e7438a57a53a0::t_12d3204a15b1e9 1-27
+extensions/finance-value-discovery/pyproject.toml
+  s_7e7438a57a53a0::t_72cb42bf39a94d 1-17
+extensions/finance-value-discovery/src/loopx_finance_value_discovery/__init__.py
+  s_7e7438a57a53a0::t_018fecd24eede5 1-21
+extensions/finance-value-discovery/src/loopx_finance_value_discovery/cli.py
+  s_7e7438a57a53a0::t_a560ed10959c0d 1-112
+extensions/finance-value-discovery/src/loopx_finance_value_discovery/reducer.py
+  s_7e7438a57a53a0::t_7b2eb9a9fb976e 1-584
+loopx/capabilities/value_connectors/cli.py
+  s_7e7438a57a53a0::t_2770bd3647ac4e 15-19,115-117,131-137,144-153,244-256,302-304,320-333,337-338,354-355,390-394,405-427,429-436
+loopx/capabilities/value_connectors/finance_extension.py
+  s_7e7438a57a53a0::t_ef544523ed170b 1-97
+loopx/capabilities/value_connectors/source_map.py
+  s_7e7438a57a53a0::t_facae26991e353 12-14,16-18,59,61,106-107,115-116,290-293,297-299,361-365
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a37594d047815da8228b729c0eaaf519a770f665",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

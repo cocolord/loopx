@@ -1,0 +1,41 @@
+docs/reference/extensions.md
+  s_7e7438a57a53a0::t_d8d6daa92194f2 159-179
+loopx/capabilities/periodic_report/cli.py
+  s_7e7438a57a53a0::t_7f85ec24f93d68 12,19,127-128,157-177
+loopx/capabilities/periodic_report/extension_authority.py
+  s_7e7438a57a53a0::t_7aab9a9a619a19 1-78
+loopx/extensions/authority.py
+  s_7e7438a57a53a0::t_a4c4f64a5532a3 1-204
+loopx/extensions/openviking_periodic_report/activation.py
+  s_7e7438a57a53a0::t_89435abc6822d7 11-16,47-68,96,140,147-149
+loopx/extensions/openviking_periodic_report/provider.py
+  s_7e7438a57a53a0::t_15047bfad6d2da 19-21,26,164,182,186-194,201-203,256,311-323,334-335,338-342
+loopx/extensions/process_runtime.py
+  s_7e7438a57a53a0::t_ae341af905e425 3,46,56
+loopx/extensions/runtime.py
+  s_7e7438a57a53a0::t_65384e7134f086 872-931
+tests/extensions/test_extension_authority.py
+  s_7e7438a57a53a0::t_6163290736271b 1-109
+tests/extensions/test_extension_runtime.py
+  s_7e7438a57a53a0::t_c93b54cd06e9bc 30,313-333
+tests/extensions/test_openviking_periodic_report.py
+  s_7e7438a57a53a0::t_ee115352d197d1 6,8,14-17,131-138,140,153-172,216,237-239,265-340,345,347,368,374,382,387-390,392-409,411-430
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ca46f988eb3c604c5194b69c5d3580c9fc7768cd",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
