@@ -139,28 +139,29 @@ The active manifest fixes the executable, arguments, protocol, permissions,
 timeout, and revision. The caller supplies one JSON object over stdin and the
 provider must return one JSON object over stdout. LoopX does not accept an
 arbitrary executable path or argument passthrough. `run` never installs a
-missing extension, and it rejects extensions with `[[provides]]`,
-`[[implements]]`, or any declared permission; those providers are invoked
-through their capability or domain command. Extension lifecycle management is
-shared, but direct execution is reserved for zero-permission, runtime-only
-standalone extensions.
+missing extension, and it rejects extensions with `[[provides]]` or
+`[[implements]]`; those providers are invoked through their capability or
+domain command. A runtime-only Extension may declare permissions, but execution
+then requires `--authority-json` plus matching observed
+`--available-capability` values. Zero-permission Extensions need neither.
 Direct provider binaries are implementation and debugging surfaces; they are
 not the supported management API.
 
-The generic runner is deliberately non-effectful and grants no operation
-effects. Both manifest `permissions` and runtime `required_permissions` must
-be empty. Any operation needing read, write, send, publish, manage, or another
-declared authority must enter through a capability or domain command that can
-apply its domain policy before managed dispatch. Request files and stdin are capped while
+The generic runner never infers authority from a manifest. For permissioned
+runtime-only Extensions it validates a fresh
+`loopx_extension_authority_decision_v0` against the active id, revision,
+protocol, exact request digest, effect scope, declared permission set, expiry,
+and observed host capabilities. It then creates the same revision-bound
+execution envelope used by capability dispatch. Request files and stdin are capped while
 being read. Provider stdout and stderr are drained concurrently and the provider
 is started in a dedicated process group. Timeout or either output limit
 terminates the entire group, so a descendant cannot continue effects after
 LoopX reports that execution stopped.
 
-Effectful capability dispatch uses
-`loopx_extension_execution_envelope_v0`. The capability command, not the caller
-or provider, creates this minimal envelope after resolving one enabled,
-doctor-ready implementation and checking the domain activation policy. It binds:
+Effectful Extension and capability dispatch use
+`loopx_extension_execution_envelope_v0`. LoopX, not the caller or provider,
+creates this minimal envelope after resolving one enabled, doctor-ready runtime
+and checking typed authority or capability-owned domain policy. It binds:
 
 - the exact action;
 - structured effect scope;

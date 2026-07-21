@@ -1,0 +1,16 @@
+{
+  "schema_version": "futu_paper_trade_request_v0",
+  "operation": "submit_order",
+  "execute": true,
+  "order": {
+    "schema_version": "paper_trade_order_request_v0",
+    "account_ref": "futu-hk-sim-example",
+    "environment": "simulate",
+    "symbol": "HK.00700",
+    "side": "buy",
+    "quantity": 100,
+    "order_type": "market",
+    "time_in_force": "day",
+    "idempotency_key": "paper-tencent-example"
+  }
+}

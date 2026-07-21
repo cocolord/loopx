@@ -149,6 +149,16 @@ def register_extension_commands(
         help="Path to one provider request JSON object, or '-' for stdin.",
     )
     run.add_argument("--execute", action="store_true")
+    run.add_argument(
+        "--authority-json",
+        help="Typed authority decision required by permissioned extensions.",
+    )
+    run.add_argument(
+        "--available-capability",
+        action="append",
+        default=[],
+        help="Observed host capability available to the authority decision.",
+    )
 
 
 def _load_json_object(path_text: str) -> dict[str, object]:
@@ -223,10 +233,17 @@ def handle_extension_command(
                 execute=args.execute,
             )
         elif args.extension_command == "run":
+            authority = (
+                _load_json_object(args.authority_json)
+                if args.authority_json
+                else None
+            )
             payload = run_standalone_extension(
                 args.extension_id,
                 state_file=state_file,
                 request=_load_json_object(args.input_json),
+                authority_decision=authority,
+                available_capabilities=args.available_capability,
                 execute=args.execute,
             )
         else:
