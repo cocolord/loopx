@@ -1,0 +1,21 @@
+extensions/loopx-finance-value-discovery/README.md
+  s_5c245bbc8fbe1f::t_70321a242cfceb 35-104,167-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4c4b1f86d903c23f2ab9053e9a2053da39c80187",
+  "prompts": {},
+  "sessions": {
+    "s_5c245bbc8fbe1f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f7da8-3c65-7d11-8a1d-fa916c1a23bd",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
