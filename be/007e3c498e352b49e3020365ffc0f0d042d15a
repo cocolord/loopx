@@ -1,0 +1,25 @@
+loopx/cli_commands/extension.py
+  s_7e7438a57a53a0::t_f6f223619fa4ea 12,156-166,168
+loopx/extensions/_process.py
+  s_7e7438a57a53a0::t_d7ea886c551eae 1-142
+loopx/extensions/runtime.py
+  s_7e7438a57a53a0::t_7501b72e2f819e 13,32,770-779,811-817,823,826-827,832-838,842
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "be007e3c498e352b49e3020365ffc0f0d042d15a",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
