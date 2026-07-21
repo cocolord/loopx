@@ -1,0 +1,47 @@
+docs/capabilities/value-connectors/README.md
+  s_7e7438a57a53a0::t_e021685cb58212 106-110
+docs/capabilities/value-connectors/finance-market-snapshot-probe.md
+  s_7e7438a57a53a0::t_701391f23ad0d3 20-23,26
+docs/reference/extensions.md
+  s_7e7438a57a53a0::t_993ffbb6ae8c1b 142-146,150-157,359-366
+docs/reference/protocols/value-connector-plan-v0.md
+  s_7e7438a57a53a0::t_5f4193cacd2913 106-109
+examples/value-connectors-finance-probe-doc-smoke.py
+  s_7e7438a57a53a0::t_5de050790832c9 32-37,41
+extensions/loopx-finance-value-discovery/README.md
+  s_7e7438a57a53a0::t_b188ba1297fa2f 97-101
+extensions/loopx-finance-value-discovery/extension.toml
+  s_7e7438a57a53a0::t_fd2de97f51fa68 5,11
+loopx/capabilities/value_connectors/cli.py
+  s_7e7438a57a53a0::t_f1465635138a6b 19-23,312-319
+loopx/capabilities/value_connectors/finance_extension_migration.py
+  s_7e7438a57a53a0::t_b9a3ac67578c01 3,16,18,86-108
+loopx/extensions/runtime.py
+  s_7e7438a57a53a0::t_81c2fdcde17f14 761,763-766
+loopx/extensions/scaffold.py
+  s_7e7438a57a53a0::t_fe45977d1ca4f1 47,53,155-157,249
+tests/extensions/test_extension_runtime.py
+  s_7e7438a57a53a0::t_bde0e470bb78a2 106,114-118,120-128,244,331-332,334,355-359,366
+tests/extensions/test_extension_scaffold.py
+  s_7e7438a57a53a0::t_77bee1cb4e4dd5 77-78
+tests/extensions/test_finance_value_discovery_extension.py
+  s_7e7438a57a53a0::t_d2ca38262c4f0c 78-79,133-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "73495f2cc8bf71b8e1e0b15f333e33bca9eb1b62",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
