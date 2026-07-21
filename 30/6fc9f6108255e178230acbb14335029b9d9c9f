@@ -1,0 +1,33 @@
+docs/reference/extensions.md
+  s_7e7438a57a53a0::t_686f85fa5ccaee 265-266,272
+examples/finance-value-discovery-extension-smoke.py
+  s_7e7438a57a53a0::t_a67452a679f9d7 2,8,26,85-97,104-105
+examples/value-connectors-github-public-probe-smoke.py
+  s_7e7438a57a53a0::t_2cb8f757fae7eb 142-143
+extensions/loopx-finance-value-discovery/README.md
+  s_7e7438a57a53a0::t_e18a61c3c2a0b8 96-97
+extensions/loopx-finance-value-discovery/src/loopx_finance_value_discovery/cli.py
+  s_7e7438a57a53a0::t_b09cb5304c8e86 105
+loopx/capabilities/value_connectors/cli.py
+  s_7e7438a57a53a0::t_754e51153bcf52 302
+tests/extensions/test_finance_value_discovery_extension.py
+  s_7e7438a57a53a0::t_0c2ee462d20860 5,14-18,165,170-174,176-185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "306fc9f6108255e178230acbb14335029b9d9c9f",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

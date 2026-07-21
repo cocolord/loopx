@@ -1,0 +1,29 @@
+examples/value-connectors-github-public-probe-smoke.py
+  s_7e7438a57a53a0::t_b2424eebfe60c1 49-53,88-91,96-98,111-113,124,126-128,140-142,181-183,202-205,278-281,288-290,343-345,350,442-444,517-519,538-541,553-558,573-578
+loopx/capabilities/value_connectors/cli.py
+  s_7e7438a57a53a0::t_04ef2b1eb9a1b8 239-240
+loopx/capabilities/value_connectors/finance_extension_migration.py
+  s_7e7438a57a53a0::t_485f338d7ca028 8,43
+loopx/capabilities/value_connectors/install_check.py
+  s_7e7438a57a53a0::t_9d1c7495153b1f 70
+tests/extensions/test_finance_value_discovery_extension.py
+  s_7e7438a57a53a0::t_9544bbf188189b 123,127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3fa5eb4f28c15017eb242716b19228cd249cebef",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
