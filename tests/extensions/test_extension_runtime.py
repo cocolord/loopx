@@ -391,7 +391,7 @@ Path({json.dumps(str(marker))}).write_text("invoked", encoding="utf-8")
     state_file = tmp_path / "extensions.json"
     install_extension(manifest, state_file=state_file, execute=True)
 
-    with pytest.raises(ValueError, match="standalone extension run grants no"):
+    with pytest.raises(ValueError, match="requires a typed authority decision"):
         run_standalone_extension(
             "test-standalone-extension",
             state_file=state_file,

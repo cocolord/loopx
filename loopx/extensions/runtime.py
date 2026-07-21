@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from ..file_lock import exclusive_file_lock
+from .authority import (
+    build_authorized_extension_request,
+    validate_extension_authority_decision,
+)
 from .process_runtime import run_capped_process
 from .manifest import load_extension_manifest
 from .readiness import (
@@ -728,6 +732,8 @@ def run_standalone_extension(
     *,
     state_file: str | Path,
     request: Mapping[str, Any],
+    authority_decision: Mapping[str, Any] | None = None,
+    available_capabilities: Sequence[str] = (),
     execute: bool = False,
 ) -> dict[str, Any]:
     """Run one lifecycle-gated standalone extension over bounded JSON stdin/stdout."""
@@ -758,17 +764,38 @@ def run_standalone_extension(
             f"extension `{extension_id}` does not declare permissions "
             f"{missing_permissions}"
         )
+    provider_request = dict(request)
+    authority_validated = False
     if declared_permissions:
-        raise ValueError(
-            f"extension `{extension_id}` declares permissions "
-            f"{sorted(declared_permissions)}; standalone extension run grants no "
-            "effect dispatch, so use a capability or domain command that owns "
-            "policy checks and a request-bound execution envelope"
-        )
+        if execute and authority_decision is None:
+            raise ValueError(
+                f"extension `{extension_id}` declares permissions "
+                f"{sorted(declared_permissions)}; effectful extension run requires "
+                "a typed authority decision"
+            )
+        if authority_decision is not None:
+            validated_authority = validate_extension_authority_decision(
+                authority_decision,
+                extension_id=extension_id,
+                extension_revision=active_revision,
+                protocol=str(runtime["protocol"]),
+                required_permissions=required_permissions,
+                available_capabilities=available_capabilities,
+                request=request,
+            )
+            provider_request = build_authorized_extension_request(
+                request,
+                authority_decision=validated_authority,
+                extension_id=extension_id,
+                extension_revision=active_revision,
+            )
+            authority_validated = True
+    elif authority_decision is not None:
+        raise ValueError("permissionless extension run does not accept authority input")
 
     try:
         request_bytes = json.dumps(
-            dict(request),
+            provider_request,
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
@@ -790,17 +817,29 @@ def run_standalone_extension(
         "executed": False,
         "status": "ready" if not execute else "running",
         "input_schema_version": request.get("schema_version"),
+        "authority_validated": authority_validated,
     }
     if not execute:
         return receipt
 
     argv = [*verified_entrypoint.argv_prefix, *(runtime.get("args") or [])]
     try:
+        process_environment = dict(os.environ)
+        process_environment.update(
+            {
+                "LOOPX_EXTENSION_ID": extension_id,
+                "LOOPX_EXTENSION_REVISION": active_revision,
+                "LOOPX_EXTENSION_GRANTED_PERMISSIONS": ",".join(
+                    required_permissions
+                ),
+            }
+        )
         completed = run_capped_process(
             argv,
             stdin=request_bytes,
             timeout_seconds=int(runtime["timeout_seconds"]),
             output_limit_bytes=MAX_EXTENSION_RESPONSE_BYTES,
+            env=process_environment,
         )
     except OSError:
         return {
