@@ -1,0 +1,37 @@
+extensions/loopx-futu-paper-trade/README.md
+  s_7e7438a57a53a0::t_eca49fc293954e 1-60
+extensions/loopx-futu-paper-trade/examples/order.json
+  s_7e7438a57a53a0::t_713a7b00cfcae4 1-16
+extensions/loopx-futu-paper-trade/extension.toml
+  s_7e7438a57a53a0::t_fc6b170fd794a8 1-12
+extensions/loopx-futu-paper-trade/pyproject.toml
+  s_7e7438a57a53a0::t_2f51d67945f8e0 1-20
+extensions/loopx-futu-paper-trade/src/loopx_futu_paper_trade/__init__.py
+  s_7e7438a57a53a0::t_55441a2ae4d896 1-3
+extensions/loopx-futu-paper-trade/src/loopx_futu_paper_trade/cli.py
+  s_7e7438a57a53a0::t_381a6201a74426 1-52
+extensions/loopx-futu-paper-trade/src/loopx_futu_paper_trade/contract.py
+  s_7e7438a57a53a0::t_94c6ffa059cbf1 1-132
+extensions/loopx-futu-paper-trade/src/loopx_futu_paper_trade/provider.py
+  s_7e7438a57a53a0::t_a0ad3a0bc3b608 1-284
+extensions/loopx-futu-paper-trade/tests/test_provider.py
+  s_7e7438a57a53a0::t_7ca6b32c9da471 1-234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "066d3cbcf8fe2f9c08a267f2ee851d45dc293e28",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
