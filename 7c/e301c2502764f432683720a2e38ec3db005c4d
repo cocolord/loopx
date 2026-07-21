@@ -1,0 +1,23 @@
+docs/reference/extensions.md
+  s_7e7438a57a53a0::t_f17731040720ef 72-85
+loopx/extensions/scaffold.py
+  s_7e7438a57a53a0::t_bea97057fef370 85,108-117,133-134,152-188,207-210,234-235,299-301
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7ce301c2502764f432683720a2e38ec3db005c4d",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
