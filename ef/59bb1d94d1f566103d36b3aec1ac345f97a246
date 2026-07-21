@@ -1,0 +1,21 @@
+tests/extensions/test_extension_runtime.py
+  s_926726893ff7f9::t_d4f62a727bd89a 6,25-26,125-153,323-510
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ef59bb1d94d1f566103d36b3aec1ac345f97a246",
+  "prompts": {},
+  "sessions": {
+    "s_926726893ff7f9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8288-58db-7931-812f-89d0463ed62a",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
