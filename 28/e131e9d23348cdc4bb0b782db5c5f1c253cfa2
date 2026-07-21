@@ -1,0 +1,43 @@
+extensions/loopx-finance-value-discovery/examples/a-share-market-regime-2026-07-21.json
+  s_926726893ff7f9::t_92cced267aaf96 1-40
+extensions/loopx-finance-value-discovery/examples/us-market-regime-2026-07-20.json
+  s_926726893ff7f9::t_4db6d2335b66bc 1-42
+extensions/loopx-finance-value-discovery/extension.toml
+  s_7e7438a57a53a0::t_2200a0cc9fbd60 3
+extensions/loopx-finance-value-discovery/pyproject.toml
+  s_7e7438a57a53a0::t_d2ecd304c9b483 7-8
+extensions/loopx-finance-value-discovery/src/loopx_finance_value_discovery/__init__.py
+  s_7e7438a57a53a0::t_4ba27d83e8c5da 3-9,22-24,30,32
+extensions/loopx-finance-value-discovery/src/loopx_finance_value_discovery/cli.py
+  s_7e7438a57a53a0::t_98f56848f768a0 10-14,71-82,86-91,99,109-110,112-117,123-124
+extensions/loopx-finance-value-discovery/src/loopx_finance_value_discovery/market_regime.py
+  s_926726893ff7f9::t_622165770d755d 1-491
+tests/extensions/test_finance_value_discovery_extension.py
+  s_926726893ff7f9::t_7c9e0661022e97 25-28,32-34,45-48,235-373,402-431
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "28e131e9d23348cdc4bb0b782db5c5f1c253cfa2",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    },
+    "s_926726893ff7f9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8288-58db-7931-812f-89d0463ed62a",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
