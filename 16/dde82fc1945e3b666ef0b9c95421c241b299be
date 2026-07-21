@@ -1,0 +1,29 @@
+docs/reference/extensions.md
+  s_7e7438a57a53a0::t_c63ab67a15befd 147-154,366-368
+loopx/cli_commands/extension.py
+  s_7e7438a57a53a0::t_8c20dc6a35546f 12,156-166,168
+loopx/extensions/process_runtime.py
+  s_7e7438a57a53a0::t_03347f4d5d7c94 1-149
+loopx/extensions/runtime.py
+  s_7e7438a57a53a0::t_093043c70784cc 13,32,163-164,166,189,242,508-510,524-526,762-771,803-809,815,818-819,824-830,834
+tests/extensions/test_extension_runtime.py
+  s_7e7438a57a53a0::t_e42dddf35584e4 6,25-26,125-153,323-510,831-834,896
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "16dde82fc1945e3b666ef0b9c95421c241b299be",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
