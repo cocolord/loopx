@@ -1,0 +1,27 @@
+extensions/loopx-finance-value-discovery/extension.toml
+  s_5ba4f4e78e5a19::t_251a3c60989176 8
+extensions/loopx-finance-value-discovery/src/loopx_finance_value_discovery/reducer.py
+  s_5ba4f4e78e5a19::t_7961b5017ee9f9 19
+loopx/capabilities/value_connectors/finance_extension.py
+  s_5ba4f4e78e5a19::t_55cbc60d52b4dd 11,15-16,30-31,33
+loopx/extensions/manifest.py
+  s_5ba4f4e78e5a19::t_bf37c9c0f81908 163,165-166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6718fefa7195920335cf8137c2520b69e8d0de70",
+  "prompts": {},
+  "sessions": {
+    "s_5ba4f4e78e5a19": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f7e3e-ca10-7a72-b18e-42e8f11b9892",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

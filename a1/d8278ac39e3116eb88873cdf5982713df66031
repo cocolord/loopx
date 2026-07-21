@@ -1,0 +1,29 @@
+docs/reference/extensions.md
+  s_5ba4f4e78e5a19::t_eebd06500ab95d 256,264,267
+examples/finance-value-discovery-extension-smoke.py
+  s_5ba4f4e78e5a19::t_4427d51947e289 14
+extensions/loopx-finance-value-discovery/README.md
+  s_5ba4f4e78e5a19::t_5a46757ef224f7 10,83,85,94,103
+tests/extensions/test_colocated_extension_layout.py
+  s_5ba4f4e78e5a19::t_647ddda0cc61e4 1-24
+tests/extensions/test_finance_value_discovery_extension.py
+  s_5ba4f4e78e5a19::t_f84c129bf8ae8b 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a1d8278ac39e3116eb88873cdf5982713df66031",
+  "prompts": {},
+  "sessions": {
+    "s_5ba4f4e78e5a19": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f7e3e-ca10-7a72-b18e-42e8f11b9892",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
