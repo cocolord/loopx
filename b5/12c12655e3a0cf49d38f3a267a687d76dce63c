@@ -1,0 +1,29 @@
+examples/cli-help-manpage-smoke.py
+  s_45c402bf32fd7b::t_b93eb328b3525d 14-20,78-92,182-183,186,189-190,192,221
+loopx/help_surface.py
+  s_45c402bf32fd7b::t_ba96a3f72458ce 5-6,316-399
+man/loopx.1
+  s_45c402bf32fd7b::t_b3be5356eea046 1,6-8,14,21-23,26,29-30,32,35-36,38-39,41-42,44-57,60-64,66-67,69-70,72,75-76,78-80,82-83,85-86,88-89,91-129,131-188,190-191,193-194,201
+scripts/install-local.sh
+  s_45c402bf32fd7b::t_e4c3089f56baca 479-481
+scripts/render-manpage.py
+  s_45c402bf32fd7b::t_c3a83c9302a514 1-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b512c12655e3a0cf49d38f3a267a687d76dce63c",
+  "prompts": {},
+  "sessions": {
+    "s_45c402bf32fd7b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f83fd-1a51-72c3-92d4-a18302bae1c6",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
