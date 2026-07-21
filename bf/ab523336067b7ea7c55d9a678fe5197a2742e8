@@ -1,0 +1,25 @@
+examples/cli-help-manpage-smoke.py
+  s_45c402bf32fd7b::t_464fb566c1d780 4,11,20-26,86-132,276-277
+loopx/cli.py
+  s_45c402bf32fd7b::t_6ff4aca21673a9 161,239-249
+loopx/help_surface.py
+  s_45c402bf32fd7b::t_d2b683927ede88 3,197-261
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bfab523336067b7ea7c55d9a678fe5197a2742e8",
+  "prompts": {},
+  "sessions": {
+    "s_45c402bf32fd7b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f83fd-1a51-72c3-92d4-a18302bae1c6",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
