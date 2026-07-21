@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -136,10 +137,15 @@ def _overflow_provider(
     stream: str,
     completion_marker: Path,
 ) -> Path:
+    child_code = (
+        "from pathlib import Path; import time; "
+        "time.sleep(0.6); "
+        f"Path({str(completion_marker)!r}).write_text('completed', encoding='utf-8')"
+    )
     path.write_text(
         f"""#!{sys.executable}
 import json
-from pathlib import Path
+import subprocess
 import sys
 import time
 
@@ -147,11 +153,11 @@ if "--doctor" in sys.argv:
     raise SystemExit(0)
 
 json.load(sys.stdin)
+subprocess.Popen([sys.executable, "-c", {json.dumps(child_code)}])
 target = sys.{stream}.buffer
 target.write(b"x" * {MAX_EXTENSION_RESPONSE_BYTES + 1})
 target.flush()
 time.sleep(5)
-Path({json.dumps(str(completion_marker))}).write_text("completed", encoding="utf-8")
 """,
         encoding="utf-8",
     )
@@ -432,22 +438,28 @@ def test_extension_run_terminates_provider_when_output_limit_is_crossed(
     assert receipt["ok"] is False
     assert receipt["status"] == expected_status
     assert receipt["failure_kind"] == expected_failure
+    time.sleep(0.8)
     assert not marker.exists()
 
 
 def test_extension_run_terminates_provider_on_timeout(tmp_path: Path) -> None:
     marker = tmp_path / "timeout-completed"
     provider = tmp_path / "timeout-provider"
+    child_code = (
+        "from pathlib import Path; import time; "
+        "time.sleep(1.2); "
+        f"Path({str(marker)!r}).write_text('completed', encoding='utf-8')"
+    )
     provider.write_text(
         f"""#!{sys.executable}
-from pathlib import Path
+import subprocess
 import sys
 import time
 
 if "--doctor" in sys.argv:
     raise SystemExit(0)
+subprocess.Popen([sys.executable, "-c", {json.dumps(child_code)}])
 time.sleep(5)
-Path({json.dumps(str(marker))}).write_text("completed", encoding="utf-8")
 """,
         encoding="utf-8",
     )
@@ -477,6 +489,7 @@ Path({json.dumps(str(marker))}).write_text("completed", encoding="utf-8")
     assert receipt["status"] == "provider_failed"
     assert receipt["failure_kind"] == "timeout"
     assert receipt["exit_code"] is None
+    time.sleep(0.5)
     assert not marker.exists()
 
 

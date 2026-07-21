@@ -762,8 +762,8 @@ def run_standalone_extension(
         raise ValueError(
             f"extension `{extension_id}` declares permissions "
             f"{sorted(declared_permissions)}; standalone extension run grants no "
-            "operation authority, so use a capability or domain command with an "
-            "explicit typed authority decision"
+            "effect dispatch, so use a capability or domain command that owns "
+            "policy checks and a request-bound execution envelope"
         )
 
     try:

@@ -153,8 +153,8 @@ __version__ = "{version}"
         This is a minimal standalone LoopX extension. It owns its package and
         provider protocol; LoopX owns lifecycle registration and managed invocation.
         The starter declares no permissions because public standalone invocation
-        grants no operation authority. Move permissioned work behind a capability
-        or domain command with an explicit typed authority decision.
+        cannot dispatch permissioned effects. Move permissioned work behind a
+        capability or domain command with a request-bound execution envelope.
 
         Run the following commands from the same activated Python environment so
         the provider entrypoint is available on `PATH` when LoopX verifies it:

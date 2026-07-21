@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .core import build_periodic_report_run
-from .extension_authority import build_openviking_archive_authority_decision
+from .extension_envelope import build_openviking_archive_execution_envelope
 from .profile import build_periodic_report_activation
 from .presets import (
     PERIODIC_REPORT_PROFILE_PRESET_ALIASES,
@@ -124,8 +124,8 @@ def _archive_openviking(
 
     if request.get("schema_version") != REQUEST_SCHEMA:
         raise ValueError(f"request must use {REQUEST_SCHEMA}")
-    if "authority_decision" in request:
-        raise ValueError("authority_decision is issued by the capability command")
+    if "execution_envelope" in request:
+        raise ValueError("execution_envelope is created by the capability command")
     context = request.get("context")
     if not isinstance(context, dict):
         raise ValueError("request.context must be an object")
@@ -156,8 +156,8 @@ def _archive_openviking(
     }
     provider_request.pop("available_capabilities", None)
     if args.execute:
-        provider_request["authority_decision"] = (
-            build_openviking_archive_authority_decision(
+        provider_request["execution_envelope"] = (
+            build_openviking_archive_execution_envelope(
                 provider_request,
                 extension_revision=str(binding["revision"]),
             )

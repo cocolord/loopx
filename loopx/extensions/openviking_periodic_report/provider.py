@@ -16,8 +16,8 @@ from ...capabilities.periodic_report.adapters import (
 from ...capabilities.periodic_report.archive import (
     build_periodic_report_archive_bundle,
 )
-from ...capabilities.periodic_report.extension_authority import (
-    validate_openviking_archive_authority_decision,
+from ...capabilities.periodic_report.extension_envelope import (
+    validate_openviking_archive_execution_envelope,
 )
 from .activation import (
     OPENVIKING_PERIODIC_REPORT_EXTENSION_ID,
@@ -187,8 +187,11 @@ def archive_request(
         revision = str(extension_revision or "").strip()
         if not revision:
             raise ValueError("effectful extension execution requires a bound revision")
-        validate_openviking_archive_authority_decision(
-            _mapping(payload.get("authority_decision"), "request.authority_decision"),
+        validate_openviking_archive_execution_envelope(
+            _mapping(
+                payload.get("execution_envelope"),
+                "request.execution_envelope",
+            ),
             request=payload,
             extension_revision=revision,
         )

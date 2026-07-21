@@ -8,7 +8,7 @@ from ...capabilities.periodic_report.profile import (
     ACTIVATION_SCHEMA,
     build_periodic_report_activation,
 )
-from ...capabilities.periodic_report.extension_authority import (
+from ...capabilities.periodic_report.extension_envelope import (
     OPENVIKING_PERIODIC_REPORT_EXTENSION_ID,
     OPENVIKING_PERIODIC_REPORT_PERMISSION,
     PERIODIC_REPORT_CAPABILITY_ID,
@@ -64,7 +64,7 @@ def validate_openviking_periodic_report_profile_activation(
     sink_id: str,
     sink_kind: str = "project_resource",
 ) -> dict[str, Any]:
-    """Validate profile and sink binding without granting operation authority."""
+    """Validate profile and sink binding without dispatching provider effects."""
 
     activation = _mapping(activation_receipt, "activation_receipt")
     if activation.get("schema_version") != ACTIVATION_SCHEMA:

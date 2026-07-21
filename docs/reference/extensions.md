@@ -148,34 +148,32 @@ Direct provider binaries are implementation and debugging surfaces; they are
 not the supported management API.
 
 The generic runner is deliberately non-effectful and grants no operation
-authority. Both manifest `permissions` and runtime `required_permissions` must
+effects. Both manifest `permissions` and runtime `required_permissions` must
 be empty. Any operation needing read, write, send, publish, manage, or another
 declared authority must enter through a capability or domain command that can
-verify a typed authority decision. Request files and stdin are capped while
+apply its domain policy before managed dispatch. Request files and stdin are capped while
 being read. Provider stdout and stderr are drained concurrently and the provider
-is terminated as soon as either stream crosses its byte limit, so the documented
-bounds do not depend on a cooperative provider exiting first.
+is started in a dedicated process group. Timeout or either output limit
+terminates the entire group, so a descendant cannot continue effects after
+LoopX reports that execution stopped.
 
 Effectful capability dispatch uses
-`loopx_extension_authority_decision_v0`. The capability command, not the caller
-or provider, issues the decision after resolving one enabled, doctor-ready
-implementation and checking the domain activation policy. The decision is
-short-lived and binds all of the following:
+`loopx_extension_execution_envelope_v0`. The capability command, not the caller
+or provider, creates this minimal envelope after resolving one enabled,
+doctor-ready implementation and checking the domain activation policy. It binds:
 
-- capability id, versioned protocol, declared permission, and exact action;
+- the exact action;
 - structured effect scope;
 - extension id and active manifest revision;
-- a digest of the exact provider request, excluding the attached decision;
-- issue and expiry timestamps plus a content-derived decision id.
+- a digest of the exact provider request, excluding the attached envelope.
 
-The capability validates the decision before dispatch and the provider repeats
-the same validation before any effect. A caller-supplied decision, expired
-decision, different request, wider scope, changed action, or mismatched active
-revision fails closed. Provider credentials remain outside the decision and are
-still authenticated by the external service. This receipt is a deterministic
-LoopX control-plane boundary inside the same host trust domain; it does not
-claim to sandbox a malicious local process or replace operating-system and
-service-side authorization.
+The provider repeats this validation before any effect. A caller-supplied
+envelope, different request, wider scope, changed action, or mismatched active
+revision fails closed. Capability id, protocol, and permission remain
+authoritative in manifest resolution instead of being duplicated in the
+envelope. The envelope is request binding, not proof of issuer identity, a
+security token, or a replacement for service-side authentication and
+authorization.
 
 `disable` is reversible, but `enable` never trusts an earlier readiness result:
 it reruns the configured doctor and changes the enabled bit only after that
