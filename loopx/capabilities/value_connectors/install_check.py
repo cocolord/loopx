@@ -67,8 +67,7 @@ def build_value_connector_install_check_packet(
             "connector_id": "finance_market_snapshot",
             "status": "migrated_to_extension",
             "install": [
-                step["command"]
-                for step in finance_migration["agent_start_sequence"]
+                step["command"] for step in finance_migration["agent_start_sequence"]
             ],
             "optional_tools": [],
             "external_write_capability": False,

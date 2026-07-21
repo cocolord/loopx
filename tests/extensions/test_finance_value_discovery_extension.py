@@ -120,15 +120,11 @@ def test_legacy_connector_returns_extension_migration_packet(
     )
     migration = item["migration"]
     assert item["status"] == "migrated_to_extension"
-    assert migration["replacement_extension_id"] == (
-        "loopx-finance-value-discovery"
-    )
+    assert migration["replacement_extension_id"] == ("loopx-finance-value-discovery")
     assert migration["replacement_capability_id"] is None
     assert migration["automatic_provider_install_supported"] is False
     assert migration["packaged_loopx_only_start_supported"] is False
-    assert migration["agent_start_mode"] == (
-        "guided_when_provider_source_is_available"
-    )
+    assert migration["agent_start_mode"] == ("guided_when_provider_source_is_available")
     assert migration["truth_contract"]["legacy_connector_executes_finance"] is False
 
 

@@ -5,9 +5,7 @@ from typing import Any
 
 FINANCE_EXTENSION_ID = "loopx-finance-value-discovery"
 LEGACY_FINANCE_CONNECTOR_ID = "finance_market_snapshot"
-FINANCE_EXTENSION_MIGRATION_SCHEMA_VERSION = (
-    "value_connector_extension_migration_v0"
-)
+FINANCE_EXTENSION_MIGRATION_SCHEMA_VERSION = "value_connector_extension_migration_v0"
 
 
 def build_finance_extension_migration_contract() -> dict[str, Any]:
@@ -42,8 +40,7 @@ def build_finance_extension_migration_contract() -> dict[str, Any]:
             {
                 "step": "install_provider_from_source_checkout",
                 "command": (
-                    "python3 -m pip install "
-                    "./extensions/loopx-finance-value-discovery"
+                    "python3 -m pip install ./extensions/loopx-finance-value-discovery"
                 ),
                 "local_environment_write": True,
                 "condition": "provider entrypoint is absent and source checkout exists",

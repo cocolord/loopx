@@ -236,6 +236,8 @@ def register_value_connector_commands(
         default=10.0,
         help="Network/tool timeout for --fetch-metadata.",
     )
+
+
 def handle_value_connector_command(
     args: argparse.Namespace,
     *,
