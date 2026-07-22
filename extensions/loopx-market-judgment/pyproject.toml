@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loopx-market-judgment"
+version = "0.1.0"
+description = "Evidence-gated market judgment state machine for LoopX."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "loopx>=0.2.9",
+  "loopx-finance-value-discovery>=0.3.0",
+]
+
+[project.scripts]
+loopx-market-judgment = "loopx_market_judgment.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
