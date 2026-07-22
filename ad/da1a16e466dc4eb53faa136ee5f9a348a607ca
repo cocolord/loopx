@@ -1,0 +1,21 @@
+tests/extensions/test_market_judgment_extension.py
+  s_926726893ff7f9::t_ff24dba67c24a4 1-411
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "adda1a16e466dc4eb53faa136ee5f9a348a607ca",
+  "prompts": {},
+  "sessions": {
+    "s_926726893ff7f9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8288-58db-7931-812f-89d0463ed62a",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
