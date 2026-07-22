@@ -1,0 +1,25 @@
+loopx/configure_goal.py
+  s_7e7438a57a53a0::t_00d0fc1bd9d20b 154-161,552
+loopx/quota.py
+  s_7e7438a57a53a0::t_130d90b26f336c 1414-1487,2429
+tests/control_plane/test_quota_paused_precedence.py
+  s_7e7438a57a53a0::t_c492cf5ac415a0 1-138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "19d3b607e5919e42d62475575c67af273193a7d7",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
