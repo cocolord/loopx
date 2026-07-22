@@ -1,0 +1,23 @@
+extensions/loopx-finance-value-discovery/README.md
+  s_926726893ff7f9::t_4b2f49b57a2da8 18-29,43-51
+extensions/loopx-market-judgment/README.md
+  s_926726893ff7f9::t_96cfd944d9f075 1-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ee6d49f9a78383c5d6dc110bbae93a4f8f46f0b1",
+  "prompts": {},
+  "sessions": {
+    "s_926726893ff7f9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8288-58db-7931-812f-89d0463ed62a",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
