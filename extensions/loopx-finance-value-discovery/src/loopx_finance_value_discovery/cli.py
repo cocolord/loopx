@@ -12,6 +12,21 @@ from .reducer import (
     build_finance_value_discovery_packet,
     render_finance_value_discovery_markdown,
 )
+from .signals import (
+    REVERSAL_LEADERSHIP_INPUT_SCHEMA_VERSION,
+    TURN_WINDOW_INPUT_SCHEMA_VERSION,
+    build_reversal_leadership_packet,
+    build_turn_window_packet,
+)
+
+
+def _reduce(payload: Mapping[str, Any]) -> dict[str, Any]:
+    schema_version = payload.get("schema_version")
+    if schema_version == TURN_WINDOW_INPUT_SCHEMA_VERSION:
+        return build_turn_window_packet(payload)
+    if schema_version == REVERSAL_LEADERSHIP_INPUT_SCHEMA_VERSION:
+        return build_reversal_leadership_packet(payload)
+    return build_finance_value_discovery_packet(payload)
 
 
 def _load_json(path_text: str) -> dict[str, Any]:
@@ -73,7 +88,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             payload = json.load(sys.stdin)
             if not isinstance(payload, Mapping):
                 raise ValueError("provider input must be a JSON object")
-            packet = build_finance_value_discovery_packet(payload)
+            packet = _reduce(payload)
         except Exception as exc:
             print(json.dumps(_error_packet(exc), sort_keys=True))
             return 1
@@ -86,7 +101,7 @@ def run(argv: Sequence[str] | None = None) -> int:
     if args.command != "reduce":
         raise ValueError("use --doctor or the reduce command")
     try:
-        packet = build_finance_value_discovery_packet(_load_json(args.input_json))
+        packet = _reduce(_load_json(args.input_json))
     except Exception as exc:
         print(json.dumps(_error_packet(exc), indent=2, sort_keys=True))
         return 1

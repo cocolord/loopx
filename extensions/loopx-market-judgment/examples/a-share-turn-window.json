@@ -1,0 +1,56 @@
+{
+  "schema_version": "market_judgment_case_v0",
+  "case_id": "a-share-turn-window-example",
+  "revision": "revision-1",
+  "hypothesis": {
+    "hypothesis_id": "a-share-reflexive-top-v0",
+    "as_of": "2026-07-21",
+    "market": "a_share",
+    "claim": "A failed upside auction creates a local top within five trading sessions.",
+    "falsifiers": [
+      "The centered five-session hit rate does not beat matched daily base rates.",
+      "The signal depends on information unavailable at the observation time."
+    ],
+    "evaluation_horizon_sessions": 20
+  },
+  "atom": {
+    "atom_id": "turn_window",
+    "input": {
+      "schema_version": "finance_turn_window_input_v0",
+      "as_of": "2026-07-21",
+      "market": "a_share",
+      "point_in_time_data": true,
+      "lookahead_free": true,
+      "metrics": {
+        "return_60d_pct": 12.0,
+        "distance_from_200d_pct": 6.0,
+        "days_since_20d_high": 2,
+        "from_20d_high_pct": -2.5,
+        "return_5d_pct": -1.0,
+        "participation_relative_5d_pct": -1.2,
+        "attention_5d_vs_20d_ratio": 1.3,
+        "drawdown_from_252d_high_pct": -3.0,
+        "days_since_20d_low": 12,
+        "bounce_from_20d_low_pct": 8.0,
+        "stress_unresolved": false
+      },
+      "source_refs": [
+        {
+          "source_id": "public-market-data-example",
+          "source_tier": "market_data",
+          "provider_label": "point-in-time public market data",
+          "observed_at": "2026-07-21"
+        }
+      ]
+    }
+  },
+  "events": [
+    {
+      "event_id": "event-1",
+      "revision": "revision-1",
+      "type": "quant_requested",
+      "observed_at": "2026-07-21",
+      "detail": {}
+    }
+  ]
+}
