@@ -15,10 +15,18 @@ its dependencies, installation, doctor, enablement, and upgrade lifecycle.
 
 ## Contract
 
-The reducer accepts a frozen `finance_value_discovery_input_v0` object and
-emits `finance_value_discovery_packet_v0`. It performs no network request. A
-separate collector may prepare public evidence cards, but connector output is
-input evidence, not accepted truth.
+The reducer accepts one of three frozen inputs and performs no network request:
+
+- `finance_value_discovery_input_v0` for cross-sectional value discovery;
+- `finance_turn_window_input_v0` for a falsifiable five-session top/bottom
+  observation;
+- `finance_reversal_leadership_input_v0` for session 1/3/5/10/20 rebound
+  leadership observations.
+
+A separate collector or quant runner may prepare public evidence, but its
+output is input evidence, not accepted truth. The market-judgment extension
+owns validation and lifecycle state; these reducers only own deterministic
+research atoms.
 
 The packet enforces:
 
@@ -31,6 +39,15 @@ The packet enforces:
   valuation gates;
 - at most one bounded successor, with no threshold relaxation or continuous
   watch.
+
+The turn-window atom requires three of four independent layers plus the
+market-specific price-auction prerequisites. It reports an observation, never
+a top or bottom call. The reversal-leadership atom treats session-1/3/5 A-share
+strength as an early candidate only. A candidate may qualify by either leading
+an oversold response or by preserving pre-rebound relative strength, but needs
+two-name sector confirmation and at least one driver fact. Durable leadership
+still cannot be reported before session 20; session-10 A-share leadership
+remains a driver hypothesis, and early US whipsaw strength remains shock beta.
 
 It rejects raw provider bodies, private paths, credentials, account or
 portfolio material, future-dated evidence, unsupported fields, and malformed
