@@ -1,0 +1,49 @@
+packages/loopx-finance-value-discovery/extension.toml
+  s_7e7438a57a53a0::t_4b5ed90a3f8538 3
+packages/loopx-finance-value-discovery/pyproject.toml
+  s_8f4fd76cccc3eb::t_8c4f16c15ff8be 7
+packages/loopx-finance-value-discovery/src/loopx_finance_value_discovery/__init__.py
+  s_8f4fd76cccc3eb::t_41051b2e7e564d 3-14,27-30,36-38,40
+packages/loopx-finance-value-discovery/src/loopx_finance_value_discovery/boundary.py
+  s_41d8527b4f731e::t_16995093f7f86c 1-57
+packages/loopx-finance-value-discovery/src/loopx_finance_value_discovery/cli.py
+  s_8f4fd76cccc3eb::t_b67963f65acbfe 10-14,71-85,96-100,111-123,127
+packages/loopx-finance-value-discovery/src/loopx_finance_value_discovery/reducer.py
+  s_7e7438a57a53a0::t_7e145dfcc22fb2 10-11,63,327
+packages/loopx-finance-value-discovery/src/loopx_finance_value_discovery/replay.py
+  s_7e7438a57a53a0::t_99c24ec1e15450 1-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f1074dc2385f4e509e08aa9777bebac8fc8c116e",
+  "prompts": {},
+  "sessions": {
+    "s_41d8527b4f731e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fac7d-e186-7a33-aed5-421749d5bdc2",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    },
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    },
+    "s_8f4fd76cccc3eb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fac7e-fe76-7423-aa5c-20f2214a9a43",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

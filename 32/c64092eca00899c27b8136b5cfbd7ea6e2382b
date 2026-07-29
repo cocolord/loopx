@@ -1,0 +1,31 @@
+packages/loopx-finance-value-discovery/src/loopx_finance_value_discovery/contract.py
+  s_7e7438a57a53a0::t_2e5f7697c4b953 5,78-82
+packages/loopx-finance-value-discovery/src/loopx_finance_value_discovery/gates.py
+  s_7e7438a57a53a0::t_747c7cfe502ae8 4,98-99
+packages/loopx-finance-value-discovery/src/loopx_finance_value_discovery/metric_packs.py
+  s_7e7438a57a53a0::t_13863ff9daed12 27,117-123
+packages/loopx-finance-value-discovery/src/loopx_finance_value_discovery/replay.py
+  s_7e7438a57a53a0::t_09ad76aa8c0ac8 16
+tests/extensions/test_finance_beta_and_metric_packs.py
+  s_7e7438a57a53a0::t_40676125d17176 168-185
+tests/extensions/test_finance_contract_gate_replay.py
+  s_7e7438a57a53a0::t_1b194c66985ad1 137-151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "32c64092eca00899c27b8136b5cfbd7ea6e2382b",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
