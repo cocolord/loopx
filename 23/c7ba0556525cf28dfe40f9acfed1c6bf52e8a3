@@ -1,0 +1,27 @@
+packages/loopx-finance-value-discovery/examples/beta-attribution-v1.json
+  s_7e7438a57a53a0::t_5d044c554f8a37 1-75
+packages/loopx-finance-value-discovery/examples/software-metric-pack-v1.json
+  s_7e7438a57a53a0::t_a1c00d4b912e19 1-105
+packages/loopx-finance-value-discovery/extension.toml
+  s_7e7438a57a53a0::t_403f9430db1226 3
+packages/loopx-finance-value-discovery/pyproject.toml
+  s_7e7438a57a53a0::t_5688b666c6c755 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "23c7ba0556525cf28dfe40f9acfed1c6bf52e8a3",
+  "prompts": {},
+  "sessions": {
+    "s_7e7438a57a53a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f36e5-7c24-77f1-9acc-58ccbec5ad27",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
