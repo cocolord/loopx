@@ -1,0 +1,23 @@
+packages/loopx-finance-value-discovery/CONTRACT.md
+  s_0f9b5c019ac895::t_003b6e4498e2f1 25-39
+packages/loopx-finance-value-discovery/README.md
+  s_0f9b5c019ac895::t_604ace6327694e 30-40,124-136,145-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a51abbc1d0f94cf1e7aa9ee1b767da2b8ec1f70b",
+  "prompts": {},
+  "sessions": {
+    "s_0f9b5c019ac895": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fac9c-c478-7803-99e6-607be4ee3c47",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
