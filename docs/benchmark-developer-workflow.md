@@ -10,6 +10,9 @@ packets and dated route notes still live under
 `docs/research/long-horizon-agent-benchmarks/`, but reusable runner behavior
 belongs in `loopx/`, `examples/`, and this guide.
 
+For package ownership and dependency direction, see
+[`reference/benchmark-architecture.md`](reference/benchmark-architecture.md).
+
 ## Product Shape
 
 The benchmark workflow has four layers:
@@ -36,7 +39,7 @@ without seeing credentials, raw logs, raw trajectories, or local machine paths.
 From a fresh checkout:
 
 ```bash
-python3 -m py_compile loopx/*.py loopx/benchmark_core/*.py
+python3 -m py_compile loopx/*.py loopx/benchmark_core/*.py loopx/benchmarks/read_models/*.py
 python3 examples/benchmark-split-control-remote-executor-smoke.py
 loopx benchmark --help
 ```
@@ -1082,6 +1085,16 @@ session. Keep one SSH multiplexed master warm for the benchmark slice and run
 remote commands through that connection. This is an operator workflow
 convention, not a LoopX protocol requirement.
 
+Use `python3 -m loopx.benchmark_adapters.skillsbench_runner_profile probe-ssh`
+as the task-free readiness receipt. Its typed fields distinguish local GSSAPI
+ticket presence from remote task-free SSH acceptance without recording command
+output or profile values. A present local ticket is not sufficient evidence to
+launch: `readiness_state` must be `ready`. Keep the benchmark blocked on
+`remote_task_free_acceptance_failed` while unrelated runnable work continues.
+The non-dry-run launcher consumes the same receipt before any remote preflight
+or supervisor start. A rejected receipt exits as the compact public blocker;
+dry-run reports the gate as required without probing the host.
+
 For repeated benchmark work, prefer a host-local SSH config stanza instead of
 spelling the multiplexing flags on every command:
 
@@ -1272,6 +1285,15 @@ auth ready, network route ready or blocked, `codex exec` smoke result, and the
 next benchmark-family blocker. Prefer per-command tunnels or short-lived
 operator-managed proxy sessions for benchmark slices; long-running unattended
 network bridges should have an explicit owner and cleanup rule.
+
+When the SkillsBench reverse-tunnel supervisor should own the local CONNECT
+process, store its foreground argv-style command in the owner-only runner
+profile as `SKILLSBENCH_LOCAL_CODEX_PROXY_COMMAND`. The supervisor starts the
+process when the local endpoint is absent, performs bounded restarts if that
+endpoint disappears while the SSH tunnel is still alive, and cleans up only
+processes it started. The raw command and process output remain private. Without
+this setting, the local endpoint remains externally owned and the launcher
+keeps its existing fail-fast behavior.
 
 For SkillsBench setup/verifier egress on a cloud host, prefer the runner's
 runtime-only proxy switch over editing task files or committing host details.

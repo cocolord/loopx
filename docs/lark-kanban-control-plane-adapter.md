@@ -146,7 +146,8 @@ When a worker discovers follow-up work, it should classify the need first:
 
 - same-slice continuation: keep evidence in the current row until review;
 - real successor: complete the current LoopX todo with `--next-agent-todo` or
-  `--next-user-todo`;
+  `--next-user-todo` plus an explicit
+  `--next-user-task-class user_action|user_gate`;
 - replacement or narrower split: use `todo supersede --next-agent-todo`;
 - strategy-heavy fan-out: run `complex_request_intake_v0` to create a small
   typed todo batch.
@@ -158,6 +159,26 @@ LoopX while letting Kanban remain the operator-visible tracker for current work
 and delivered outputs.
 
 ## Setup And Reuse
+
+A saved `.loopx/lark-kanban.json` file is a reusable destination binding, not
+an automation switch. Normal sync stays user-driven through
+`lark-kanban sync-loopx-todos`. A goal may explicitly opt into best-effort
+heartbeat refresh with:
+
+```bash
+loopx configure-goal \
+  --goal-id <goal-id> \
+  --lark-kanban-heartbeat-sync \
+  --execute
+```
+
+That opt-in does not create a board, authenticate Lark, or turn sink delivery
+into a gate. It projects one `post_writeback_actions` entry through
+`quota should-run.goal_boundary` and `interaction_contract.cli_channel` only
+after material state changes; failures remain nonblocking and cannot preempt
+runnable P0 work. The host automation prompt contains no Kanban-specific
+switch or command. Disable the behavior with
+`--no-lark-kanban-heartbeat-sync`.
 
 The recommended path is `setup`, using user identity by default. It preflights
 `lark-cli`, auth, and the required Base shortcuts, then either reuses the local

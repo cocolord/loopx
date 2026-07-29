@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Union, get_args, get_origin
 
 import pytest
 
@@ -23,6 +24,12 @@ from loopx.benchmark_adapters.skillsbench_turn_route import (
     sync_skillsbench_loopx_turn_trace_into_compact,
 )
 from loopx.control_plane.turn_driver import executor as turn_executor
+
+
+def test_agent_prompt_runner_alias_is_bootstrap_python_39_safe() -> None:
+    return_type = get_args(runtime.AgentPromptRunner)[1]
+
+    assert get_origin(return_type) is Union
 
 
 def _config(tmp_path: Path) -> runtime.SkillsBenchTurnRuntimeConfig:
@@ -178,7 +185,7 @@ def test_nonzero_validation_probe_does_not_return_private_output(
     assert "private" not in json.dumps(result)
 
 
-def test_bridge_progress_receipt_requires_successful_task_file_write(
+def test_bridge_progress_receipt_requires_successful_task_content_change(
     tmp_path: Path,
 ) -> None:
     summary_path = tmp_path / "bridge-summary.jsonl"
@@ -215,6 +222,7 @@ def test_bridge_progress_receipt_requires_successful_task_file_write(
             "operation": "write_file",
             "task_facing_operation": True,
             "durable_task_write": True,
+            "durable_task_content_changed": True,
             "success": True,
             "returncode": 0,
         },
@@ -228,10 +236,11 @@ def test_bridge_progress_receipt_requires_successful_task_file_write(
 
     assert receipt == {
         "schema_version": "skillsbench_bridge_task_progress_receipt_v0",
-        "status": "verified_task_file_write",
+        "status": "verified_task_content_change",
         "task_facing_operation_count": 4,
         "task_facing_success_count": 3,
         "successful_task_file_write_count": 1,
+        "successful_task_file_change_count": 1,
         "raw_material_recorded": False,
     }
 
@@ -240,12 +249,34 @@ def test_instrumented_bridge_emits_durable_root_without_raw_path(
     tmp_path: Path,
 ) -> None:
     fake_bridge = tmp_path / "fake-bridge"
+    bridge_state = tmp_path / "bridge-state.json"
     fake_bridge.write_text(
         "#!/usr/bin/env python3\n"
-        "import json, sys\n"
+        "import json, shlex, sys\n"
+        "from pathlib import Path\n"
+        f"state_path = Path({str(bridge_state)!r})\n"
+        "state = json.loads(state_path.read_text()) if state_path.exists() else {}\n"
         "request = json.loads(sys.stdin.read())\n"
-        "ok = not str(request.get('path', '')).endswith('failed.txt')\n"
-        "print(json.dumps({'ok': ok, 'exit_code': 0}))\n",
+        "operation = request.get('operation')\n"
+        "path = str(request.get('path', ''))\n"
+        "if operation == 'exec':\n"
+        "    tokens = shlex.split(str(request.get('command', '')))\n"
+        "    path = tokens[-1] if len(tokens) >= 3 else ''\n"
+        "    ok = path in state\n"
+        "    response = {'ok': ok, 'exit_code': 0 if ok else 1}\n"
+        "elif operation == 'read_file':\n"
+        "    ok = path in state\n"
+        "    response = {'ok': ok, 'exit_code': 0 if ok else 1, "
+        "'content': state.get(path, ''), 'content_truncated': False}\n"
+        "elif operation == 'write_file':\n"
+        "    ok = not path.endswith('failed.txt')\n"
+        "    if ok:\n"
+        "        state[path] = str(request.get('content', ''))\n"
+        "        state_path.write_text(json.dumps(state))\n"
+        "    response = {'ok': ok, 'exit_code': 0 if ok else 1}\n"
+        "else:\n"
+        "    response = {'ok': True, 'exit_code': 0}\n"
+        "print(json.dumps(response))\n",
         encoding="utf-8",
     )
     fake_bridge.chmod(0o755)
@@ -262,6 +293,16 @@ def test_instrumented_bridge_emits_durable_root_without_raw_path(
             "operation": "write_file",
             "path": "/root/task-output.txt",
             "content": "private task output",
+        },
+        {
+            "operation": "write_file",
+            "path": "/root/task-output.txt",
+            "content": "private task output",
+        },
+        {
+            "operation": "write_file",
+            "path": "/root/task-output.txt",
+            "content": "updated private task output",
         },
         {
             "operation": "write_file",
@@ -287,30 +328,34 @@ def test_instrumented_bridge_emits_durable_root_without_raw_path(
     receipt = bridge_summary.bridge_summary_task_progress_receipt(summary_path)
     summary_text = summary_path.read_text(encoding="utf-8")
 
-    assert receipt["successful_task_file_write_count"] == 1
-    assert receipt["status"] == "verified_task_file_write"
+    assert receipt["successful_task_file_write_count"] == 3
+    assert receipt["successful_task_file_change_count"] == 2
+    assert receipt["status"] == "verified_task_content_change"
     assert '"durable_task_write_root": "root"' in summary_text
     assert "/root/task-output.txt" not in summary_text
     assert "/tmp/temporary-note.txt" not in summary_text
     assert "/root/failed.txt" not in summary_text
     assert "private task output" not in summary_text
+    assert "updated private task output" not in summary_text
     assert "temporary private note" not in summary_text
     assert "failed private output" not in summary_text
     assert '"failure_category": "bridge_operation_failed"' in summary_text
 
 
 @pytest.mark.parametrize(
-    ("write_count", "raw_material_recorded", "expected_status"),
+    ("write_count", "change_count", "raw_material_recorded", "expected_status"),
     [
-        (1, False, "committed"),
-        (0, False, "failed"),
-        (1, True, "failed"),
+        (1, 1, False, "committed"),
+        (1, 0, False, "failed"),
+        (0, 0, False, "failed"),
+        (1, 1, True, "failed"),
     ],
 )
-def test_bridge_write_progress_can_commit_when_workspace_command_cannot(
+def test_bridge_content_progress_can_commit_when_workspace_command_cannot(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     write_count: int,
+    change_count: int,
     raw_material_recorded: bool,
     expected_status: str,
 ) -> None:
@@ -355,13 +400,14 @@ def test_bridge_write_progress_can_commit_when_workspace_command_cannot(
     evidence = {
         "schema_version": "skillsbench_bridge_task_progress_receipt_v0",
         "status": (
-            "verified_task_file_write"
-            if write_count and not raw_material_recorded
+            "verified_task_content_change"
+            if change_count and not raw_material_recorded
             else "no_verified_task_mutation"
         ),
         "task_facing_operation_count": 4,
         "task_facing_success_count": 4,
         "successful_task_file_write_count": write_count,
+        "successful_task_file_change_count": change_count,
         "raw_material_recorded": raw_material_recorded,
     }
 
@@ -384,9 +430,10 @@ def test_bridge_write_progress_can_commit_when_workspace_command_cannot(
     if expected_status == "committed":
         assert validation["status"] == "passed"
         assert validation["post_agent_postcondition_status"] == "progress_validated"
-        assert validation["validator_kind"] == "skillsbench_bridge_write_progress"
-        assert validation["progress_evidence_kind"] == "verified_task_file_write"
+        assert validation["validator_kind"] == "skillsbench_bridge_content_progress"
+        assert validation["progress_evidence_kind"] == "verified_task_content_change"
         assert validation["successful_task_file_write_count"] == 1
+        assert validation["successful_task_file_change_count"] == 1
     else:
         assert validation["status"] == "failed"
         assert validation["post_agent_postcondition_status"] == "unsatisfied"
@@ -606,6 +653,7 @@ def test_adaptive_sequence_commits_progress_then_terminal_turns(
 
     assert len(records) == 2
     assert sequence["status"] == "terminal_complete"
+    assert sequence["official_feedback_blinded"] is True
     assert sequence["turn_count"] == 2
     assert len(set(plan_instance_ids)) == 2
     assert plan_instance_ids[0].endswith("turn-001")
@@ -621,6 +669,61 @@ def test_adaptive_sequence_commits_progress_then_terminal_turns(
     assert records[1][1]["terminal_complete"] is True
     assert records[1][1]["sequence_stop_reason"] == "terminal_complete"
     assert len(observed) == 2
+
+
+def test_adaptive_sequence_reviews_verified_content_after_validator_success(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    progress_kinds = iter(
+        ["verified_task_content_change", "scored_workspace_command"]
+    )
+    prompts: list[str] = []
+
+    def fake_turn(**kwargs: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        prompts.append(kwargs["prompt"])
+        return (
+            {"status": "committed"},
+            {
+                "status": "passed",
+                "validated_progress": True,
+                "terminal_complete": True,
+                "progress_evidence_kind": next(progress_kinds),
+            },
+        )
+
+    monkeypatch.setattr(runtime, "run_skillsbench_loopx_turn", fake_turn)
+
+    records, sequence = runtime.run_skillsbench_loopx_turn_sequence(
+        prompt="original task prompt",
+        agent_runner=lambda _prompt: "done",
+        config=runtime.SkillsBenchTurnRuntimeConfig(
+            **{**_config(tmp_path).__dict__, "max_turns": 4}
+        ),
+    )
+
+    assert len(records) == 2
+    assert sequence["status"] == "terminal_complete"
+    assert sequence["official_feedback_blinded"] is True
+    assert prompts[0] == "original task prompt"
+    assert "Continue the same task" in prompts[1]
+    assert records[0][1]["terminal_complete"] is True
+    assert records[0][1]["sequence_terminal_complete"] is False
+    assert records[0][1]["sequence_stop_reason"] == "continue"
+    assert records[1][1]["sequence_terminal_complete"] is True
+    assert records[1][1]["sequence_stop_reason"] == "terminal_complete"
+    first_trace = runtime.build_skillsbench_loopx_turn_trace(
+        route="loopx-turn-agent-cli",
+        benchmark_id="synthetic-benchmark",
+        task_id="synthetic-task",
+        execution=records[0][0],
+        scored_workspace_validation=records[0][1],
+    )
+    summary = SkillsBenchTurnTraceSummary()
+    summary.merge(first_trace, first_trace["boundary"])
+    controller_trace: dict[str, Any] = {}
+    summary.apply(controller_trace)
+    assert controller_trace["scored_workspace_validation"]["terminal_complete"] is False
 
 
 def test_stability_sequence_repeats_repairs_then_stops_after_no_change(
@@ -692,6 +795,8 @@ def test_stability_sequence_repeats_repairs_then_stops_after_no_change(
         record[1]["stability_completion_satisfied"] is True for record in records
     )
     assert all(record[1]["sequence_baseline_configured"] is True for record in records)
+    sequence_refs = {record[1]["turn_sequence_ref"] for record in records}
+    assert sequence_refs == {sequence["turn_sequence_ref"]}
     assert sequence_baseline_paths[0] not in json.dumps(records, sort_keys=True)
     assert all(
         not any(key.startswith("stability_") for key in execution["validation"])
@@ -898,6 +1003,585 @@ print(json.dumps({"type": "thread.started", "thread_id": "thread-fixture-001"}))
     )
     assert "_loopx_turn_codex_thread_id" not in session
     assert not private_cwd_root.exists()
+
+
+def test_codex_exec_same_session_continuation_requires_safe_progress(
+    tmp_path: Path,
+) -> None:
+    summary_path = tmp_path / "bridge-summary.jsonl"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "record_phase": "complete",
+                "operation": "run_command",
+                "task_facing_operation": True,
+                "success": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert acp_relay._codex_exec_same_session_continuation_allowed(
+        category="codex_exec_bridge_idle_timeout",
+        bridge_summary_path=summary_path,
+        continuation_count=0,
+        thread_present=True,
+        final_message_present=False,
+        turn_deadline=time.monotonic() + 30,
+    )
+    assert not acp_relay._codex_exec_same_session_continuation_allowed(
+        category="codex_exec_bridge_idle_timeout",
+        bridge_summary_path=summary_path,
+        continuation_count=acp_relay.CODEX_EXEC_SAME_SESSION_CONTINUATION_LIMIT,
+        thread_present=True,
+        final_message_present=False,
+        turn_deadline=time.monotonic() + 30,
+    )
+    assert not acp_relay._codex_exec_same_session_continuation_allowed(
+        category="codex_exec_bridge_idle_timeout",
+        bridge_summary_path=summary_path,
+        continuation_count=0,
+        thread_present=False,
+        final_message_present=False,
+        turn_deadline=time.monotonic() + 30,
+    )
+    assert not acp_relay._codex_exec_same_session_continuation_allowed(
+        category="codex_exec_bridge_idle_timeout",
+        bridge_summary_path=summary_path,
+        continuation_count=0,
+        thread_present=True,
+        final_message_present=True,
+        turn_deadline=time.monotonic() + 30,
+    )
+    assert not acp_relay._codex_exec_same_session_continuation_allowed(
+        category="codex_exec_bridge_idle_timeout",
+        bridge_summary_path=summary_path,
+        continuation_count=0,
+        thread_present=True,
+        final_message_present=False,
+        turn_deadline=time.monotonic() - 1,
+    )
+
+    summary_path.write_text(
+        json.dumps(
+            {
+                "record_phase": "start",
+                "operation": "run_command",
+                "task_facing_operation": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert not acp_relay._codex_exec_same_session_continuation_allowed(
+        category="codex_exec_bridge_idle_timeout",
+        bridge_summary_path=summary_path,
+        continuation_count=0,
+        thread_present=True,
+        final_message_present=False,
+        turn_deadline=time.monotonic() + 30,
+    )
+
+
+def test_progress_validation_handoff_requires_no_scheduled_continuation(
+    tmp_path: Path,
+) -> None:
+    summary_path = tmp_path / "bridge-summary.jsonl"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "record_phase": "complete",
+                "operation": "write_file",
+                "task_facing_operation": True,
+                "durable_task_write": True,
+                "durable_task_content_changed": True,
+                "success": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert acp_relay._codex_exec_progress_validation_handoff_allowed(
+        category="codex_exec_bridge_idle_timeout",
+        bridge_summary_path=summary_path,
+        same_session_continuation_scheduled=False,
+        final_message_present=False,
+        turn_deadline=time.monotonic() + 30,
+    )
+    assert acp_relay._codex_exec_progress_validation_handoff_allowed(
+        category="codex_exec_timeout",
+        bridge_summary_path=summary_path,
+        same_session_continuation_scheduled=False,
+        final_message_present=False,
+        turn_deadline=time.monotonic() - 1,
+    )
+    assert not acp_relay._codex_exec_progress_validation_handoff_allowed(
+        category="codex_exec_bridge_idle_timeout",
+        bridge_summary_path=summary_path,
+        same_session_continuation_scheduled=True,
+        final_message_present=False,
+        turn_deadline=time.monotonic() + 30,
+    )
+    summary_path.write_text("{}\n", encoding="utf-8")
+    assert not acp_relay._codex_exec_progress_validation_handoff_allowed(
+        category="codex_exec_timeout",
+        bridge_summary_path=summary_path,
+        same_session_continuation_scheduled=False,
+        final_message_present=False,
+        turn_deadline=time.monotonic() - 1,
+    )
+
+
+def test_timeout_handoff_waits_for_bridge_summary_quiescence(
+    tmp_path: Path,
+) -> None:
+    summary_path = tmp_path / "bridge-summary.jsonl"
+    summary_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "record_phase": "complete",
+                        "operation": "write_file",
+                        "task_facing_operation": True,
+                        "durable_task_write": True,
+                        "durable_task_content_changed": True,
+                        "success": True,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "record_phase": "start",
+                        "operation": "run_command",
+                        "task_facing_operation": True,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def finish_bridge_record() -> None:
+        time.sleep(0.03)
+        with summary_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(
+                    {
+                        "record_phase": "complete",
+                        "operation": "run_command",
+                        "task_facing_operation": True,
+                        "success": True,
+                    }
+                )
+                + "\n"
+            )
+
+    writer = threading.Thread(target=finish_bridge_record)
+    writer.start()
+    assert acp_relay._wait_for_bridge_summary_quiescence(
+        summary_path,
+        timeout_sec=0.5,
+        poll_interval_sec=0.005,
+    )
+    writer.join()
+    assert acp_relay._codex_exec_progress_validation_handoff_allowed(
+        category="codex_exec_timeout",
+        bridge_summary_path=summary_path,
+        same_session_continuation_scheduled=False,
+        final_message_present=False,
+        turn_deadline=time.monotonic() - 1,
+    )
+
+
+def test_skillsbench_single_turn_codex_exec_resumes_progressful_idle_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    invocation_log = tmp_path / "invocations.jsonl"
+    fake_codex = tmp_path / "fake-codex"
+    fake_codex.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+import pathlib
+import sys
+import time
+
+log_path = pathlib.Path(os.environ["FAKE_CODEX_INVOCATION_LOG"])
+attempt = len(log_path.read_text().splitlines()) + 1 if log_path.exists() else 1
+prompt = sys.stdin.read()
+with log_path.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps({"argv": sys.argv[1:], "prompt": prompt}) + "\\n")
+if attempt == 1:
+    print(json.dumps({"type": "thread.started", "thread_id": "thread-single-001"}), flush=True)
+    time.sleep(10)
+output_index = sys.argv.index("--output-last-message") + 1
+pathlib.Path(sys.argv[output_index]).write_text("bounded turn complete", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(0o755)
+    monkeypatch.setenv("FAKE_CODEX_INVOCATION_LOG", str(invocation_log))
+    trace_dir = tmp_path / "public-traces"
+    trace_dir.mkdir()
+    relay = SkillsBenchLocalAcpRelay(
+        CodexExecConfig(
+            codex_bin=str(fake_codex),
+            loopx_turn_agent_cli=True,
+            loopx_turn_max_turns=1,
+            remote_command_file_bridge_command="synthetic-bridge",
+            worker_public_trace_dir=str(trace_dir),
+            bridge_idle_timeout_sec=1,
+            timeout_sec=30,
+        )
+    )
+    monkeypatch.setattr(
+        relay,
+        "_consume_remote_bridge_for_solver",
+        lambda: {"ready": True},
+    )
+    monkeypatch.setattr(
+        relay,
+        "_publish_remote_bridge_consumption_trace",
+        lambda _probe: None,
+    )
+    monkeypatch.setattr(
+        relay,
+        "_start_json_file_bridge_server",
+        lambda **_kwargs: ("synthetic-agent-bridge", None),
+    )
+
+    def write_progress_summary(**kwargs: Any) -> Path:
+        kwargs["summary_path"].write_text(
+            json.dumps(
+                {
+                    "record_phase": "complete",
+                    "operation": "run_command",
+                    "task_facing_operation": True,
+                    "success": True,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return kwargs["tmp_path"] / "synthetic-wrapper"
+
+    monkeypatch.setattr(
+        relay,
+        "_write_instrumented_bridge_wrapper",
+        write_progress_summary,
+    )
+    monkeypatch.setattr(
+        relay,
+        "_prompt_with_remote_bridge_packet",
+        lambda prompt, **_kwargs: prompt,
+    )
+    monkeypatch.setattr(
+        relay,
+        "_publish_remote_bridge_agent_operations_trace",
+        lambda **_kwargs: None,
+    )
+    session: dict[str, Any] = {"cwd": str(tmp_path), "model": None}
+    private_original_prompt = "private original task prompt fixture"
+
+    response = relay._run_codex(
+        private_original_prompt,
+        session=session,
+        session_id="fixture-session",
+        stdout=SimpleNamespace(write=lambda _value: None, flush=lambda: None),
+        _bypass_loopx_turn=True,
+        _turn_deadline=time.monotonic() + 20,
+    )
+
+    invocations = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    assert response == "bounded turn complete"
+    assert len(invocations) == 2
+    assert invocations[0]["argv"][:2] == ["exec", "--skip-git-repo-check"]
+    assert "--ephemeral" not in invocations[0]["argv"]
+    assert invocations[1]["argv"][:3] == [
+        "exec",
+        "resume",
+        "--skip-git-repo-check",
+    ]
+    assert "thread-single-001" in invocations[1]["argv"]
+    assert private_original_prompt in invocations[0]["prompt"]
+    assert private_original_prompt not in invocations[1]["prompt"]
+    assert "Continue the same bounded task in this thread" in invocations[1]["prompt"]
+
+    traces = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in trace_dir.glob("*.compact.json")
+    ]
+    failure = next(
+        trace
+        for trace in traces
+        if trace.get("trace_kind") == "codex_exec_process_failure"
+    )
+    assert (
+        failure["codex_exec_process"]["same_session_continuation_scheduled"] is True
+    )
+    continuation = next(
+        trace
+        for trace in traces
+        if trace.get("trace_kind") == "codex_exec_same_session_continuation"
+    )
+    assert continuation["codex_exec_same_session_continuation"] == {
+        "schema_version": "skillsbench_codex_exec_same_session_continuation_v0",
+        "stage": "completed",
+        "continuation_index": 1,
+        "thread_present": True,
+        "shared_sequence_deadline_preserved": True,
+        "original_prompt_replayed": False,
+        "thread_ids_recorded": False,
+        "raw_task_text_recorded": False,
+    }
+    public_trace_text = json.dumps(traces, sort_keys=True)
+    assert private_original_prompt not in public_trace_text
+    assert "thread-single-001" not in public_trace_text
+
+
+def test_skillsbench_single_turn_codex_exec_hands_exhausted_progress_to_validator(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    invocation_log = tmp_path / "invocations.jsonl"
+    fake_codex = tmp_path / "fake-codex"
+    fake_codex.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+import pathlib
+import sys
+import time
+
+log_path = pathlib.Path(os.environ["FAKE_CODEX_INVOCATION_LOG"])
+with log_path.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps({"argv": sys.argv[1:]}) + "\\n")
+print(json.dumps({"type": "thread.started", "thread_id": "private-thread"}), flush=True)
+time.sleep(10)
+""",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(0o755)
+    monkeypatch.setenv("FAKE_CODEX_INVOCATION_LOG", str(invocation_log))
+    trace_dir = tmp_path / "public-traces"
+    trace_dir.mkdir()
+    relay = SkillsBenchLocalAcpRelay(
+        CodexExecConfig(
+            codex_bin=str(fake_codex),
+            loopx_turn_agent_cli=True,
+            loopx_turn_max_turns=1,
+            remote_command_file_bridge_command="synthetic-bridge",
+            worker_public_trace_dir=str(trace_dir),
+            bridge_idle_timeout_sec=1,
+            timeout_sec=30,
+        )
+    )
+    monkeypatch.setattr(
+        relay,
+        "_consume_remote_bridge_for_solver",
+        lambda: {"ready": True},
+    )
+    monkeypatch.setattr(
+        relay,
+        "_publish_remote_bridge_consumption_trace",
+        lambda _probe: None,
+    )
+    monkeypatch.setattr(
+        relay,
+        "_start_json_file_bridge_server",
+        lambda **_kwargs: ("synthetic-agent-bridge", None),
+    )
+
+    def write_progress_summary(**kwargs: Any) -> Path:
+        kwargs["summary_path"].write_text(
+            json.dumps(
+                {
+                    "record_phase": "complete",
+                    "operation": "run_command",
+                    "task_facing_operation": True,
+                    "success": True,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return kwargs["tmp_path"] / "synthetic-wrapper"
+
+    monkeypatch.setattr(
+        relay,
+        "_write_instrumented_bridge_wrapper",
+        write_progress_summary,
+    )
+    monkeypatch.setattr(
+        relay,
+        "_prompt_with_remote_bridge_packet",
+        lambda prompt, **_kwargs: prompt,
+    )
+    monkeypatch.setattr(
+        relay,
+        "_publish_remote_bridge_agent_operations_trace",
+        lambda **_kwargs: None,
+    )
+
+    result = relay._run_loopx_turn_agent_prompt(
+        "private task fixture",
+        session={"cwd": str(tmp_path), "model": None},
+        session_id="fixture-session",
+        stdout=SimpleNamespace(write=lambda _value: None, flush=lambda: None),
+        turn_deadline=time.monotonic() + 20,
+    )
+
+    assert (
+        result.response_text
+        == runtime.SKILLSBENCH_TURN_AGENT_VALIDATION_HANDOFF_RESPONSE
+    )
+    assert result.progress_evidence["task_facing_operation_count"] == 1
+    assert result.progress_evidence["task_facing_success_count"] == 1
+    assert result.progress_evidence["raw_material_recorded"] is False
+    assert len(invocation_log.read_text(encoding="utf-8").splitlines()) == 2
+    traces = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in trace_dir.glob("*.compact.json")
+    ]
+    assert any(
+        trace.get("trace_kind") == "codex_exec_process_failure"
+        and trace["codex_exec_process"][
+            "independent_validation_handoff_scheduled"
+        ]
+        is True
+        for trace in traces
+    )
+    assert "private task fixture" not in json.dumps(traces, sort_keys=True)
+    assert "private-thread" not in json.dumps(traces, sort_keys=True)
+
+
+def test_skillsbench_turn_timeout_hands_safe_progress_to_validator(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_codex = tmp_path / "fake-codex"
+    fake_codex.write_text(
+        """#!/usr/bin/env python3
+import json
+import time
+
+print(json.dumps({"type": "thread.started", "thread_id": "private-thread"}), flush=True)
+time.sleep(10)
+""",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(0o755)
+    trace_dir = tmp_path / "public-traces"
+    trace_dir.mkdir()
+    relay = SkillsBenchLocalAcpRelay(
+        CodexExecConfig(
+            codex_bin=str(fake_codex),
+            loopx_turn_agent_cli=True,
+            loopx_turn_max_turns=1,
+            remote_command_file_bridge_command="synthetic-bridge",
+            worker_public_trace_dir=str(trace_dir),
+            bridge_idle_timeout_sec=0,
+            timeout_sec=30,
+        )
+    )
+    monkeypatch.setattr(
+        relay,
+        "_consume_remote_bridge_for_solver",
+        lambda: {"ready": True},
+    )
+    monkeypatch.setattr(
+        relay,
+        "_publish_remote_bridge_consumption_trace",
+        lambda _probe: None,
+    )
+    monkeypatch.setattr(
+        relay,
+        "_start_json_file_bridge_server",
+        lambda **_kwargs: ("synthetic-agent-bridge", None),
+    )
+
+    def write_progress_summary(**kwargs: Any) -> Path:
+        kwargs["summary_path"].write_text(
+            json.dumps(
+                {
+                    "record_phase": "complete",
+                    "operation": "run_command",
+                    "task_facing_operation": True,
+                    "success": True,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return kwargs["tmp_path"] / "synthetic-wrapper"
+
+    monkeypatch.setattr(
+        relay,
+        "_write_instrumented_bridge_wrapper",
+        write_progress_summary,
+    )
+    monkeypatch.setattr(
+        relay,
+        "_prompt_with_remote_bridge_packet",
+        lambda prompt, **_kwargs: prompt,
+    )
+    monkeypatch.setattr(
+        relay,
+        "_publish_remote_bridge_agent_operations_trace",
+        lambda **_kwargs: None,
+    )
+
+    result = relay._run_loopx_turn_agent_prompt(
+        "private timeout task fixture",
+        session={"cwd": str(tmp_path), "model": None},
+        session_id="fixture-session",
+        stdout=SimpleNamespace(write=lambda _value: None, flush=lambda: None),
+        turn_deadline=time.monotonic() + 1,
+    )
+
+    assert (
+        result.response_text
+        == runtime.SKILLSBENCH_TURN_AGENT_VALIDATION_HANDOFF_RESPONSE
+    )
+    assert result.progress_evidence["task_facing_operation_count"] == 1
+    assert result.progress_evidence["task_facing_success_count"] == 1
+    assert result.progress_evidence["raw_material_recorded"] is False
+    traces = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in trace_dir.glob("*.compact.json")
+    ]
+    failure = next(
+        trace
+        for trace in traces
+        if trace.get("trace_kind") == "codex_exec_process_failure"
+    )
+    assert failure["codex_exec_process"]["failure_category"] == "codex_exec_timeout"
+    assert (
+        failure["codex_exec_process"][
+            "independent_validation_handoff_scheduled"
+        ]
+        is True
+    )
+    public_trace_text = json.dumps(traces, sort_keys=True)
+    assert "private timeout task fixture" not in public_trace_text
+    assert "private-thread" not in public_trace_text
+
+
+def test_skillsbench_progress_validation_handoff_is_not_host_completion() -> None:
+    result = runtime._host_result(
+        {"turn_key": "synthetic-turn"},
+        runtime.SKILLSBENCH_TURN_AGENT_VALIDATION_HANDOFF_RESPONSE,
+    )
+
+    assert (
+        result["classification"]
+        == "skillsbench_loopx_turn_agent_cli_validation_handoff"
+    )
+    assert "independent validation" in result["summary"]
 
 
 def test_codex_exec_transport_retry_requires_no_task_facing_operation(
@@ -1469,6 +2153,8 @@ def test_runner_readiness_survives_public_trace_aggregation() -> None:
             "post_agent_postcondition_status": "satisfied",
             "baseline_contract": "task_declared_independent_postcondition",
             "terminal_policy": "fixed-n",
+            "turn_sequence_ref": "sequence:aaaaaaaaaaaaaaaa",
+            "turn_index": 1,
             "oracle_feedback_used": False,
         },
     )
@@ -1486,6 +2172,8 @@ def test_runner_readiness_survives_public_trace_aggregation() -> None:
             "post_agent_postcondition_status": "satisfied",
             "baseline_contract": "task_declared_independent_postcondition",
             "terminal_policy": "fixed-n",
+            "turn_sequence_ref": "sequence:aaaaaaaaaaaaaaaa",
+            "turn_index": 2,
             "oracle_feedback_used": False,
         },
     )
@@ -1509,9 +2197,60 @@ def test_runner_readiness_survives_public_trace_aggregation() -> None:
     assert receipt["proven_turn_count"] == 2
     assert receipt["committed_turn_count"] == 2
     assert receipt["observed_turn_count"] == 2
+    assert receipt["turn_sequence_count"] == 1
+    assert receipt["max_observed_turn_count_per_sequence"] == 2
+    assert receipt["max_committed_turn_count_per_sequence"] == 2
+    assert receipt["multi_turn_sequence_committed"] is True
+    assert receipt["unattributed_turn_count"] == 0
+    assert receipt["unindexed_sequence_turn_count"] == 0
     assert receipt["blocker_codes"] == []
     assert receipt["raw_task_text_recorded"] is False
     assert (
         compact["scored_workspace_validation"]["raw_validator_output_recorded"] is False
     )
     assert compact["scored_workspace_validation"]["terminal_policy"] == "fixed-n"
+
+
+def test_runner_readiness_does_not_flatten_commits_across_turn_sequences() -> None:
+    summary = SkillsBenchTurnTraceSummary()
+    for sequence_ref in (
+        "sequence:aaaaaaaaaaaaaaaa",
+        "sequence:bbbbbbbbbbbbbbbb",
+    ):
+        for turn_index, committed in ((1, True), (2, False)):
+            trace = runtime.build_skillsbench_loopx_turn_trace(
+                route="loopx-turn-agent-cli",
+                benchmark_id="synthetic-benchmark",
+                task_id="synthetic-task",
+                execution={"status": "committed" if committed else "failed"},
+                scored_workspace_validation={
+                    "status": "passed" if committed else "failed",
+                    "validator_kind": "skillsbench_stability_postcondition",
+                    "independent": True,
+                    "pre_agent_postcondition_checked": True,
+                    "pre_agent_postcondition_status": "unsatisfied",
+                    "post_agent_postcondition_status": (
+                        "progress_validated" if committed else "unsatisfied"
+                    ),
+                    "baseline_contract": "task_declared_independent_postcondition",
+                    "terminal_policy": "stability",
+                    "turn_sequence_ref": sequence_ref,
+                    "turn_index": turn_index,
+                    "oracle_feedback_used": False,
+                },
+            )
+            summary.merge(trace, trace["boundary"])
+            summary.merge(trace, trace["boundary"])
+
+    controller_trace: dict[str, Any] = {}
+    summary.apply(controller_trace)
+    receipt = controller_trace["benchmark_runner_readiness"]
+
+    assert receipt["observed_turn_count"] == 8
+    assert receipt["committed_turn_count"] == 4
+    assert receipt["turn_sequence_count"] == 2
+    assert receipt["max_observed_turn_count_per_sequence"] == 2
+    assert receipt["max_committed_turn_count_per_sequence"] == 1
+    assert receipt["multi_turn_sequence_committed"] is False
+    assert receipt["unattributed_turn_count"] == 0
+    assert receipt["unindexed_sequence_turn_count"] == 0

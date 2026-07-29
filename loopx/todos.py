@@ -20,7 +20,7 @@ from .control_plane.todos.contract import (
     TODO_STATUS_DEFERRED,
     TODO_STATUS_DONE,
     TODO_STATUS_OPEN,
-    TODO_TASK_CLASS_USER_ACTION,
+    TODO_TASK_CLASS_MONITOR,
     TODO_TASK_CLASS_USER_GATE,
     build_todo_id,
     format_todo_metadata_line,
@@ -47,6 +47,7 @@ from .control_plane.todos.contract import (
     normalize_todo_task_repository,
     parse_todo_metadata_line,
     require_todo_excluded_agents,
+    resolve_next_user_task_class,
     resolve_todo_continuation_policy,
     require_supported_todo_resume_when,
     todo_done_for_status,
@@ -97,20 +98,6 @@ from .control_plane.todos.write_policy import (
 
 
 ARCHIVE_COMPLETED_DEFAULT_MAX_ACTIVE_DONE = max(0, MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE - 2)
-
-
-def resolve_next_user_task_class(
-    next_user_todo: str | None,
-    next_user_task_class: str | None,
-) -> str:
-    if next_user_task_class and not next_user_todo:
-        raise ValueError("--next-user-task-class requires --next-user-todo")
-    effective = next_user_task_class or TODO_TASK_CLASS_USER_GATE
-    if effective not in {TODO_TASK_CLASS_USER_GATE, TODO_TASK_CLASS_USER_ACTION}:
-        raise ValueError(
-            "next_user_task_class must be one of: user_action, user_gate"
-        )
-    return effective
 
 
 def require_registered_todo_excluded_agents(
@@ -935,6 +922,11 @@ def add_goal_todo(
         if unblocks_todo_id and not normalized_unblocks_todo_id:
             raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
         normalized_resume_when = require_supported_todo_resume_when(resume_when)
+        if task_class == TODO_TASK_CLASS_MONITOR and normalized_resume_when:
+            raise ValueError(
+                "continuous_monitor todos cannot use resume_when; use target_key, "
+                "cadence, and next_due_at so the monitor can observe the transition"
+            )
         if normalized_status == TODO_STATUS_DEFERRED and not normalized_resume_when:
             raise ValueError("deferred todo add requires --resume-when with a supported condition")
         normalized_monitor_metadata = require_monitor_metadata_scope(
@@ -1078,6 +1070,7 @@ def update_goal_todo(
     unblocks_todo_id: str | None = None,
     successor_todo_ids: list[str] | None = None,
     resume_when: str | None = None,
+    clear_resume_when: bool = False,
     no_followup: bool | None = None,
     monitor_metadata: dict[str, Any] | None = None,
     clear_claim: bool = False,
@@ -1094,6 +1087,10 @@ def update_goal_todo(
         raise ValueError("todo update accepts either blocks_agent or clear_blocks_agent, not both")
     if bound_agent and goal_bound:
         raise ValueError("todo update accepts either bound_agent or goal_bound, not both")
+    if resume_when and clear_resume_when:
+        raise ValueError(
+            "todo update accepts either resume_when or clear_resume_when, not both"
+        )
     resolved_project, resolved_state_file = resolve_todo_state_path(
         registry_path=registry_path,
         goal_id=goal_id,
@@ -1165,7 +1162,7 @@ def update_goal_todo(
                 bound_agent, goal_bound,
                 excluded_agents, clear_excluded_agents, global_gate,
                 clear_global_gate, unblocks_todo_id, successor_todo_ids,
-                resume_when, no_followup,
+                resume_when, clear_resume_when, no_followup,
             ),
             monitor_metadata=monitor_metadata,
         )
@@ -1292,10 +1289,26 @@ def update_goal_todo(
         if successor_todo_ids and not normalized_successor_todo_ids:
             raise ValueError("successor_todo_ids must contain public todo_<letters-digits-underscore-hyphen> tokens")
         normalized_resume_when = require_supported_todo_resume_when(resume_when)
-        effective_resume_when = normalized_resume_when or normalize_supported_todo_resume_when(
-            existing_block.get("resume_when")
+        effective_resume_when = (
+            None
+            if clear_resume_when
+            else normalized_resume_when
+            or normalize_supported_todo_resume_when(existing_block.get("resume_when"))
         )
-        if status and target_status == TODO_STATUS_DEFERRED and not effective_resume_when:
+        if target_task_class == TODO_TASK_CLASS_MONITOR and normalized_resume_when:
+            raise ValueError(
+                "continuous_monitor todos cannot use resume_when; use target_key, "
+                "cadence, and next_due_at so the monitor can observe the transition"
+            )
+        if (
+            task_class == TODO_TASK_CLASS_MONITOR
+            and effective_resume_when
+            and not clear_resume_when
+        ):
+            raise ValueError(
+                "moving a todo to continuous_monitor requires --clear-resume-when"
+            )
+        if target_status == TODO_STATUS_DEFERRED and not effective_resume_when:
             raise ValueError("transition to deferred requires --resume-when with a supported condition")
         normalized_monitor_metadata = require_monitor_metadata_scope(
             monitor_metadata=monitor_metadata,
@@ -1340,6 +1353,7 @@ def update_goal_todo(
             unblocks_todo_id=normalized_unblocks_todo_id,
             successor_todo_ids=normalized_successor_todo_ids if successor_todo_ids is not None else None,
             resume_when=normalized_resume_when,
+            clear_resume_when=clear_resume_when,
             no_followup=no_followup,
             monitor_metadata=normalized_monitor_metadata,
             clear_claim=clear_claim,

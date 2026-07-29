@@ -13,7 +13,9 @@ from ..goals.goal_frontier import AUTONOMOUS_REPLAN_REQUIRED_MODE
 from ..goals.goal_vision_wait import exact_blocked_successor_wait_state
 from ..scheduler.execution_context import (
     SchedulerExecutionContextResolution,
+    SchedulerRuntimeProfile,
     render_scheduler_execution_args,
+    scheduler_runtime_profile_for_execution_context,
 )
 from ..todos.contract import (
     TODO_TASK_CLASS_MONITOR,
@@ -29,6 +31,7 @@ from .primary_action import (
     protocol_first_candidate_action as _protocol_first_candidate_action,
     protocol_monitor_action as _protocol_monitor_action,
 )
+from .runtime_capability_reentry import build_runtime_capability_reentry_packet
 
 INTERACTION_CONTRACT_SCHEMA_VERSION = "loopx_interaction_contract_v0"
 INTERACTION_RESPONSE_PLAN_SCHEMA_VERSION = "interaction_response_plan_v0"
@@ -128,7 +131,11 @@ def _user_gate_scope_projection_repair_active(payload: dict[str, Any]) -> bool:
     repair = payload.get("stall_self_repair")
     return bool(
         isinstance(repair, dict)
-        and repair.get("trigger") == "user_gate_scope_projection_drift"
+        and repair.get("trigger")
+        in {
+            "user_gate_scope_projection_drift",
+            "runtime_capability_user_gate_overreach",
+        }
     )
 
 
@@ -496,6 +503,7 @@ def interaction_next_cli_actions(
     scheduler_execution_context: (
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
+    capability_reentry: dict[str, Any] | None = None,
 ) -> list[str]:
     goal_id = str(payload.get("goal_id") or "<GOAL_ID>")
     agent_identity = (
@@ -530,6 +538,21 @@ def interaction_next_cli_actions(
         if scheduler_args
         else "use the current host packet's typed monitor command"
     )
+    typed_heartbeat_receipt_retry = (
+        f"on missing/write_failed heartbeat_receipt only: {typed_quota_guard} "
+        '--turn-instance-id "${LOOPX_TURN:?}"'
+        if scheduler_args
+        else (
+            "on missing/write_failed heartbeat_receipt only: retry the current "
+            "host packet's typed quota guard with the same heartbeat turn id"
+        )
+    )
+    heartbeat_turn_receipt_enabled = (
+        scheduler_runtime_profile_for_execution_context(
+            scheduler_execution_context
+        )
+        is SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
+    )
     capability_resolution_actions = build_capability_resolution_writeback_actions(
         payload.get("capability_gate"),
         goal_id=goal_id,
@@ -539,6 +562,20 @@ def interaction_next_cli_actions(
             else None
         ),
     )
+    if capability_reentry is None:
+        capability_reentry = build_runtime_capability_reentry_packet(
+            payload,
+            available_capabilities=available_capabilities,
+            scheduler_execution_context=scheduler_execution_context,
+        )
+    if capability_reentry is not None:
+        capability_resolution_actions.extend(
+            (
+                "after real-callsite verification of "
+                f"{candidate['capability']}: {candidate['command']}"
+            )
+            for candidate in capability_reentry["candidates"]
+        )
     if mode == "terminal_no_followup":
         return ["no quota spend until explicit goal resume or newly projected work"]
     if mode == "agent_monitor_only":
@@ -565,6 +602,8 @@ def interaction_next_cli_actions(
             f"loopx heartbeat-prompt --thin --goal-id {goal_id} --agent-id <registered-agent> --agent-scope '<scope>'",
         ]
     if mode == "monitor_quiet_skip":
+        if heartbeat_turn_receipt_enabled:
+            return [typed_heartbeat_receipt_retry]
         return [
             typed_monitor_poll,
             typed_quota_guard,
@@ -620,7 +659,11 @@ def interaction_next_cli_actions(
         first_candidate = candidates[0] if candidates and isinstance(candidates[0], dict) else {}
         todo_id = str(first_candidate.get("todo_id") or "<todo_id>")
         return [
-            f"loopx todo update --goal-id {goal_id} --todo-id {todo_id}{lifecycle_actor_args} --status open --note '<public-safe successor replan reason>'",
+            (
+                f"loopx todo update --goal-id {goal_id} --todo-id {todo_id}"
+                f"{lifecycle_actor_args} --status open --clear-resume-when "
+                "--note '<public-safe successor replan reason>'"
+            ),
             f"loopx refresh-state --goal-id {goal_id} --classification successor_replan_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{scoped_cli_args}",
             f"loopx quota spend-slot --goal-id {goal_id} --slots 1 --source heartbeat --execute{scoped_cli_args}",
         ]
@@ -743,7 +786,7 @@ def _interaction_spend_policy(
     if mode in {"user_gate", "user_todo_blocker_push", "user_action_required"}:
         return "no spend for gate or blocker push"
     if mode == "monitor_quiet_skip":
-        return "no spend for unchanged monitor poll"
+        return "no spend for unchanged heartbeat stall receipt"
     if mode == "monitor_due":
         return (
             "spend once only after a validated material monitor transition; "
@@ -869,6 +912,12 @@ def _interaction_spend_after_validation(mode: str) -> bool:
 def _interaction_user_reason(payload: dict[str, Any]) -> Any:
     return (
         (
+            payload.get("stall_self_repair", {}).get("reason")
+            if _user_gate_scope_projection_repair_active(payload)
+            and isinstance(payload.get("stall_self_repair"), dict)
+            else None
+        )
+        or (
             payload.get("user_gate_notification_cooldown", {}).get("reason")
             if _user_gate_notification_suppressed(payload)
             else None
@@ -945,7 +994,10 @@ def _build_interaction_user_channel(
         "notify": "NOTIFY"
         if user_required or non_blocking_notice
         else "DONT_NOTIFY"
-        if _user_gate_notification_suppressed(payload)
+        if (
+            _user_gate_notification_suppressed(payload)
+            or _user_gate_scope_projection_repair_active(payload)
+        )
         else heartbeat_recommendation.get("notify", "DONT_NOTIFY"),
     }
     if actions:
@@ -995,12 +1047,18 @@ def _build_interaction_cli_channel(
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
 ) -> dict[str, Any]:
-    return {
+    capability_reentry = build_runtime_capability_reentry_packet(
+        payload,
+        available_capabilities=available_capabilities,
+        scheduler_execution_context=scheduler_execution_context,
+    )
+    channel = {
         "next_cli_actions": interaction_next_cli_actions(
             payload,
             mode=mode,
             available_capabilities=available_capabilities,
             scheduler_execution_context=scheduler_execution_context,
+            capability_reentry=capability_reentry,
         ),
         "spend_allowed_now": False,
         "spend_after_validation": spend_after_validation,
@@ -1011,6 +1069,9 @@ def _build_interaction_cli_channel(
             spend_after_validation=spend_after_validation,
         ),
     }
+    if capability_reentry is not None:
+        channel["runtime_capability_reentry"] = capability_reentry
+    return channel
 
 
 def _attach_interaction_required_reads(
@@ -1021,6 +1082,19 @@ def _attach_interaction_required_reads(
         return
     contract["agent_channel"]["required_reads"] = required_reads
     contract["cli_channel"]["required_reads"] = required_reads
+
+
+def _attach_interaction_post_writeback_actions(
+    contract: dict[str, Any], payload: dict[str, Any]
+) -> None:
+    goal_boundary = (
+        payload.get("goal_boundary")
+        if isinstance(payload.get("goal_boundary"), Mapping)
+        else {}
+    )
+    actions = goal_boundary.get("post_writeback_actions")
+    if isinstance(actions, list) and actions:
+        contract["cli_channel"]["post_writeback_actions"] = actions
 
 
 def _attach_interaction_vision_continuation_audit(
@@ -1056,6 +1130,9 @@ def _attach_interaction_vision_continuation_audit(
             "agent_judge_instruction": vision_gap_judge.get("agent_judge_instruction"),
             "evidence_read_instruction": vision_gap_judge.get(
                 "evidence_read_instruction"
+            ),
+            "registry_read_instruction": vision_gap_judge.get(
+                "registry_read_instruction"
             ),
             "done_only_when": vision_gap_judge.get("done_only_when") or [],
             "continue_when": vision_gap_judge.get("continue_when") or [],
@@ -1185,6 +1262,7 @@ def build_interaction_contract(
     if response_plan is not None:
         contract["response_plan"] = response_plan
     _attach_interaction_required_reads(contract, required_reads)
+    _attach_interaction_post_writeback_actions(contract, payload)
     _attach_interaction_vision_continuation_audit(contract, payload)
     _attach_interaction_vision_wait_state(contract, payload)
     if _interaction_fallback_policy_required(payload, mode=mode):

@@ -17,6 +17,9 @@ incident report, or launch draft.
 - [Newcomer command path](guides/newcomer-command-path.md): the minimal product
   path for `/loopx`, `/loopx <goal>`, and one CLI quickstart before the full
   command catalog.
+- [Custom Agent runner integration](guides/custom-agent-runner-integration.md):
+  the concise CLI, lightweight skill, self-driven tick, and decentralized
+  handoff model for an existing remote runner or workflow supervisor.
 - [Auto-research command path](guides/auto-research-command-path.md): the
   shortest visible route from a clean workspace to an inspectable multi-agent
   auto-research rehearsal with stop and takeover controls.
@@ -41,6 +44,9 @@ incident report, or launch draft.
 - [Architecture](architecture.md): core concepts and control-plane shape.
 - [Extensions and capabilities](reference/extensions.md): declarative manifests,
   doctor-verified subprocess activation, and reversible provider lifecycle.
+- [Project skill delivery](reference/project-skill-delivery.md): managed,
+  project-local discovery for release-owned agent skills without domain
+  authority expansion.
 - [Integration guide](integration.md): how to connect a project to LoopX,
   including public-safe Lark or Feishu reply card payloads.
 - [Showcases](showcases/README.md): public-safe cases, reproducible demos, and
@@ -92,6 +98,7 @@ incident report, or launch draft.
 - [State interaction model](state-interaction-model.md)
 - [Interaction pattern catalog](interaction-pattern-catalog.md)
 - [Extensions and capabilities](reference/extensions.md)
+- [Project skill delivery](reference/project-skill-delivery.md)
 - [Field-derived patterns](field-derived-patterns.md)
 - [Public/private boundary](public-private-boundary.md)
 
@@ -99,6 +106,7 @@ incident report, or launch draft.
 
 - [Getting started](guides/getting-started.md)
 - [Newcomer command path](guides/newcomer-command-path.md)
+- [Custom Agent runner integration](guides/custom-agent-runner-integration.md)
 - [Auto-research command path](guides/auto-research-command-path.md)
 - [Multi-agent product recipe](guides/multi-agent-product-recipe.md)
 - [Integration guide](integration.md)

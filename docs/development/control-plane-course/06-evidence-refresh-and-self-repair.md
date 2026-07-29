@@ -1,8 +1,12 @@
 # 第 6 讲：证据、Refresh 与 Self-Repair
 
-> 核心问题：为什么“代码改了”“todo 勾了”“agent 说完成了”都不足以证明长期目标真的推进？
+> **本讲结论：** Artifact 只有经过 validation、writeback、refresh 和一次性 spend，才成为
+> material progress；replan 或 repair 必须留下 bounded state delta，不能只写 ACK。
 
 建议时长：100 分钟。讲解 55 分钟、失败回放 25 分钟、实验 20 分钟。
+
+如果尚未建立 Turn、material delta、replan 与 self-repair 的整体关系，先读一小时专题
+[长程任务如何收敛](topic-long-horizon-convergence.md)，再用本讲深入 writeback 和恢复细节。
 
 ## 学习目标
 
@@ -13,6 +17,67 @@
 3. 解释 projection gap、outcome floor、vision checkpoint 和 repair delta。
 4. 在连续 no-progress 时执行 self-repair，而不是降低 gate。
 5. 为 public/private evidence 设计安全边界和 compact lineage。
+
+## 本讲技术契约
+
+| 边界 | LoopX 中的答案 |
+| --- | --- |
+| Artifact owner | Workspace、外部系统或 host 保存产物；LoopX 保存 public-safe ref 与 lineage |
+| Acceptance owner | Independent validator、readback 或明确的 user/reviewer decision |
+| Transaction owner | Turn journal 保存 phase progress，不能替代 goal state |
+| Commit boundary | Validation 先于 writeback，writeback 先于 spend，scheduler apply 先于 ACK |
+| Recovery | 按失败 phase 恢复；repair/replan 必须写出可 read back 的 state delta |
+
+## 三个 Showcase 中什么才算推进
+
+产物存在只是第一步。对三个 Showcase，可以直接比较“看起来完成”和“控制面已接受”：
+
+| 观察 | 是否已构成 material progress | 还缺什么 |
+| --- | --- | --- |
+| Issue-Fix 修改了文件 | 否 | 聚焦验证、正确 worktree、todo lineage |
+| PR 已创建 | 视情况 | PR/commit readback、monitor successor、durable writeback |
+| PR checks 轮询仍无变化 | 否 | 只更新 lane-local no-change evidence 和 next due，不 spend |
+| Auto ML 外部任务启动成功 | 是 effect progress，不是模型证据 | exact revision/window/task receipt、monitor successor |
+| 外部任务因基础设施失败 | 是诊断证据，不是模型负证据 | failure attribution、repair/retry successor |
+| matched result 未超过 baseline 或触发 guardrail | 是 no-promote evidence | result ledger、Graph refutes/supports edge、路线收缩 |
+| matched result 达到目标与 guardrail | 是 promotion candidate | 独立 evaluator、promotion/release gate 与 activation receipt |
+| 研究 dev metric 提升 | 是局部证据，不是目标完成 | holdout 或独立 evaluator evidence |
+| holdout 通过且 boundary clean | 是候选推进 | promotion review/receipt 与 acceptance checkpoint |
+| worker 声称“没有更多想法” | 否 | 从 durable frontier、retry 和 vision gap 推导 completion |
+
+这张表也是 self-repair 的入口：当外部结果已经存在但 writeback、successor、vision 或
+projection 缺失时，应修补丢失的 state delta；当根本没有新证据时，不应靠改写总结制造
+“推进”。
+
+## Auto ML：先判可比性，再判模型价值
+
+Single-Agent Auto ML 的结果 reducer 应按固定顺序工作：
+
+```text
+provider terminal readback
+  -> identity/revision/window match
+  -> artifact completeness
+  -> failure attribution
+  -> baseline/guardrail comparison
+  -> promote | no-promote | retry | repair
+  -> compact result ledger
+  -> Explore Graph event
+```
+
+前四步不通过时，metric 没有资格进入模型判断。常见分类如下：
+
+| 结果 | 进入模型证据？ | Kernel 下一步 | Explore 记录 |
+| --- | --- | --- | --- |
+| task 仍运行或 readback unchanged | 否 | monitor continuation | 通常 zero-write |
+| provider/transport/resource failure | 否 | repair 或 bounded retry | diagnostic node/depends_on，可选 |
+| revision、窗口或 baseline 不匹配 | 否 | blocker/replan | invalid-comparison finding |
+| comparable negative result | 是 | no-promote、retire near-neighbor 或新 successor | refutes/negative finding |
+| comparable positive result，guardrail clean | 是 | promotion gate | supports/promotion-candidate finding |
+
+Explore Graph 只追加 compact、public-safe、带 lineage 的 material finding；不保存 raw log。
+Explore Harness 下一轮可以利用 negative finding、近邻排除和资源状态减少重复实验，但它不能
+把一次高置信排序升级为 acceptance evidence。Reward Memory 可以补充历史经验，同样必须
+在当前 revision 和数据合同上重新验证。
 
 ## “做了”与“控制面推进了”之间的差距
 
@@ -280,6 +345,27 @@ signal
 - raw feedback 不直接覆盖 Vision，必须形成明确 source、scope 和 delta；
 - performance review 可以影响下一轮优先级，但仍要通过 todo/gate/vision API 写回。
 
+同一句自然语言反馈可能需要落到不同合同，分类依据是它要改变什么：
+
+| 反馈语义 | 应写入的合同 | 不能顺带获得什么 |
+| --- | --- | --- |
+| 对 exact action 的允许或拒绝 | scoped operator gate + decision receipt | 其他 action、其他 head 或其他 goal 的授权 |
+| 对当前事实的纠正 | evidence / fresh observation | 自动可执行的 todo |
+| 对当前路线的纠正 | vision patch / replan delta + successor | 绕过 capability、workspace 或 user gate |
+| 对某次交付的评价 | run-bound reward | 长期策略或通用权限 |
+| 可复用的表达偏好 | reviewed soft preference | publish、merge 或生产 authority |
+| 可复用的工程经验 | procedural experience + current-artifact verification | 把旧经验当当前事实 |
+
+Reward Memory 位于“评价证据”与“未来策略影响”之间。它可以把 run-bound reward 提炼成
+带 source、scope、authority、freshness 和 lifecycle 的候选，再经 review/activation 后影响
+匹配 surface 的排序、改写、诊断或验证计划。它不能读取一段表扬就生成 hard policy，也不能
+用高 confidence 扩大 actor 原本没有的权限；hard policy 的生效 scope 必须由独立 authority
+checkpoint 证明。
+
+应用记忆后仍需生成 influence/application receipt，并在当前 artifact 上验证技术主张。当前
+todo、gate、fresh observation 和 source-of-truth 始终高于 recalled experience。更完整的
+provider 与 default-off 边界见[第 9 讲的 Reward Memory](09-extension-layer.md#reward-memory)。
+
 开发 connector 或 inbox 时，应先把 signal 归一化为 public-safe evidence，再由
 现有 Core State 承接 anchor。第 9 讲的 Lark Event Inbox 展示了这一边界；不要
 为每种外部信号新增一个 quota 分支。
@@ -546,6 +632,38 @@ loopx refresh-state \
   --agent-id <lab-agent> \
   --vision-unchanged-reason "lab acceptance remains unchanged"
 ```
+
+## Turn Journal 只拥有事务恢复
+
+`run_loopx_turn_once` 会把 plan、host result、task validation、writeback、spend 和 scheduler
+状态写入 `runtime_root/goals/<goal-id>/turns/<turn-key>.json`。这份 journal 的 owner 是
+**单个 Turn 的阶段进度**，不是 goal truth：只有 `writeback` callback 成功，长期状态才发生
+变化；只有 source state readback 才能证明 todo、vision 或 evidence 已提交。
+
+这一区分让恢复可以按失败阶段精确继续：
+
+| 停止位置 | Journal 已拥有的事实 | 重试时允许做什么 |
+| --- | --- | --- |
+| `host_execute` 失败 | plan、失败 receipt | 重新调用 host |
+| task validation 失败 | typed host result、validator failure | 保留合法 result，重新跑 postcondition |
+| `durable_writeback` 失败 | validated result | 只重试 writeback，不重复 host |
+| `quota_spend` 失败 | durable state 已写 | 只重试 spend，不重复 delivery |
+| scheduler 尚未 apply / ACK | writeback 与 spend 已完成 | 只结算 scheduler effect 与 ACK |
+
+`completed_phases` 必须是事务阶段的有序前缀；`validate_loopx_turn_receipt` 会拒绝跳过
+validation、提前 spend 或把错误 phase 写成完成。已 `committed` / `stopped` 的 journal
+再次执行时直接 replay，不重新调用 host。
+
+因此这里至少有三种不同 ledger：
+
+```text
+Turn journal       owns one execution transaction and resume cursor
+Goal/event state   owns durable lifecycle facts
+Run history/status owns evidence indexes and read projections
+```
+
+把 journal 当 goal state，会让一个“阶段已记录”的本地文件冒充业务 transition；把 run
+history 当 journal，又无法可靠判断该从 writeback、spend 还是 scheduler ACK 恢复。
 
 ## 核心代码领读：从“我做了”到可归因的 refresh 与 spend
 

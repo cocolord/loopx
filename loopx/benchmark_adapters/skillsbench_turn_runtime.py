@@ -19,7 +19,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 from ..benchmark_case_state import benchmark_case_loopx_command_prefix
 from ..control_plane.turn_driver import run_loopx_turn_once
@@ -41,6 +41,9 @@ SKILLSBENCH_TURN_SEQUENCE_BASELINE_ENV = "LOOPX_TURN_SEQUENCE_BASELINE_FILE"
 SKILLSBENCH_LOOPX_TURN_TERMINAL_POLICIES = frozenset(
     {"validator", "fixed-n", "stability"}
 )
+SKILLSBENCH_TURN_AGENT_VALIDATION_HANDOFF_RESPONSE = (
+    "bounded task-facing progress awaits independent scored-workspace validation"
+)
 
 
 @dataclass(frozen=True)
@@ -49,7 +52,7 @@ class SkillsBenchTurnAgentResult:
     progress_evidence: Mapping[str, Any]
 
 
-AgentPromptRunner = Callable[[str], str | SkillsBenchTurnAgentResult]
+AgentPromptRunner = Callable[[str], Union[str, SkillsBenchTurnAgentResult]]
 PublicTraceWriter = Callable[[dict[str, Any]], None]
 TurnObserver = Callable[[dict[str, Any], dict[str, Any]], None]
 
@@ -274,18 +277,29 @@ def _host_result(request: Mapping[str, Any], response: str) -> dict[str, Any]:
     recoverable_failure = response.startswith(RECOVERABLE_CODEX_TURN_FAILURE_PREFIX)
     if recoverable_failure:
         raise SkillsBenchTurnAgentFailure("agent CLI execution requires repair")
+    validation_handoff = (
+        response == SKILLSBENCH_TURN_AGENT_VALIDATION_HANDOFF_RESPONSE
+    )
     return {
         "schema_version": "loopx_turn_result_v0",
         "turn_key": turn_key,
         "result_kind": "validated_progress",
         "completed_phases": ["host_execute", "typed_result"],
-        "classification": "skillsbench_loopx_turn_agent_cli_progress",
+        "classification": (
+            "skillsbench_loopx_turn_agent_cli_validation_handoff"
+            if validation_handoff
+            else "skillsbench_loopx_turn_agent_cli_progress"
+        ),
         "recommended_action": "continue from the case-local LoopX frontier if work remains",
         "next_action": "use the next typed Turn rather than an ungoverned prompt poll",
         "delivery_batch_scale": "single_surface",
         "delivery_outcome": "outcome_progress",
         "vision_unchanged_reason": "the benchmark case objective is unchanged",
-        "summary": "agent CLI completed one bounded scored-workspace turn",
+        "summary": (
+            "agent CLI yielded bounded task-facing progress for independent validation"
+            if validation_handoff
+            else "agent CLI completed one bounded scored-workspace turn"
+        ),
     }
 
 
@@ -295,12 +309,12 @@ def _agent_result(value: str | SkillsBenchTurnAgentResult) -> tuple[str, dict[st
     return str(value), {}
 
 
-def _verified_bridge_write_progress(value: Mapping[str, Any]) -> bool:
-    count = value.get("successful_task_file_write_count")
+def _verified_bridge_content_progress(value: Mapping[str, Any]) -> bool:
+    count = value.get("successful_task_file_change_count")
     return bool(
         value.get("schema_version")
         == "skillsbench_bridge_task_progress_receipt_v0"
-        and value.get("status") == "verified_task_file_write"
+        and value.get("status") == "verified_task_content_change"
         and isinstance(count, int)
         and not isinstance(count, bool)
         and count > 0
@@ -468,7 +482,7 @@ def run_skillsbench_loopx_turn(
             completion_satisfied = completion_result.get("ok") is True
             progress_detected = bool(
                 exit_code == config.progress_exit_code
-                or _verified_bridge_write_progress(agent_progress_evidence)
+                or _verified_bridge_content_progress(agent_progress_evidence)
             )
             stability_validation_evidence = {
                 "stability_progress_detected": progress_detected,
@@ -505,21 +519,21 @@ def run_skillsbench_loopx_turn(
             }
         validation_succeeded = exit_code in {0, config.progress_exit_code}
         if not validation_succeeded:
-            if _verified_bridge_write_progress(agent_progress_evidence):
+            if _verified_bridge_content_progress(agent_progress_evidence):
                 effective_step_kind = sequence_step_kind
                 if effective_step_kind == "validator":
                     effective_step_kind = "progress"
                 if effective_step_kind == "terminal":
                     return {
                         "status": "passed",
-                        "validator_kind": "skillsbench_bridge_write_progress",
-                        "summary": "independent task-facing bridge write validated progress",
+                        "validator_kind": "skillsbench_bridge_content_progress",
+                        "summary": "independent task-facing content change validated progress",
                         "exit_code": 0,
                     }
                 return {
                     "status": "progress",
-                    "validator_kind": "skillsbench_bridge_write_progress",
-                    "summary": "independent task-facing bridge write validated progress",
+                    "validator_kind": "skillsbench_bridge_content_progress",
+                    "summary": "independent task-facing content change validated progress",
                     "exit_code": config.progress_exit_code,
                 }
             return {
@@ -622,10 +636,13 @@ def run_skillsbench_loopx_turn(
     validation_passed = validation_status in {"passed", "progress"}
     terminal_complete = validation_status == "passed"
     validated_progress = validation_status in {"passed", "progress"}
-    bridge_write_progress = _verified_bridge_write_progress(agent_progress_evidence)
+    bridge_content_progress = _verified_bridge_content_progress(agent_progress_evidence)
     write_count = agent_progress_evidence.get("successful_task_file_write_count")
     if not isinstance(write_count, int) or isinstance(write_count, bool):
         write_count = 0
+    change_count = agent_progress_evidence.get("successful_task_file_change_count")
+    if not isinstance(change_count, int) or isinstance(change_count, bool):
+        change_count = 0
     scored_validation = {
         "schema_version": "skillsbench_scored_workspace_validation_v0",
         "status": ("passed" if validation_passed else "failed"),
@@ -657,14 +674,15 @@ def run_skillsbench_loopx_turn(
             stability_validation_evidence.get("stability_completion_satisfied") is True
         ),
         "baseline_contract": (
-            "task_declared_independent_postcondition_or_verified_bridge_write"
+            "task_declared_independent_postcondition_or_verified_content_change"
         ),
         "progress_evidence_kind": (
-            "verified_task_file_write"
-            if bridge_write_progress
+            "verified_task_content_change"
+            if bridge_content_progress
             else "scored_workspace_command"
         ),
         "successful_task_file_write_count": max(0, write_count),
+        "successful_task_file_change_count": max(0, change_count),
         "oracle_feedback_used": False,
         "meaningful_operation_count": bridge.meaningful_operation_count,
         "raw_validator_output_recorded": False,
@@ -690,6 +708,9 @@ def run_skillsbench_loopx_turn_sequence(
             "SkillsBench terminal policy must be validator, fixed-n, or stability"
         )
     sequence_id = uuid.uuid4().hex[:16]
+    turn_sequence_ref = (
+        "sequence:" + hashlib.sha256(sequence_id.encode("utf-8")).hexdigest()[:16]
+    )
     sequence_baseline_path = (
         f"{config.case_runtime_root.rstrip('/')}"
         f"/benchmark-turn-sequences/{sequence_id}.baseline"
@@ -734,10 +755,24 @@ def run_skillsbench_loopx_turn_sequence(
             sequence_step_kind=sequence_step_kind,
         )
         validation["turn_index"] = turn_index
+        validation["turn_sequence_ref"] = turn_sequence_ref
         records.append((execution, validation))
+        verified_content_progress = bool(
+            validation.get("progress_evidence_kind")
+            == "verified_task_content_change"
+        )
+        sequence_terminal_complete = bool(
+            validation.get("terminal_complete") is True
+            and not (
+                config.terminal_policy == "validator"
+                and turn_index < config.max_turns
+                and verified_content_progress
+            )
+        )
+        validation["sequence_terminal_complete"] = sequence_terminal_complete
         if execution.get("status") != "committed":
             stop_reason = "turn_not_committed"
-        elif validation.get("terminal_complete") is True:
+        elif sequence_terminal_complete:
             stop_reason = "terminal_complete"
         elif validation.get("validated_progress") is not True:
             stop_reason = "no_validated_progress"
@@ -755,6 +790,7 @@ def run_skillsbench_loopx_turn_sequence(
         "status": stop_reason,
         "turn_count": len(records),
         "max_turns": config.max_turns,
+        "turn_sequence_ref": turn_sequence_ref,
         "terminal_policy": config.terminal_policy,
         "terminal_complete": stop_reason == "terminal_complete",
         "official_feedback_blinded": True,
@@ -804,7 +840,7 @@ def build_skillsbench_benchmark_runner_readiness(
     }
     blockers = [name for name, passed in checks.items() if not passed]
     turn_proven = all(checks[name] for name in LOOPX_TURN_PROOF_CHECKS)
-    return {
+    receipt = {
         "schema_version": "skillsbench_benchmark_runner_readiness_v0",
         "capability": "benchmark_runner",
         "status": "ready" if not blockers else "blocked",
@@ -820,6 +856,15 @@ def build_skillsbench_benchmark_runner_readiness(
         "credential_values_recorded": False,
         "local_paths_recorded": False,
     }
+    turn_sequence_ref = scored_workspace_validation.get("turn_sequence_ref")
+    if isinstance(turn_sequence_ref, str) and re.fullmatch(
+        r"sequence:[0-9a-f]{16}", turn_sequence_ref
+    ):
+        receipt["turn_sequence_ref"] = turn_sequence_ref
+    turn_index = scored_workspace_validation.get("turn_index")
+    if isinstance(turn_index, int) and not isinstance(turn_index, bool):
+        receipt["turn_index"] = max(1, turn_index)
+    return receipt
 
 
 def build_skillsbench_loopx_turn_trace(

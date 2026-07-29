@@ -5,8 +5,9 @@ This helper is intentionally local-side: the remote benchmark host cannot
 create an ``ssh -R`` tunnel back to itself. The launcher owns the tunnel process,
 probes the remote loopback proxy through SSH, runs one remote command, and then
 cleans the tunnel up. Public output records only lifecycle status and compact
-counts; raw SSH destinations, remote commands, proxy URLs, and command output
-are private.
+counts. It is created when the supervisor starts, refreshed atomically while
+the remote command is running, and finalized on every exit path; raw SSH
+destinations, remote commands, proxy URLs, and command output are private.
 """
 
 from __future__ import annotations
@@ -16,11 +17,13 @@ import json
 import os
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
 import time
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,19 +32,37 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.benchmark_core.remote_closeout import (
+from loopx.benchmark_core.remote_closeout import (  # noqa: E402
     build_remote_benchmark_closeout_contract,
     closeout_remote_benchmark_batch,
+)
+from loopx.benchmark_core.lifecycle import (  # noqa: E402
+    build_benchmark_live_worker_phase,
+    compact_benchmark_live_worker_phase,
 )
 
 
 SCHEMA_VERSION = "skillsbench_reverse_tunnel_supervisor_v0"
+PUBLIC_LIVENESS_SCHEMA_VERSION = "skillsbench_supervisor_public_liveness_v0"
+ACTIVE_PHASE_SCHEMA_VERSION = "skillsbench_supervisor_active_phase_v0"
+PUBLIC_LIVENESS_INTERVAL_SEC = 30.0
 DEFAULT_REMOTE_FORWARD = "127.0.0.1:18180:127.0.0.1:18180"
 DEFAULT_TEST_HOST = "chatgpt.com"
 DEFAULT_TEST_PORT = 443
 BRIDGE_HELPER = (
     Path(__file__).resolve().with_name("skillsbench_reverse_channel_bridge.py")
 )
+PROXY_PORT_FIELDS = (
+    "codex_reverse_proxy_port",
+    "benchmark_egress_proxy_port",
+    "container_forwarder_port",
+)
+
+
+class _SupervisorTerminationSignal(Exception):
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        super().__init__(signal.Signals(signum).name)
 
 
 def _host_kind(value: str) -> str:
@@ -87,6 +108,163 @@ def _forward_public_contract(remote_forward: str) -> dict[str, Any]:
     }
 
 
+def _proxy_port_coherence_public_contract(
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    declared = {
+        field: getattr(args, field, None)
+        for field in PROXY_PORT_FIELDS
+        if getattr(args, field, None) is not None
+    }
+    contract: dict[str, Any] = {
+        "schema_version": "skillsbench_proxy_port_coherence_v0",
+        "state": "not_requested",
+        "guard_enforced": False,
+        "declared_surface_count": len(declared),
+        "expected_surface_count": len(PROXY_PORT_FIELDS),
+        "raw_command_read": False,
+        "raw_command_recorded": False,
+    }
+    if not declared:
+        return contract
+    if len(declared) != len(PROXY_PORT_FIELDS):
+        missing = [
+            "--" + field.replace("_", "-")
+            for field in PROXY_PORT_FIELDS
+            if field not in declared
+        ]
+        raise ValueError(
+            "proxy port coherence declarations are all-or-none; missing "
+            + ", ".join(missing)
+        )
+
+    remote_port = _parse_remote_forward(args.remote_forward)["remote_port"]
+    ports = [remote_port, *(int(declared[field]) for field in PROXY_PORT_FIELDS)]
+    if any(port < 1 or port > 65535 for port in ports):
+        raise ValueError("proxy port coherence declarations must be valid TCP ports")
+    if len(set(ports)) != 1:
+        raise ValueError(
+            "--remote-forward remote port, --codex-reverse-proxy-port, "
+            "--benchmark-egress-proxy-port, and --container-forwarder-port "
+            "must match"
+        )
+    contract.update(
+        {
+            "state": "coherent",
+            "guard_enforced": True,
+            "coherent_port": remote_port,
+        }
+    )
+    return contract
+
+
+def _local_forward_dependency_public_contract(
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    parsed = _parse_remote_forward(args.remote_forward)
+    configured = bool(args.local_forward_managed_command)
+    return {
+        "schema_version": "skillsbench_local_forward_dependency_v0",
+        "configured": configured,
+        "state": "not_started" if configured else "not_requested",
+        "local_host_kind": _host_kind(parsed["local_host"]),
+        "local_port": parsed["local_port"],
+        "managed_command_configured": configured,
+        "managed_process_owned": False,
+        "start_attempt_count": 0,
+        "start_success_count": 0,
+        "restart_attempt_limit": max(
+            0,
+            int(args.local_forward_restart_attempts),
+        ),
+        "restart_attempt_count": 0,
+        "restart_success_count": 0,
+        "failure_count": 0,
+        "last_status": "not_started" if configured else "not_requested",
+        "raw_command_recorded": False,
+        "raw_output_recorded": False,
+    }
+
+
+def _local_forward_endpoint_ready(args: argparse.Namespace) -> bool:
+    parsed = _parse_remote_forward(args.remote_forward)
+    try:
+        with socket.create_connection(
+            (parsed["local_host"], parsed["local_port"]),
+            timeout=max(0.05, float(args.local_forward_probe_timeout_sec)),
+        ):
+            return True
+    except OSError:
+        return False
+
+
+def _wait_for_local_forward_endpoint(
+    args: argparse.Namespace,
+    proc: subprocess.Popen[Any],
+) -> tuple[bool, str]:
+    deadline = time.monotonic() + max(
+        0.1,
+        float(args.local_forward_ready_timeout_sec),
+    )
+    while time.monotonic() < deadline:
+        if _local_forward_endpoint_ready(args):
+            return True, "ready"
+        if proc.poll() is not None:
+            return False, "managed_process_exited_before_ready"
+        time.sleep(0.05)
+    return False, "endpoint_ready_timeout"
+
+
+def _start_local_forward_dependency(
+    args: argparse.Namespace,
+    dependency: dict[str, Any],
+    *,
+    previous_proc: subprocess.Popen[Any] | None,
+    restart: bool,
+) -> tuple[subprocess.Popen[Any] | None, bool]:
+    if previous_proc is not None:
+        _stop_process_group(previous_proc, grace_sec=1.0)
+    counter = "restart_attempt_count" if restart else "start_attempt_count"
+    dependency[counter] = int(dependency[counter]) + 1
+    dependency["state"] = "restarting" if restart else "starting"
+    try:
+        command = shlex.split(args.local_forward_managed_command)
+    except ValueError:
+        command = []
+    if not command:
+        dependency["failure_count"] = int(dependency["failure_count"]) + 1
+        dependency["last_status"] = "managed_command_invalid"
+        dependency["state"] = "failed"
+        return None, False
+    try:
+        proc = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        dependency["failure_count"] = int(dependency["failure_count"]) + 1
+        dependency["last_status"] = (
+            f"managed_process_launch_failed_{type(exc).__name__[:40]}"
+        )
+        dependency["state"] = "failed"
+        return None, False
+    dependency["managed_process_owned"] = True
+    ready, status = _wait_for_local_forward_endpoint(args, proc)
+    dependency["last_status"] = status
+    if not ready:
+        dependency["failure_count"] = int(dependency["failure_count"]) + 1
+        dependency["state"] = "failed"
+        _stop_process_group(proc, grace_sec=1.0)
+        return None, False
+    success_counter = "restart_success_count" if restart else "start_success_count"
+    dependency[success_counter] = int(dependency[success_counter]) + 1
+    dependency["state"] = "recovered" if restart else "ready"
+    return proc, True
+
+
 def _ssh_base_command(args: argparse.Namespace) -> list[str]:
     command = [
         args.ssh_bin,
@@ -117,6 +295,35 @@ def _json_bridge_requested(args: argparse.Namespace) -> bool:
         or args.json_remote_socket
         or args.json_remote_client_path
     )
+
+
+def _codex_bridge_requested(args: argparse.Namespace) -> bool:
+    return bool(
+        args.codex_bridge
+        or args.codex_remote_socket
+        or args.codex_remote_client_path
+        or args.codex_prompt_bridge_command
+    )
+
+
+def _codex_bridge_public_contract(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "enabled": _codex_bridge_requested(args),
+        "server_started": False,
+        "local_socket_ready": False,
+        "reverse_socket_forward_requested": bool(args.codex_remote_socket),
+        "remote_socket_ready": False,
+        "remote_client_materialized": False,
+        "participant_probe_requested": bool(args.codex_participant_sandbox),
+        "participant_probe_passed": False,
+        "participant_sandbox": args.codex_participant_sandbox or "not_requested",
+        "raw_codex_command_recorded": False,
+        "raw_prompt_bridge_command_recorded": False,
+        "raw_socket_paths_recorded": False,
+        "raw_client_path_recorded": False,
+        "raw_probe_output_recorded": False,
+        "remote_socket_cleanup": _remote_codex_socket_cleanup_public_contract(args),
+    }
 
 
 def _json_bridge_public_contract(args: argparse.Namespace) -> dict[str, Any]:
@@ -151,6 +358,15 @@ def _resolved_json_local_socket(
     if args.json_local_socket:
         return Path(args.json_local_socket).expanduser()
     return runtime_dir / "json-bridge.sock"
+
+
+def _resolved_codex_local_socket(
+    args: argparse.Namespace,
+    runtime_dir: Path,
+) -> Path:
+    if args.codex_local_socket:
+        return Path(args.codex_local_socket).expanduser()
+    return runtime_dir / "codex-bridge.sock"
 
 
 def _cleanup_stale_local_forward(args: argparse.Namespace) -> dict[str, Any]:
@@ -230,13 +446,62 @@ def _start_json_bridge_server(
     )
 
 
-def _probe_local_json_socket(args: argparse.Namespace, socket_path: Path) -> bool:
-    deadline = time.monotonic() + max(1.0, float(args.json_socket_ready_timeout_sec))
+def _start_codex_bridge_server(
+    args: argparse.Namespace,
+    *,
+    socket_path: Path,
+) -> subprocess.Popen[Any]:
+    command = [
+        sys.executable,
+        str(BRIDGE_HELPER),
+        "serve-codex",
+        "--socket",
+        str(socket_path),
+        "--codex-bin",
+        args.codex_bin,
+        "--timeout-sec",
+        str(max(1.0, float(args.codex_server_timeout_sec))),
+        "--first-action-timeout-sec",
+        str(max(0.0, float(args.codex_first_action_timeout_sec))),
+        "--bridge-idle-timeout-sec",
+        str(max(0.0, float(args.codex_bridge_idle_timeout_sec))),
+    ]
+    if args.codex_prompt_bridge_command:
+        command.extend(["--prompt-bridge-command", args.codex_prompt_bridge_command])
+    return subprocess.Popen(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        start_new_session=True,
+    )
+
+
+def _probe_local_socket(
+    socket_path: Path, *, timeout_sec: float, interval_sec: float
+) -> bool:
+    deadline = time.monotonic() + max(1.0, float(timeout_sec))
     while time.monotonic() < deadline:
         if socket_path.exists():
             return True
-        time.sleep(max(0.05, float(args.probe_interval_sec)))
+        time.sleep(max(0.05, float(interval_sec)))
     return False
+
+
+def _probe_local_json_socket(args: argparse.Namespace, socket_path: Path) -> bool:
+    return _probe_local_socket(
+        socket_path,
+        timeout_sec=args.json_socket_ready_timeout_sec,
+        interval_sec=args.probe_interval_sec,
+    )
+
+
+def _probe_local_codex_socket(args: argparse.Namespace, socket_path: Path) -> bool:
+    return _probe_local_socket(
+        socket_path,
+        timeout_sec=args.codex_socket_ready_timeout_sec,
+        interval_sec=args.probe_interval_sec,
+    )
 
 
 def _run_remote_shell_command(
@@ -268,6 +533,31 @@ def _probe_remote_json_socket(args: argparse.Namespace) -> bool:
     return proc.returncode == 0
 
 
+def _probe_remote_codex_socket(args: argparse.Namespace) -> bool:
+    command = "test -S " + shlex.quote(args.codex_remote_socket)
+    try:
+        proc = _run_remote_shell_command(
+            args,
+            command,
+            timeout_sec=args.codex_socket_ready_timeout_sec,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
+def _remote_codex_socket_cleanup_public_contract(
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    return {
+        "requested": bool(_codex_bridge_requested(args) and args.codex_remote_socket),
+        "attempted": False,
+        "ok": False,
+        "raw_socket_paths_recorded": False,
+        "raw_output_recorded": False,
+    }
+
+
 def _remote_json_socket_cleanup_public_contract(
     args: argparse.Namespace,
 ) -> dict[str, Any]:
@@ -280,12 +570,17 @@ def _remote_json_socket_cleanup_public_contract(
     }
 
 
-def _cleanup_remote_json_socket(args: argparse.Namespace) -> dict[str, Any]:
-    payload = _remote_json_socket_cleanup_public_contract(args)
+def _cleanup_remote_socket(
+    args: argparse.Namespace,
+    *,
+    socket_path: str,
+    payload: dict[str, Any],
+    blocker_prefix: str,
+) -> dict[str, Any]:
     if not payload["requested"]:
         return payload
     payload["attempted"] = True
-    command = "rm -f -- " + shlex.quote(args.json_remote_socket)
+    command = "rm -f -- " + shlex.quote(socket_path)
     try:
         proc = _run_remote_shell_command(
             args,
@@ -293,24 +588,47 @@ def _cleanup_remote_json_socket(args: argparse.Namespace) -> dict[str, Any]:
             timeout_sec=args.remote_setup_timeout_sec,
         )
     except subprocess.TimeoutExpired:
-        payload["first_blocker"] = "json_bridge_remote_socket_cleanup_timeout"
+        payload["first_blocker"] = f"{blocker_prefix}_timeout"
         return payload
     except OSError:
-        payload["first_blocker"] = "json_bridge_remote_socket_cleanup_launch_failed"
+        payload["first_blocker"] = f"{blocker_prefix}_launch_failed"
         return payload
     payload["exit_code"] = proc.returncode
     payload["stdout_size_bucket"] = _size_bucket(proc.stdout or "")
     payload["stderr_size_bucket"] = _size_bucket(proc.stderr or "")
     payload["ok"] = proc.returncode == 0
     if proc.returncode != 0:
-        payload["first_blocker"] = "json_bridge_remote_socket_cleanup_exit_nonzero"
+        payload["first_blocker"] = f"{blocker_prefix}_exit_nonzero"
     return payload
 
 
-def _materialize_remote_json_client(
-    args: argparse.Namespace, runtime_dir: Path
+def _cleanup_remote_codex_socket(args: argparse.Namespace) -> dict[str, Any]:
+    return _cleanup_remote_socket(
+        args,
+        socket_path=args.codex_remote_socket,
+        payload=_remote_codex_socket_cleanup_public_contract(args),
+        blocker_prefix="codex_bridge_remote_socket_cleanup",
+    )
+
+
+def _cleanup_remote_json_socket(args: argparse.Namespace) -> dict[str, Any]:
+    return _cleanup_remote_socket(
+        args,
+        socket_path=args.json_remote_socket,
+        payload=_remote_json_socket_cleanup_public_contract(args),
+        blocker_prefix="json_bridge_remote_socket_cleanup",
+    )
+
+
+def _materialize_remote_bridge_client(
+    args: argparse.Namespace,
+    runtime_dir: Path,
+    *,
+    kind: str,
+    remote_socket: str,
+    remote_path: str,
 ) -> bool:
-    local_client = runtime_dir / "json-bridge-client"
+    local_client = runtime_dir / f"{kind}-bridge-client"
     try:
         subprocess.run(
             [
@@ -318,9 +636,9 @@ def _materialize_remote_json_client(
                 str(BRIDGE_HELPER),
                 "write-client",
                 "--kind",
-                "json",
+                kind,
                 "--socket",
-                args.json_remote_socket,
+                remote_socket,
                 "--output",
                 str(local_client),
             ],
@@ -331,7 +649,6 @@ def _materialize_remote_json_client(
             check=True,
         )
         client_text = local_client.read_text(encoding="utf-8")
-        remote_path = args.json_remote_client_path
         remote_parent = os.path.dirname(remote_path) or "."
         remote_command = (
             "umask 077; mkdir -p "
@@ -355,8 +672,80 @@ def _materialize_remote_json_client(
     return proc.returncode == 0
 
 
+def _materialize_remote_json_client(
+    args: argparse.Namespace, runtime_dir: Path
+) -> bool:
+    return _materialize_remote_bridge_client(
+        args,
+        runtime_dir,
+        kind="json",
+        remote_socket=args.json_remote_socket,
+        remote_path=args.json_remote_client_path,
+    )
+
+
+def _materialize_remote_codex_client(
+    args: argparse.Namespace, runtime_dir: Path
+) -> bool:
+    return _materialize_remote_bridge_client(
+        args,
+        runtime_dir,
+        kind="codex",
+        remote_socket=args.codex_remote_socket,
+        remote_path=args.codex_remote_client_path,
+    )
+
+
+def _probe_remote_codex_participant(args: argparse.Namespace) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "requested": bool(args.codex_participant_sandbox),
+        "passed": False,
+        "sandbox": args.codex_participant_sandbox or "not_requested",
+        "raw_output_recorded": False,
+        "raw_command_recorded": False,
+        "raw_paths_recorded": False,
+        "credential_values_recorded": False,
+    }
+    if not payload["requested"]:
+        return payload
+    command = " ".join(
+        [
+            shlex.quote(args.codex_remote_client_path),
+            "sandbox",
+            "-c",
+            shlex.quote(f'sandbox_mode="{args.codex_participant_sandbox}"'),
+            "--",
+            "true",
+            ">/dev/null",
+            "2>&1",
+        ]
+    )
+    try:
+        proc = _run_remote_shell_command(
+            args,
+            command,
+            timeout_sec=args.codex_participant_probe_timeout_sec,
+        )
+    except subprocess.TimeoutExpired:
+        payload["first_blocker"] = "codex_bridge_participant_probe_timeout"
+        return payload
+    except OSError:
+        payload["first_blocker"] = "codex_bridge_participant_probe_launch_failed"
+        return payload
+    payload["exit_code"] = proc.returncode
+    payload["passed"] = proc.returncode == 0
+    if proc.returncode != 0:
+        payload["first_blocker"] = "codex_bridge_participant_probe_exit_nonzero"
+    return payload
+
+
 def _render_remote_command(args: argparse.Namespace) -> str:
     command = args.remote_command
+    if _codex_bridge_requested(args):
+        command = command.replace(
+            "{codex_bridge_client}",
+            shlex.quote(args.codex_remote_client_path),
+        )
     if _json_bridge_requested(args):
         command = command.replace(
             "{json_bridge_client}",
@@ -389,6 +778,7 @@ def _tunnel_command(
     args: argparse.Namespace,
     *,
     json_local_socket: Path | None = None,
+    codex_local_socket: Path | None = None,
 ) -> list[str]:
     keepalive = max(1, int(args.keepalive_interval_sec))
     remote_keepalive = (
@@ -407,6 +797,15 @@ def _tunnel_command(
                 "StreamLocalBindUnlink=yes",
                 "-R",
                 f"{args.json_remote_socket}:{json_local_socket}",
+            ]
+        )
+    if _codex_bridge_requested(args) and codex_local_socket is not None:
+        command.extend(
+            [
+                "-o",
+                "StreamLocalBindUnlink=yes",
+                "-R",
+                f"{args.codex_remote_socket}:{codex_local_socket}",
             ]
         )
     command.extend(
@@ -503,9 +902,14 @@ def _start_tunnel_process(
     args: argparse.Namespace,
     *,
     json_local_socket: Path | None = None,
+    codex_local_socket: Path | None = None,
 ) -> subprocess.Popen[Any]:
     return subprocess.Popen(
-        _tunnel_command(args, json_local_socket=json_local_socket),
+        _tunnel_command(
+            args,
+            json_local_socket=json_local_socket,
+            codex_local_socket=codex_local_socket,
+        ),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         text=True,
@@ -541,6 +945,8 @@ def _wait_for_tunnel_ready(
             return False, "run_deadline_exceeded", attempts
         if remote_proc is not None and remote_proc.poll() is not None:
             return False, "remote_command_completed", attempts
+        if tunnel_proc.poll() is not None:
+            return False, "tunnel_process_exited", attempts
         if time.monotonic() >= deadline:
             return False, status, attempts
         if ready:
@@ -617,6 +1023,78 @@ def _write_private_log(
     return True
 
 
+def _utc_timestamp(epoch_seconds: float) -> str:
+    return (
+        datetime.fromtimestamp(epoch_seconds, tz=timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _write_public_checkpoint(
+    path: str | None,
+    payload: dict[str, Any],
+    *,
+    state: str,
+    started_at: float,
+    heartbeat_count: int,
+    terminal: bool,
+    observed_at: float | None = None,
+) -> None:
+    now = time.time() if observed_at is None else observed_at
+    payload["duration_sec"] = round(max(0.0, now - started_at), 3)
+    if terminal:
+        active_phase = payload.get("active_phase")
+        active_phase = active_phase if isinstance(active_phase, dict) else {}
+        live_worker_phase = compact_benchmark_live_worker_phase(
+            active_phase.get("benchmark_live_worker_phase")
+        )
+        phase_ready = live_worker_phase.get("phase_ready")
+        if live_worker_phase and isinstance(phase_ready, dict):
+            terminal_disposition = {
+                "succeeded": "completed",
+                "failed": "failed",
+            }.get(state, "ended_unresolved")
+            active_phase["benchmark_live_worker_phase"] = (
+                build_benchmark_live_worker_phase(
+                    runtime_preparing=phase_ready.get("runtime_preparing") is True,
+                    worker_prepared=phase_ready.get("worker_prepared") is True,
+                    worker_running=phase_ready.get("worker_running") is True,
+                    agent_active=phase_ready.get("agent_active") is True,
+                    terminal_disposition=terminal_disposition,
+                )
+            )
+    payload["public_liveness"] = {
+        "schema_version": PUBLIC_LIVENESS_SCHEMA_VERSION,
+        "state": state,
+        "terminal": terminal,
+        "process_alive": not terminal,
+        "heartbeat_count": max(1, int(heartbeat_count)),
+        "update_interval_sec": PUBLIC_LIVENESS_INTERVAL_SEC,
+        "started_at": _utc_timestamp(started_at),
+        "observed_at": _utc_timestamp(now),
+        "elapsed_sec": payload["duration_sec"],
+        "raw_task_text_recorded": False,
+        "raw_logs_recorded": False,
+        "raw_trajectory_recorded": False,
+        "raw_verifier_output_recorded": False,
+        "local_paths_recorded": False,
+    }
+    if not path:
+        return
+    target = Path(path).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _public_artifact_sync_requested(args: argparse.Namespace) -> bool:
     return bool(
         args.remote_public_artifact_root
@@ -648,6 +1126,65 @@ def _incremental_public_artifact_sync_contract(
         "raw_paths_recorded": False,
         "raw_artifacts_recorded": False,
     }
+
+
+def _active_phase_public_contract(args: argparse.Namespace) -> dict[str, Any]:
+    contract: dict[str, Any] = {
+        "schema_version": ACTIVE_PHASE_SCHEMA_VERSION,
+        "state": "not_observed",
+        "receipt_count": 0,
+        "public_artifact_read": False,
+        "raw_artifacts_read": False,
+        "raw_task_text_read": False,
+        "raw_logs_read": False,
+        "raw_trajectory_read": False,
+        "raw_verifier_output_read": False,
+        "local_paths_recorded": False,
+    }
+    if not args.local_public_artifact_dir:
+        return contract
+
+    root = Path(args.local_public_artifact_dir).expanduser()
+    if not root.is_dir() or root.is_symlink():
+        return contract
+
+    selected_phase: dict[str, Any] = {}
+    selected_sequence = -1
+    receipt_count = 0
+    for path in sorted(root.rglob("runner_prerequisites.public.json")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            if path.stat().st_size > int(args.public_artifact_max_bytes):
+                continue
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, Mapping):
+            continue
+        phase = compact_benchmark_live_worker_phase(
+            payload.get("benchmark_live_worker_phase")
+        )
+        if not phase:
+            continue
+        receipt_count += 1
+        sequence = payload.get("benchflow_lifecycle_receipt_sequence")
+        if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
+            sequence = 0
+        if sequence >= selected_sequence:
+            selected_phase = phase
+            selected_sequence = sequence
+
+    contract["receipt_count"] = receipt_count
+    if not selected_phase:
+        return contract
+    contract.update(
+        state="observed",
+        receipt_sequence=selected_sequence,
+        benchmark_live_worker_phase=selected_phase,
+        public_artifact_read=True,
+    )
+    return contract
 
 
 def _record_incremental_public_artifact_sync(
@@ -715,6 +1252,27 @@ def _size_bucket(value: str) -> str:
     if size < 5000:
         return "1000_4999"
     return "5000_plus"
+
+
+def _remote_command_failure_subtype(stderr_text: str) -> str:
+    """Classify stable entry failures without projecting remote stderr."""
+    normalized = stderr_text.lower()
+    if "loopx_runner_source_git_head_mismatch" in normalized:
+        return "runner_source_git_head_mismatch"
+    if "loopx_runner_source_git_head_unknown" in normalized:
+        return "runner_source_git_head_unknown"
+    if "unrecognized arguments:" in normalized:
+        return "cli_argument_incompatible"
+    if "usage:" in normalized and ": error:" in normalized:
+        return "cli_argument_error"
+    if (
+        "can't open file" in normalized
+        and "no such file or directory" in normalized
+    ):
+        return "remote_entrypoint_missing"
+    if "skillsbenchsetuppreflightblocked" in normalized:
+        return "setup_preflight_blocked"
+    return "unclassified"
 
 
 def _remote_failure_cleanup_public_contract(args: argparse.Namespace) -> dict[str, Any]:
@@ -913,9 +1471,8 @@ def _run_remote_failure_cleanup(
     return payload
 
 
-def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
-    started_at = time.time()
-    payload: dict[str, Any] = {
+def _initial_public_payload(args: argparse.Namespace) -> dict[str, Any]:
+    return {
         "schema_version": SCHEMA_VERSION,
         "ok": False,
         "tunnel_started": False,
@@ -929,7 +1486,12 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         "raw_remote_output_recorded": False,
         "private_log_written": False,
         "remote_forward": _forward_public_contract(args.remote_forward),
+        "proxy_port_coherence": dict(args.proxy_port_coherence),
+        "local_forward_dependency": (
+            _local_forward_dependency_public_contract(args)
+        ),
         "json_bridge": _json_bridge_public_contract(args),
+        "codex_bridge": _codex_bridge_public_contract(args),
         "remote_failure_cleanup": _remote_failure_cleanup_public_contract(args),
         "public_artifact_sync": _public_artifact_sync_contract(args),
         "incremental_public_artifact_sync": (
@@ -938,10 +1500,158 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         "tunnel_liveness": _tunnel_liveness_public_contract(args),
     }
 
+
+def _last_public_liveness_contract(path: str | None) -> dict[str, Any]:
+    contract: dict[str, Any] = {
+        "schema_version": "skillsbench_supervisor_previous_liveness_v0",
+        "status": "unavailable",
+        "state": "unknown",
+        "terminal": False,
+        "process_alive": False,
+        "heartbeat_count": 0,
+        "elapsed_sec": 0.0,
+        "last_known_tunnel_ready": False,
+        "raw_task_text_read": False,
+        "raw_logs_read": False,
+        "raw_trajectory_read": False,
+        "raw_verifier_output_read": False,
+        "local_paths_recorded": False,
+    }
+    if not path:
+        return contract
+    try:
+        loaded = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return contract
+    if not isinstance(loaded, Mapping):
+        return contract
+    liveness = loaded.get("public_liveness")
+    if not isinstance(liveness, Mapping):
+        return contract
+
+    state = str(liveness.get("state") or "unknown")
+    if state not in {"starting", "running", "succeeded", "failed"}:
+        state = "unknown"
+    try:
+        heartbeat_count = max(0, int(liveness.get("heartbeat_count", 0)))
+    except (TypeError, ValueError):
+        heartbeat_count = 0
+    try:
+        elapsed_sec = max(0.0, float(liveness.get("elapsed_sec", 0.0)))
+    except (TypeError, ValueError):
+        elapsed_sec = 0.0
+    contract.update(
+        {
+            "status": "read",
+            "state": state,
+            "terminal": bool(liveness.get("terminal")),
+            "process_alive": bool(liveness.get("process_alive")),
+            "heartbeat_count": heartbeat_count,
+            "elapsed_sec": elapsed_sec,
+            "last_known_tunnel_ready": bool(loaded.get("tunnel_ready")),
+        }
+    )
+    return contract
+
+
+def _finalize_unhandled_supervisor_failure(
+    args: argparse.Namespace,
+    exc: Exception,
+) -> dict[str, Any]:
+    previous = _last_public_liveness_contract(args.public_output_path)
+    now = time.time()
+    started_at = now - float(previous["elapsed_sec"])
+    try:
+        payload = _initial_public_payload(args)
+    except Exception as payload_exc:
+        payload = {
+            "schema_version": SCHEMA_VERSION,
+            "ok": False,
+            "tunnel_started": False,
+            "tunnel_ready": False,
+            "remote_command_requested": bool(args.remote_command),
+            "raw_ssh_destination_recorded": False,
+            "raw_remote_command_recorded": False,
+            "raw_probe_output_recorded": False,
+            "raw_remote_output_recorded": False,
+            "private_log_written": False,
+            "fallback_payload_error_type": type(payload_exc).__name__[:80],
+        }
+    termination_signal = (
+        exc.signum if isinstance(exc, _SupervisorTerminationSignal) else None
+    )
+    payload["first_blocker"] = (
+        "supervisor_termination_signal"
+        if termination_signal is not None
+        else "supervisor_unhandled_exception"
+    )
+    payload["supervisor_error_type"] = type(exc).__name__[:80]
+    payload["public_terminal_fallback"] = {
+        "schema_version": "skillsbench_supervisor_terminal_fallback_v0",
+        "triggered": True,
+        "trigger": payload["first_blocker"],
+        "previous_liveness": previous,
+        "exception_message_recorded": False,
+        "raw_task_text_recorded": False,
+        "raw_logs_recorded": False,
+        "raw_trajectory_recorded": False,
+        "raw_verifier_output_recorded": False,
+        "local_paths_recorded": False,
+    }
+    if termination_signal is not None:
+        payload["public_terminal_fallback"]["signal_name"] = signal.Signals(
+            termination_signal
+        ).name
+    try:
+        payload["remote_failure_cleanup"] = _run_remote_failure_cleanup(
+            args,
+            trigger=str(payload["first_blocker"]),
+        )
+    except Exception as cleanup_exc:
+        cleanup = _remote_failure_cleanup_public_contract(args)
+        cleanup["trigger"] = str(payload["first_blocker"])
+        cleanup["first_blocker"] = "remote_failure_cleanup_failed"
+        cleanup["error_type"] = type(cleanup_exc).__name__[:80]
+        payload["remote_failure_cleanup"] = cleanup
+    _write_public_checkpoint(
+        args.public_output_path,
+        payload,
+        state="failed",
+        started_at=started_at,
+        heartbeat_count=int(previous["heartbeat_count"]) + 1,
+        terminal=True,
+        observed_at=now,
+    )
+    return payload
+
+
+def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
+    started_at = time.time()
+    payload = _initial_public_payload(args)
+    public_heartbeat_count = 0
+
+    def checkpoint(state: str, *, terminal: bool = False) -> None:
+        nonlocal public_heartbeat_count
+        public_heartbeat_count += 1
+        payload["active_phase"] = _active_phase_public_contract(args)
+        _write_public_checkpoint(
+            args.public_output_path,
+            payload,
+            state=state,
+            started_at=started_at,
+            heartbeat_count=public_heartbeat_count,
+            terminal=terminal,
+        )
+
+    checkpoint("starting")
+
     tunnel_proc: subprocess.Popen[Any] | None = None
+    local_forward_proc: subprocess.Popen[Any] | None = None
     json_bridge_proc: subprocess.Popen[Any] | None = None
+    codex_bridge_proc: subprocess.Popen[Any] | None = None
     runtime_dir_obj: tempfile.TemporaryDirectory[str] | None = None
     json_local_socket: Path | None = None
+    codex_local_socket: Path | None = None
 
     def finish(returncode: int) -> tuple[int, dict[str, Any]]:
         payload["duration_sec"] = round(max(0.0, time.time() - started_at), 3)
@@ -952,6 +1662,16 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             )
             if tunnel_proc.returncode is not None:
                 payload["tunnel_exit_code"] = tunnel_proc.returncode
+        if local_forward_proc is not None:
+            dependency = payload["local_forward_dependency"]
+            dependency["managed_process_cleanup_status"] = _stop_process_group(
+                local_forward_proc,
+                grace_sec=1.0,
+            )
+            if local_forward_proc.returncode is not None:
+                dependency["managed_process_exit_code"] = (
+                    local_forward_proc.returncode
+                )
         if json_bridge_proc is not None:
             payload["json_bridge"]["server_cleanup_status"] = _stop_process_group(
                 json_bridge_proc,
@@ -959,12 +1679,42 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             )
             if json_bridge_proc.returncode is not None:
                 payload["json_bridge"]["server_exit_code"] = json_bridge_proc.returncode
+        if codex_bridge_proc is not None:
+            payload["codex_bridge"]["server_cleanup_status"] = _stop_process_group(
+                codex_bridge_proc,
+                grace_sec=1.0,
+            )
+            if codex_bridge_proc.returncode is not None:
+                payload["codex_bridge"]["server_exit_code"] = codex_bridge_proc.returncode
         if runtime_dir_obj is not None:
             runtime_dir_obj.cleanup()
+        checkpoint(
+            "succeeded" if returncode == 0 and payload.get("ok") is True else "failed",
+            terminal=True,
+        )
         return returncode, payload
 
     try:
         payload["stale_forward_cleanup"] = _cleanup_stale_local_forward(args)
+        local_dependency = payload["local_forward_dependency"]
+        if local_dependency["configured"]:
+            if _local_forward_endpoint_ready(args):
+                local_dependency["state"] = "external_ready"
+                local_dependency["last_status"] = "ready"
+            else:
+                local_forward_proc, local_forward_ready = (
+                    _start_local_forward_dependency(
+                        args,
+                        local_dependency,
+                        previous_proc=None,
+                        restart=False,
+                    )
+                )
+                if not local_forward_ready:
+                    payload["first_blocker"] = (
+                        "local_forward_dependency_unavailable"
+                    )
+                    return finish(2)
         runtime_dir_obj = tempfile.TemporaryDirectory(
             prefix="loopx-rt-",
             dir="/tmp",
@@ -1004,9 +1754,44 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                 )
                 return finish(2)
 
+        if _codex_bridge_requested(args):
+            codex_bridge_payload = payload["codex_bridge"]
+            codex_local_socket = _resolved_codex_local_socket(args, runtime_dir)
+            try:
+                codex_bridge_proc = _start_codex_bridge_server(
+                    args,
+                    socket_path=codex_local_socket,
+                )
+                codex_bridge_payload["server_started"] = True
+            except OSError as exc:
+                payload["first_blocker"] = "codex_bridge_server_launch_failed"
+                codex_bridge_payload["server_error_type"] = type(exc).__name__[:80]
+                return finish(2)
+
+            if not _probe_local_codex_socket(args, codex_local_socket):
+                payload["first_blocker"] = "codex_bridge_local_socket_not_ready"
+                return finish(2)
+            if codex_bridge_proc.poll() is not None:
+                payload["first_blocker"] = "codex_bridge_server_exited_before_ready"
+                codex_bridge_payload["server_exit_code"] = codex_bridge_proc.returncode
+                return finish(2)
+            codex_bridge_payload["local_socket_ready"] = True
+            codex_bridge_payload["remote_socket_cleanup"] = (
+                _cleanup_remote_codex_socket(args)
+            )
+            if not codex_bridge_payload["remote_socket_cleanup"].get("ok"):
+                payload["first_blocker"] = codex_bridge_payload[
+                    "remote_socket_cleanup"
+                ].get(
+                    "first_blocker",
+                    "codex_bridge_remote_socket_cleanup_failed",
+                )
+                return finish(2)
+
         tunnel_proc = _start_tunnel_process(
             args,
             json_local_socket=json_local_socket,
+            codex_local_socket=codex_local_socket,
         )
         payload["tunnel_started"] = True
     except OSError as exc:
@@ -1023,9 +1808,52 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     payload["probe_status"] = status
     payload["tunnel_ready"] = ready
     if status == "tunnel_process_exited":
-        payload["first_blocker"] = "reverse_tunnel_process_exited_before_ready"
-        payload["tunnel_exit_code"] = tunnel_proc.returncode
-        return finish(2)
+        liveness = payload["tunnel_liveness"]
+        for _attempt in range(int(liveness["reconnect_attempt_limit"])):
+            liveness["reconnect_attempt_count"] = (
+                int(liveness["reconnect_attempt_count"]) + 1
+            )
+            try:
+                tunnel_proc = _start_tunnel_process(
+                    args,
+                    json_local_socket=json_local_socket,
+                    codex_local_socket=codex_local_socket,
+                )
+            except OSError as exc:
+                liveness["last_probe_status"] = (
+                    f"reconnect_launch_failed_{type(exc).__name__[:40]}"
+                )
+                liveness["reconnect_failure_count"] = (
+                    int(liveness["reconnect_failure_count"]) + 1
+                )
+                continue
+            ready, status, reconnect_probes = _wait_for_tunnel_ready(
+                args,
+                tunnel_proc,
+                timeout_sec=args.tunnel_reconnect_ready_timeout_sec,
+            )
+            payload["probe_attempt_count"] = (
+                int(payload["probe_attempt_count"]) + reconnect_probes
+            )
+            payload["probe_status"] = status
+            payload["tunnel_ready"] = ready
+            liveness["last_probe_status"] = status
+            if ready:
+                liveness["reconnect_success_count"] = (
+                    int(liveness["reconnect_success_count"]) + 1
+                )
+                liveness["state"] = "reconnected"
+                break
+            liveness["reconnect_failure_count"] = (
+                int(liveness["reconnect_failure_count"]) + 1
+            )
+        if not ready:
+            liveness["state"] = "failed"
+            payload["first_blocker"] = (
+                "reverse_tunnel_process_exited_before_ready"
+            )
+            payload["tunnel_exit_code"] = tunnel_proc.returncode
+            return finish(2)
 
     if payload["tunnel_ready"] is not True:
         payload["first_blocker"] = "reverse_tunnel_probe_not_ready"
@@ -1045,6 +1873,32 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         json_bridge_payload["remote_command_placeholder_supported"] = (
             "{json_bridge_client}" in args.remote_command
         )
+
+    if _codex_bridge_requested(args):
+        codex_bridge_payload = payload["codex_bridge"]
+        if not _probe_remote_codex_socket(args):
+            payload["first_blocker"] = "codex_bridge_remote_socket_not_ready"
+            return finish(2)
+        codex_bridge_payload["remote_socket_ready"] = True
+        assert runtime_dir_obj is not None
+        if not _materialize_remote_codex_client(args, Path(runtime_dir_obj.name)):
+            payload["first_blocker"] = "codex_bridge_remote_client_materialize_failed"
+            return finish(2)
+        codex_bridge_payload["remote_client_materialized"] = True
+        codex_bridge_payload["remote_command_placeholder_supported"] = (
+            "{codex_bridge_client}" in args.remote_command
+        )
+        participant_probe = _probe_remote_codex_participant(args)
+        codex_bridge_payload["participant_probe"] = participant_probe
+        codex_bridge_payload["participant_probe_passed"] = bool(
+            participant_probe["passed"]
+        )
+        if participant_probe["requested"] and not participant_probe["passed"]:
+            payload["first_blocker"] = participant_probe.get(
+                "first_blocker",
+                "codex_bridge_participant_probe_failed",
+            )
+            return finish(2)
 
     if args.preflight_only or not args.remote_command:
         payload["ok"] = True
@@ -1087,8 +1941,12 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             )
             consecutive_failures = 0
             consecutive_inconclusive = 0
-            if liveness["enabled"]:
+            if liveness["enabled"] and liveness["state"] != "reconnected":
                 liveness["state"] = "healthy"
+            checkpoint("running")
+            next_public_checkpoint = (
+                time.monotonic() + PUBLIC_LIVENESS_INTERVAL_SEC
+            )
 
             while remote_proc.poll() is None:
                 now = time.monotonic()
@@ -1108,6 +1966,11 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     if remote_proc.poll() is not None:
                         break
                     now = time.monotonic()
+                if now >= next_public_checkpoint:
+                    checkpoint("running")
+                    next_public_checkpoint = (
+                        time.monotonic() + PUBLIC_LIVENESS_INTERVAL_SEC
+                    )
                 if not liveness["enabled"] or now < next_health_probe:
                     time.sleep(0.1)
                     continue
@@ -1143,6 +2006,51 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                         liveness["state"] = "healthy"
                     next_health_probe = time.monotonic() + health_interval
                     continue
+
+                local_dependency = payload["local_forward_dependency"]
+                if (
+                    local_dependency["configured"]
+                    and tunnel_proc.poll() is None
+                    and not _local_forward_endpoint_ready(args)
+                ):
+                    liveness["health_probe_failure_count"] = (
+                        int(liveness["health_probe_failure_count"]) + 1
+                    )
+                    consecutive_failures += 1
+                    liveness["max_consecutive_failure_count"] = max(
+                        int(liveness["max_consecutive_failure_count"]),
+                        consecutive_failures,
+                    )
+                    recovered_local_dependency = False
+                    for _attempt in range(
+                        int(local_dependency["restart_attempt_limit"])
+                    ):
+                        local_forward_proc, recovered_local_dependency = (
+                            _start_local_forward_dependency(
+                                args,
+                                local_dependency,
+                                previous_proc=local_forward_proc,
+                                restart=True,
+                            )
+                        )
+                        if recovered_local_dependency:
+                            break
+                    if recovered_local_dependency:
+                        liveness["last_probe_status"] = (
+                            "local_forward_dependency_recovered"
+                        )
+                        liveness["state"] = "degraded"
+                        consecutive_failures = 0
+                        consecutive_inconclusive = 0
+                        next_health_probe = time.monotonic()
+                        continue
+                    liveness["state"] = "failed"
+                    liveness["last_probe_status"] = (
+                        "local_forward_dependency_unrecoverable"
+                    )
+                    tunnel_liveness_failed = True
+                    _stop_process_group(remote_proc, grace_sec=1.0)
+                    break
 
                 if (
                     health_status == "ssh_transport_unavailable"
@@ -1180,13 +2088,21 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     continue
 
                 if tunnel_proc.poll() is None:
-                    liveness["state"] = "failed"
-                    liveness["last_probe_status"] = (
-                        "new_connect_admission_failed_tunnel_preserved"
+                    liveness["health_probe_inconclusive_count"] = (
+                        int(liveness["health_probe_inconclusive_count"]) + 1
                     )
-                    tunnel_liveness_failed = True
-                    _stop_process_group(remote_proc, grace_sec=1.0)
-                    break
+                    consecutive_inconclusive += 1
+                    liveness["max_consecutive_inconclusive_count"] = max(
+                        int(liveness["max_consecutive_inconclusive_count"]),
+                        consecutive_inconclusive,
+                    )
+                    consecutive_failures = 0
+                    liveness["state"] = "degraded"
+                    liveness["last_probe_status"] = (
+                        "new_connect_admission_inconclusive_tunnel_preserved"
+                    )
+                    next_health_probe = time.monotonic() + health_interval
+                    continue
 
                 recovered = False
                 for _attempt in range(int(liveness["reconnect_attempt_limit"])):
@@ -1197,6 +2113,7 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                         tunnel_proc = _start_tunnel_process(
                             args,
                             json_local_socket=json_local_socket,
+                            codex_local_socket=codex_local_socket,
                         )
                     except OSError as exc:
                         liveness["last_probe_status"] = (
@@ -1283,6 +2200,9 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         payload["ok"] = remote_proc.returncode == 0 and sync_ok
         if remote_proc.returncode != 0:
             payload["first_blocker"] = "remote_command_exit_nonzero"
+            payload["remote_command_failure_subtype"] = (
+                _remote_command_failure_subtype(stderr_text)
+            )
             payload["remote_failure_cleanup"] = _run_remote_failure_cleanup(
                 args,
                 trigger="remote_command_exit_nonzero",
@@ -1322,6 +2242,61 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--server-alive-interval-sec", type=int, default=30)
     parser.add_argument("--server-alive-count-max", type=int, default=3)
     parser.add_argument("--remote-forward", default=DEFAULT_REMOTE_FORWARD)
+    parser.add_argument(
+        "--codex-reverse-proxy-port",
+        type=int,
+        default=None,
+        help=(
+            "Structured declaration of the remote Codex reverse-proxy port. "
+            "Must match the other proxy port declarations and --remote-forward."
+        ),
+    )
+    parser.add_argument(
+        "--benchmark-egress-proxy-port",
+        type=int,
+        default=None,
+        help=(
+            "Structured declaration of the benchmark egress-proxy port. "
+            "Must match the other proxy port declarations and --remote-forward."
+        ),
+    )
+    parser.add_argument(
+        "--container-forwarder-port",
+        type=int,
+        default=None,
+        help=(
+            "Structured declaration of the container forwarder listen port. "
+            "Must match the other proxy port declarations and --remote-forward."
+        ),
+    )
+    parser.add_argument(
+        "--local-forward-managed-command",
+        default="",
+        help=(
+            "Optional private foreground command that owns the local endpoint "
+            "targeted by --remote-forward. The supervisor starts it when the "
+            "endpoint is absent and restarts it after bounded liveness failure; "
+            "the raw command and output are never written publicly."
+        ),
+    )
+    parser.add_argument(
+        "--local-forward-probe-timeout-sec",
+        type=float,
+        default=1.0,
+        help="TCP probe timeout for the managed local-forward endpoint.",
+    )
+    parser.add_argument(
+        "--local-forward-ready-timeout-sec",
+        type=float,
+        default=10.0,
+        help="Readiness budget after starting the managed local-forward command.",
+    )
+    parser.add_argument(
+        "--local-forward-restart-attempts",
+        type=int,
+        default=2,
+        help="Bounded managed local-forward restarts after endpoint loss.",
+    )
     parser.add_argument("--test-host", default=DEFAULT_TEST_HOST)
     parser.add_argument("--test-port", type=int, default=DEFAULT_TEST_PORT)
     parser.add_argument("--probe-timeout-sec", type=float, default=8.0)
@@ -1441,6 +2416,77 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "checks only the local/remote bridge socket and client lifecycle."
         ),
     )
+    parser.add_argument(
+        "--codex-bridge",
+        action="store_true",
+        help=(
+            "Hold an opt-in local Codex reverse-channel provider alongside the "
+            "TCP reverse tunnel."
+        ),
+    )
+    parser.add_argument(
+        "--codex-bin",
+        default="codex",
+        help="Local Codex executable used by the reverse-channel server.",
+    )
+    parser.add_argument(
+        "--codex-local-socket",
+        default="",
+        help=(
+            "Optional local Unix socket path for the Codex bridge server. "
+            "Omit to use a per-run temporary socket."
+        ),
+    )
+    parser.add_argument(
+        "--codex-remote-socket",
+        default="",
+        help=(
+            "Remote Unix socket exposed through ssh -R for the Codex bridge. "
+            "The raw path is not written to public output."
+        ),
+    )
+    parser.add_argument(
+        "--codex-remote-client-path",
+        default="",
+        help=(
+            "Remote path where the Codex bridge client is materialized. "
+            "Use {codex_bridge_client} inside --remote-command to inject it."
+        ),
+    )
+    parser.add_argument(
+        "--codex-prompt-bridge-command",
+        default="",
+        help=(
+            "Private local command used to execute scored sandbox operations "
+            "on the remote participant host. Not written to public output."
+        ),
+    )
+    parser.add_argument("--codex-server-timeout-sec", type=float, default=7200.0)
+    parser.add_argument("--codex-socket-ready-timeout-sec", type=float, default=15.0)
+    parser.add_argument(
+        "--codex-participant-sandbox",
+        choices=("read-only", "workspace-write"),
+        default="",
+        help=(
+            "Fixed sandbox used by the task-free participant probe. "
+            "Split-control benchmark launches must use workspace-write."
+        ),
+    )
+    parser.add_argument(
+        "--codex-participant-probe-timeout-sec",
+        type=float,
+        default=60.0,
+    )
+    parser.add_argument(
+        "--codex-first-action-timeout-sec",
+        type=float,
+        default=180.0,
+    )
+    parser.add_argument(
+        "--codex-bridge-idle-timeout-sec",
+        type=float,
+        default=0.0,
+    )
     parser.add_argument("--remote-command", default="")
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument(
@@ -1543,6 +2589,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Optional path for compact public-safe supervisor JSON.",
     )
     args = parser.parse_args(argv)
+    try:
+        args.proxy_port_coherence = _proxy_port_coherence_public_contract(args)
+    except ValueError as exc:
+        parser.error(str(exc))
     if _json_bridge_requested(args):
         args.json_bridge = True
         missing = [
@@ -1557,6 +2607,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         if missing:
             parser.error(
                 "--json-bridge requires "
+                + ", ".join("--" + item.replace("_", "-") for item in missing)
+            )
+    if _codex_bridge_requested(args):
+        args.codex_bridge = True
+        missing = [
+            name
+            for name in (
+                "codex_remote_socket",
+                "codex_remote_client_path",
+                "codex_prompt_bridge_command",
+                "codex_participant_sandbox",
+            )
+            if not getattr(args, name)
+        ]
+        if missing:
+            parser.error(
+                "--codex-bridge requires "
                 + ", ".join("--" + item.replace("_", "-") for item in missing)
             )
     if _public_artifact_sync_requested(args):
@@ -1595,12 +2662,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    rc, payload = run_supervisor(args)
+    previous_signal_handlers: dict[int, Any] = {}
+
+    def request_terminal_closeout(signum: int, _frame: Any) -> None:
+        raise _SupervisorTerminationSignal(signum)
+
+    for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+        previous_signal_handlers[signum] = signal.signal(
+            signum,
+            request_terminal_closeout,
+        )
+    try:
+        rc, payload = run_supervisor(args)
+    except Exception as exc:
+        payload = _finalize_unhandled_supervisor_failure(args, exc)
+        rc = (
+            128 + exc.signum
+            if isinstance(exc, _SupervisorTerminationSignal)
+            else 70
+        )
+        sys.stderr.write(
+            "skillsbench supervisor failed unexpectedly: "
+            f"{type(exc).__name__}\n"
+        )
+    finally:
+        for signum, previous_handler in previous_signal_handlers.items():
+            signal.signal(signum, previous_handler)
     text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    if args.public_output_path:
-        path = Path(args.public_output_path).expanduser()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
     sys.stdout.write(text)
     return rc
 

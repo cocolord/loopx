@@ -527,8 +527,26 @@ Treat these as experimental until their contract docs say otherwise:
 
 ## Release Note Checklist
 
-Organize every public release note into the following stable groups. Omit an
-empty group instead of inventing filler:
+Keep user-visible product changes first. When merged pull requests between the
+previous and current tags include community contributors other than project
+founder `@huangruiteng`, add a prominent `## Community Contributors` section
+after the English product groups and before compatibility, validation, or
+update material. Link each eligible GitHub handle and relevant pull requests,
+summarize the concrete contribution, and explicitly call out external or
+first-time contributors when applicable.
+
+Do not list or thank `@huangruiteng` in this section; founder stewardship is
+implicit in each LoopX release. Omit the section when the tag range contains no
+eligible community contribution. Contributor recognition must complement the
+release narrative, not replace or precede its product highlights.
+
+Build the list from the tag-to-tag Git range and merged pull-request metadata,
+not commit display names or an unreviewed generated changelog. Attribution is
+part of the release contract even when the same pull request is linked again
+under a product group.
+
+Organize the remaining release note into the following stable groups. Omit an
+empty product group instead of inventing filler:
 
 1. **State Kernel & Control Plane** for state, todo, quota, scheduler, gate,
    peer-routing, and runtime authority changes.
@@ -541,11 +559,16 @@ empty group instead of inventing filler:
 5. **Documentation & Compatibility** for public contracts, install/update
    guidance, migrations, defaults, and intentional exclusions.
 
-Bilingual releases must preserve these same group boundaries in both
-languages. Under `## 中文摘要`, use the matching headings **状态内核与控制面**,
-**能力与工作流**, **质量与测试**, **基准与集成**, and **文档与兼容性**. The Chinese
-copy may be shorter, but it must not collapse several groups into a generic
-highlights list or omit a non-empty English group.
+Bilingual releases with eligible community contributions must add
+`### 社区贡献者` after the Chinese product groups and before Chinese
+compatibility or validation material, with the same people, pull-request
+links, and concrete contribution scope as the English section. Omit both
+language sections together when no eligible contributor exists. Bilingual
+releases must preserve these same group boundaries in both languages. Use the
+matching headings **状态内核与控制面**, **能力与工作流**, **质量与测试**,
+**基准与集成**, and **文档与兼容性**. The Chinese copy may be shorter, but it
+must not collapse several groups into a generic highlights list, omit a
+non-empty English group, or weaken contributor attribution.
 
 Within each non-empty group, every material claim must carry one or more direct
 GitHub pull-request links such as
@@ -616,9 +639,10 @@ last-mile boundary. Translation may be shorter, but it must not replace the
 user-facing outcome with architecture-only terminology.
 
 The release PR and final GitHub release body must use the same grouping and
-validation receipt. Re-run the gates after rebasing or merging any additional
-runtime change; results from an earlier commit do not qualify a later tag.
-Public git history and shipped CLI behavior remain the source of truth.
+contributor attribution, plus the same validation receipt. Re-run the gates
+after rebasing or merging any additional runtime change; results from an
+earlier commit do not qualify a later tag. Public git history, merged PR
+metadata, and shipped CLI behavior remain the source of truth.
 
 ## Related Docs
 

@@ -21,6 +21,11 @@ from loopx.bootstrap_command_pack import (  # noqa: E402
     build_loopx_bootstrap_command_pack,
     build_start_goal_guided_packet,
 )
+from loopx.cli import build_parser  # noqa: E402
+from loopx.control_plane.quota.usage_summary import is_automation_run  # noqa: E402
+from loopx.control_plane.scheduler.execution_context import (  # noqa: E402
+    scheduler_execution_context_for_runtime_profile,
+)
 from loopx.host_loop_activation import (  # noqa: E402
     agent_type_for_host_surface,
     build_agent_type_catalog,
@@ -28,13 +33,18 @@ from loopx.host_loop_activation import (  # noqa: E402
 )
 
 
-def run_cli(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+def run_cli(
+    *args: str,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "loopx.cli", "--format", "json", *args],
         cwd=REPO_ROOT,
         check=check,
         text=True,
         capture_output=True,
+        env=env,
     )
 
 
@@ -43,6 +53,7 @@ def main() -> int:
     agent_types = {item["agent_type"] for item in catalog["canonical_agent_types"]}
     assert {
         "codex-app",
+        "codex-app-ssh",
         "codex-ide-plugin",
         "codex-cli",
         "claude-code",
@@ -51,20 +62,43 @@ def main() -> int:
         "other-agent",
     } <= agent_types
     ambiguous = {item["input"]: item["use_one_of"] for item in catalog["ambiguous_inputs"]}
-    assert ambiguous["codex"] == ["codex-app", "codex-ide-plugin", "codex-cli"], ambiguous
+    assert ambiguous["codex"] == [
+        "codex-app",
+        "codex-app-ssh",
+        "codex-ide-plugin",
+        "codex-cli",
+    ], ambiguous
 
     assert agent_type_for_host_surface("chat-box") == "codex-app"
+    assert agent_type_for_host_surface("codex-app-ssh") == "codex-app-ssh"
     assert agent_type_for_host_surface("codex-ide-plugin") == "codex-ide-plugin"
     assert agent_type_for_host_surface("codex-ide") == "codex-ide-plugin"
     assert agent_type_for_host_surface("codex-cli-tui") == "codex-cli"
     assert agent_type_for_host_surface("opencode") == "opencode"
 
     codex_app = build_host_loop_activation_packet(agent_type="codex-app", goal_id="demo")
+    codex_app_ssh = build_host_loop_activation_packet(
+        agent_type="codex-app-ssh",
+        goal_id="demo",
+    )
     codex_ide = build_host_loop_activation_packet(agent_type="codex-ide-plugin", goal_id="demo")
     codex_cli = build_host_loop_activation_packet(agent_type="codex-cli", goal_id="demo")
     claude_code = build_host_loop_activation_packet(agent_type="claude-code", goal_id="demo")
     opencode = build_host_loop_activation_packet(agent_type="opencode", goal_id="demo")
     assert codex_app["activation_method"] == "create_or_update_codex_app_automation", codex_app
+    assert codex_app_ssh["activation_method"] == "set_visible_goal", codex_app_ssh
+    assert codex_app_ssh["host_surface"] == "codex_app_ssh_visible_goal_mode", codex_app_ssh
+    assert "--runtime-profile codex_app_ssh_goal" in (
+        codex_app_ssh["commands"]["heartbeat_prompt"]
+    ), codex_app_ssh
+    app_ssh_scheduler = scheduler_execution_context_for_runtime_profile(
+        "codex_app_ssh_goal"
+    )
+    assert app_ssh_scheduler.ok, app_ssh_scheduler
+    assert app_ssh_scheduler.projection()["host_surface"] == "codex_app_ssh"
+    assert app_ssh_scheduler.projection()["scheduler_owner"] == "agent_cli_loop"
+    assert app_ssh_scheduler.projection()["execution_mode"] == "interactive"
+    assert app_ssh_scheduler.projection()["codex_app_applicability"] == "not_applicable"
     assert codex_ide["activation_method"] == "set_visible_goal", codex_ide
     assert codex_ide["host_mutation"]["host_command"] == "/goal <task_body>", codex_ide
     assert codex_cli["host_mutation"]["host_command"] == "/goal <task_body>", codex_cli
@@ -119,6 +153,7 @@ def main() -> int:
     assert ambiguous_payload["ok"] is False, ambiguous_payload
     assert ambiguous_payload["suggestions"] == [
         "codex-app",
+        "codex-app-ssh",
         "codex-ide-plugin",
         "codex-cli",
     ], ambiguous_payload
@@ -246,6 +281,14 @@ def main() -> int:
             available_capabilities=["network", "external_evidence_poll"],
         )
         assert selected_pack["host_loop_activation"]["activation_allowed"] is True
+        refresh_command = selected_pack["commands"]["goal_start_refresh_state"]
+        assert "--agent-id codex-product-capability" in refresh_command, refresh_command
+        assert "--progress-scope agent_lane" in refresh_command, refresh_command
+        assert "--health-check" not in refresh_command, refresh_command
+        refresh_args = build_parser().parse_args(shlex.split(refresh_command)[1:])
+        assert refresh_args.command == "refresh-state", refresh_args
+        assert refresh_args.agent_id == "codex-product-capability", refresh_args
+        assert refresh_args.progress_scope == "agent_lane", refresh_args
         for key in (
             "heartbeat_prompt_json",
             "quota_guard",
@@ -277,6 +320,77 @@ def main() -> int:
         assert "worker-bridge" not in ide_bootstrap, ide_onboarding
         assert "visible IDE plugin" in ide_onboarding["recommended_start"], ide_onboarding
 
+        app_ssh_onboarding = build_agent_onboarding_packet(
+            project=project,
+            agent_type="codex-app-ssh",
+            goal_id="multi-agent-goal",
+            agent_id="codex-product-capability",
+            cli_bin=cli_bin,
+        )
+        app_ssh_activation = app_ssh_onboarding["host_loop_activation"]
+        assert app_ssh_activation["activation_method"] == "set_visible_goal"
+        assert app_ssh_activation["host_surface"] == "codex_app_ssh_visible_goal_mode"
+        assert "--host-surface codex-app-ssh" in (
+            app_ssh_onboarding["commands"]["bootstrap_command_pack"]
+        )
+        assert "/goal <task_body>" in app_ssh_activation["host_mutation"]["host_command"]
+
+        app_ssh_prompt_run = subprocess.run(
+            shlex.split(app_ssh_activation["activation_input_command"]),
+            cwd=REPO_ROOT,
+            env={**os.environ, "HOME": str(home)},
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        app_ssh_prompt = json.loads(app_ssh_prompt_run.stdout)
+        assert app_ssh_prompt["ok"] is True, app_ssh_prompt
+        assert app_ssh_prompt["interface_budget"]["mode"] == "visible_goal", app_ssh_prompt
+        assert app_ssh_prompt["interface_budget"]["max_chars"] == 4_000, app_ssh_prompt
+        assert app_ssh_prompt["interface_budget"]["within_budget"] is True, app_ssh_prompt
+        assert "--runtime-profile codex_app_ssh_goal" in (
+            app_ssh_prompt["quota_guard_command"]
+        ), app_ssh_prompt
+        assert "--turn-instance-id" not in app_ssh_prompt["quota_guard_command"], app_ssh_prompt
+        assert "--source visible-goal" in app_ssh_prompt["quota_spend_command"], app_ssh_prompt
+        spend_args = build_parser().parse_args(
+            shlex.split(app_ssh_prompt["quota_spend_command"])[1:]
+        )
+        assert spend_args.command == "quota", spend_args
+        assert spend_args.quota_command == "spend-slot", spend_args
+        assert spend_args.source == "visible-goal", spend_args
+        assert is_automation_run(
+            {
+                "classification": "quota_slot_spent",
+                "quota_event": {"source": spend_args.source},
+            }
+        ) is False
+        assert "not a heartbeat automation" in app_ssh_prompt["task_body"], app_ssh_prompt
+        assert "host_action=" not in app_ssh_prompt["task_body"], app_ssh_prompt
+        assert "automation_update stop" not in app_ssh_prompt["task_body"], app_ssh_prompt
+
+        cli_onboarding = build_agent_onboarding_packet(
+            project=project,
+            agent_type="codex-cli",
+            goal_id="multi-agent-goal",
+            agent_id="codex-product-capability",
+            cli_bin=cli_bin,
+        )
+        cli_prompt_run = subprocess.run(
+            shlex.split(
+                cli_onboarding["host_loop_activation"]["activation_input_command"]
+            ),
+            cwd=REPO_ROOT,
+            env={**os.environ, "HOME": str(home)},
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        cli_prompt = json.loads(cli_prompt_run.stdout)
+        assert cli_prompt["interface_budget"]["mode"] == "visible_goal", cli_prompt
+        assert "--turn-instance-id" not in cli_prompt["quota_guard_command"], cli_prompt
+        assert "--source visible-goal" in cli_prompt["quota_spend_command"], cli_prompt
+
         opencode_onboarding = build_agent_onboarding_packet(
             project=project,
             agent_type="opencode",
@@ -291,6 +405,108 @@ def main() -> int:
         assert opencode_onboarding["host_loop_activation"]["host_mutation"]["host_tool"] == (
             "loopx_goal_activate"
         )
+
+        other_agent_onboarding = build_agent_onboarding_packet(
+            project=project,
+            agent_type="other-agent",
+            goal_id="multi-agent-goal",
+            agent_id="codex-product-capability",
+            cli_bin=cli_bin,
+        )
+        other_commands = other_agent_onboarding["commands"]
+        assert "install_command_facade" not in other_commands
+        assert "doctor --agent-type other-agent" in other_commands["doctor_or_install"]
+        delivery = other_agent_onboarding["skill_delivery"]
+        assert delivery["mode"] == "host_managed", delivery
+        assert delivery["owner"] == "custom_agent_host", delivery
+        assert delivery["status"] == "pending_host_readback", delivery
+        assert delivery["codex_skills_root_required"] is False, delivery
+        assert delivery["required_for_cli_health"] is False, delivery
+        assert delivery["required_for_loopx_workflow"] is True, delivery
+        assert set(delivery["required_skill_ids"]) == {
+            "loopx-project",
+            "loopx-pr-review",
+            "loopx-doc-registry",
+            "loopx-self-repair",
+        }, delivery
+        assert delivery["delivery_options"] == [
+            "host_skill_manifest",
+            "prompt_injection",
+        ], delivery
+        assert delivery["source_directories"] == [
+            f"skills/{skill_id}" for skill_id in delivery["required_skill_ids"]
+        ], delivery
+        assert delivery["host_readback_required"] is True, delivery
+        assert set(delivery["readback_fields"]) == {
+            "integration_mode",
+            "loaded_skill_ids",
+            "source_revision",
+        }, delivery
+        assert any(
+            "loaded-skill readback" in item
+            for item in other_agent_onboarding["slash_command_contract"][
+                "setup_complete_requires"
+            ]
+        ), other_agent_onboarding
+
+        registry["goals"][0]["control_plane"] = {
+            "change_quality_qualification": {
+                "enabled": True,
+                "safe_fix": True,
+                "strict_receipt": True,
+            }
+        }
+        serialized_registry = json.dumps(registry)
+        project_registry.write_text(serialized_registry, encoding="utf-8")
+        global_registry.write_text(serialized_registry, encoding="utf-8")
+        quality_other_agent = build_agent_onboarding_packet(
+            project=project,
+            agent_type="other-agent",
+            goal_id="multi-agent-goal",
+            agent_id="codex-product-capability",
+            cli_bin=cli_bin,
+        )
+        quality_delivery = quality_other_agent["skill_delivery"]
+        assert "loopx-change-quality" in quality_delivery["active_project_skill_ids"]
+        assert "loopx-change-quality" in quality_delivery["required_skill_ids"]
+        assert "skills/loopx-change-quality" in quality_delivery["source_directories"]
+
+        quality_codex = build_agent_onboarding_packet(
+            project=project,
+            agent_type="codex-cli",
+            goal_id="multi-agent-goal",
+            agent_id="codex-product-capability",
+            cli_bin=cli_bin,
+        )
+        quality_commands = quality_codex["skill_delivery"][
+            "project_skill_commands"
+        ]
+        assert len(quality_commands) == 1, quality_codex
+        assert "project-skill status" in quality_commands[0]["status"]
+        assert "project-skill install" in quality_commands[0]["apply_install"]
+        assert quality_commands[0]["apply_install"].endswith("--execute")
+
+        doctor_home = root / "doctor-home"
+        doctor_home.mkdir()
+        doctor_env = {
+            **os.environ,
+            "HOME": str(doctor_home),
+            "PATH": f"{REPO_ROOT / 'scripts'}{os.pathsep}{os.environ.get('PATH', '')}",
+        }
+        other_agent_doctor = json.loads(
+            run_cli(
+                "doctor",
+                "--agent-type",
+                "other-agent",
+                env=doctor_env,
+            ).stdout
+        )
+        assert other_agent_doctor["install_freshness"]["requires_upgrade"] is False
+        assert other_agent_doctor["skill_delivery"]["mode"] == "host_managed"
+        for check in other_agent_doctor["checks"]:
+            if str(check.get("id", "")).startswith("installed_"):
+                assert check["ok"] is True, check
+                assert check["applicable"] is False, check
 
     return 0
 

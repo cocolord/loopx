@@ -447,11 +447,16 @@ loopx quota monitor-poll --goal-id <GOAL_ID> \
 
 When a poll sees a material transition, add `--material-change` and optionally
 `--next-agent-todo` or `--next-user-todo` so the monitor produces a concrete
-follow-up instead of staying as an opaque watch:
+follow-up instead of staying as an opaque watch. A user follow-up must declare
+`--next-user-task-class user_gate|user_action` explicitly: use `user_gate` for
+a blocking owner decision and `user_action` for a visible reminder that must
+not block the bound agent lane. Omitting the task class fails before writeback:
 
 ```bash
 loopx quota monitor-poll --goal-id <GOAL_ID> \
   --target-key <TARGET_KEY> --result-hash <HASH> --material-change \
+  --next-user-todo "<PUBLIC_SAFE_REVIEW_REMINDER>" \
+  --next-user-task-class user_action \
   --next-agent-todo "<PUBLIC_SAFE_FOLLOW_UP>" --execute
 ```
 
@@ -606,6 +611,12 @@ the displayed gate, evidence, or health reason.
 `quota should-run` is the per-goal guard for heartbeat jobs. It returns a small
 JSON or Markdown decision:
 
+Its health gate is also per-goal: global contract errors and errors owned by
+the selected goal fail closed, while errors owned by other goals remain visible
+in broad status inventory without blocking this decision. Error ownership comes
+from structured contract diagnostics, never from parsing a goal-id prefix out
+of an error string.
+
 ```json
 {
   "goal_id": "project-main-control",
@@ -647,7 +658,7 @@ JSON or Markdown decision:
       "schema_version": "scheduler_hint_detail_v0",
       "omitted_by_default": true,
       "execution_required": false,
-      "request": "loopx quota should-run --include-scheduler-detail",
+      "request": "loopx quota should-run --include-detail scheduler",
       "hot_path_runtime_fields": [
         "codex_app",
         "unchanged_poll",
@@ -860,7 +871,7 @@ unchanged polls and reset the unchanged streak whenever the token changes. The
 token is derived from scheduler action plus the current identity/profile inputs;
 the explanatory reset profile, profile signature, reset condition summary, and
 stateful-backoff policy live in `scheduler_hint.cold_path_detail` when callers
-request `loopx quota should-run --include-scheduler-detail`. Hosts should also
+request `loopx quota should-run --include-detail scheduler`. Hosts should also
 reset when an external event makes the goal actionable again, such as user
 feedback in the thread, a new or reassigned todo, a resolved gate, or material
 evidence transition. A reset applies `codex_app_initial_interval_minutes` (and
@@ -926,12 +937,12 @@ unchanged poll triggers the compact final quota/replan check named by
 still unchanged, the loop applies
 `scheduler_hint.unchanged_poll.after_limits.<runtime>`. Hosts that need the
 older per-runtime detail objects must opt in with
-`quota should-run --include-scheduler-detail` and read
+`quota should-run --include-detail scheduler` and read
 `scheduler_hint.cold_path_detail.local_scheduler`,
 `scheduler_hint.cold_path_detail.codex_cli_tui`, or
 `scheduler_hint.cold_path_detail.claude_code_loop`. That opt-in is diagnostic
 and migration support only: a host or agent that forgets
-`--include-scheduler-detail` must still retain the core scheduling abilities by
+`--include-detail scheduler` must still retain the core scheduling abilities by
 reading the default hot-path fields named in
 `scheduler_hint.detail_ref.hot_path_runtime_fields`.
 The response also includes `execution_obligation`, which is the compatibility
@@ -978,12 +989,19 @@ Post-turn accounting protocol:
 
 - call `quota should-run` before spending delivery compute;
 - do the bounded automatic turn, validation, and state writeback;
+- append an accountable `refresh-state` with `delivery_outcome=outcome_progress`
+  or `primary_goal_outcome` before spend. This run is the causal delivery record
+  consumed by `spend-slot`; a plain `state_refreshed` run without delivery
+  outcome is quota-neutral and cannot replace it;
 - append exactly one `quota spend-slot --execute` event for that completed
   turn after validated writeback. When the writeback is a state refresh that
   moves the guard from eligible/replan to waiting, `spend-slot` may still
   account the latest unspent `outcome_progress` delivery run once; a later
   duplicate spend is rejected because the latest run is then the spend event,
   not the delivery run.
+- after spend, an optional plain state-only refresh may update dashboard or
+  controller state. Do not append another accountable progress refresh after
+  spend, because it would become a new unspent delivery record;
 - keep accountable delivery attribution on the worktree that produced it. If
   `refresh-state` must run from a separate registry checkout, pass
   `--delivery-workspace-path <delivery-worktree>`; the path is validated locally
@@ -993,9 +1011,10 @@ Post-turn accounting protocol:
   concrete successor, blocker, or `outcome_progress`/`primary_goal_outcome`
   writeback, but do not spend for a `surface_only` watch-lane continuation or
   no-follow-up rationale that closes into `monitor_quiet_skip`.
-- for unchanged `monitor_quiet_skip` heartbeat polls, append at most one
-  no-spend `quota monitor-poll --execute` event and rerun `quota should-run`
-  before choosing quiet no-op versus autonomous replan;
+- give each heartbeat a stable turn id and pass it to `quota should-run`; the
+  guard commits one idempotent receipt, and for unchanged `monitor_quiet_skip`
+  it idempotently appends the no-spend stall observation before returning quiet
+  no-op versus autonomous replan;
 - do not append spend for quiet `should_run=false` skips, preflight failures,
   pure dry-run previews, or duplicate accounting attempts;
 - if `should_run=false` but `safe_bypass_allowed=true` and the agent actually

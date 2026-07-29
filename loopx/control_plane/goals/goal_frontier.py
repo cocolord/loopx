@@ -39,6 +39,10 @@ VISION_GAP_JUDGE_SCHEMA_VERSION = "vision_gap_judge_v0"
 AUTONOMOUS_REPLAN_DECISION_SCHEMA_VERSION = "autonomous_replan_decision_v0"
 AUTONOMOUS_REPLAN_SCOPE_SCHEMA_VERSION = "autonomous_replan_scope_v0"
 AUTONOMOUS_REPLAN_OBLIGATION_SCHEMA_VERSION = "autonomous_replan_obligation_v0"
+REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS = (
+    "runnable_todo_set",
+    "successor_or_supersede",
+)
 AUTONOMOUS_REPLAN_REQUIRED_MODE = "autonomous_replan_required"
 GOAL_TERMINAL_STATE_SCHEMA_VERSION = "goal_terminal_state_v0"
 GOAL_TERMINAL_SOURCE_COMPLETENESS_SCHEMA_VERSION = "goal_terminal_source_completeness_v0"
@@ -59,6 +63,7 @@ VISION_CHECKPOINT_SATISFIED_DECISIONS = {
     "retired_or_superseded",
     "unchanged_with_reason",
 }
+VISION_CHECKPOINT_NO_FOLLOWUP_RESOLUTION = "record_no_followup"
 
 
 def safe_non_negative_int(value: Any) -> int:
@@ -94,7 +99,7 @@ def _terminal_todo_source_state(
     deferred = summary.get("deferred_count")
     if not (
         type(total) is int
-        and total > 0
+        and total >= 0
         and type(done) is int
         and done == total
         and _strict_zero(summary.get("open_count"))
@@ -167,16 +172,12 @@ def derive_goal_terminal_state(
     agent_todo_summary: dict[str, Any] | None,
     projection: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    user_status, user_intent = _terminal_todo_source_state(user_todo_summary, role="user")
-    agent_status, agent_intent = _terminal_todo_source_state(agent_todo_summary, role="agent")
-    source_completeness = {
-        "schema_version": GOAL_TERMINAL_SOURCE_COMPLETENESS_SCHEMA_VERSION,
-        "user_todos": user_status,
-        "agent_todos": agent_status,
-    }
+    source_completeness, source_closure_confirmed = _terminal_todo_source_contract(
+        user_todo_summary=user_todo_summary,
+        agent_todo_summary=agent_todo_summary,
+    )
     if not (
-        user_status == agent_status == "valid"
-        and (user_intent or agent_intent)
+        source_closure_confirmed
         and _projection_has_empty_terminal_frontier(projection)
     ):
         return source_completeness, None
@@ -186,6 +187,45 @@ def derive_goal_terminal_state(
         "derived": True,
         "source": "validated_goal_closure",
     }
+
+
+def _terminal_todo_source_contract(
+    *,
+    user_todo_summary: dict[str, Any] | None,
+    agent_todo_summary: dict[str, Any] | None,
+) -> tuple[dict[str, Any], bool]:
+    user_status, user_intent = _terminal_todo_source_state(user_todo_summary, role="user")
+    agent_status, agent_intent = _terminal_todo_source_state(agent_todo_summary, role="agent")
+    source_completeness = {
+        "schema_version": GOAL_TERMINAL_SOURCE_COMPLETENESS_SCHEMA_VERSION,
+        "user_todos": user_status,
+        "agent_todos": agent_status,
+    }
+    return (
+        source_completeness,
+        user_status == agent_status == "valid" and (user_intent or agent_intent),
+    )
+
+
+def _terminal_no_followup_resolves_vision_checkpoint(
+    *,
+    user_todo_summary: dict[str, Any] | None,
+    agent_todo_summary: dict[str, Any] | None,
+    checkpoint: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(checkpoint, dict):
+        return False
+    required_resolution = checkpoint.get("required_resolution")
+    if not (
+        isinstance(required_resolution, list)
+        and VISION_CHECKPOINT_NO_FOLLOWUP_RESOLUTION in required_resolution
+    ):
+        return False
+    _, source_closure_confirmed = _terminal_todo_source_contract(
+        user_todo_summary=user_todo_summary,
+        agent_todo_summary=agent_todo_summary,
+    )
+    return source_closure_confirmed
 
 
 def goal_frontier_is_terminal_no_followup(*, projection: dict[str, Any] | None) -> bool:
@@ -244,6 +284,102 @@ def autonomous_replan_ack_has_frontier_delta(ack: dict[str, Any] | None) -> bool
     return repair_delta_kinds_have_frontier_delta(delta_contract.get("delta_kinds"))
 
 
+def _blocked_successor_repeat_vision_open(
+    replan_obligation: dict[str, Any] | None,
+    acceptance_gaps: list[dict[str, Any]] | None,
+) -> bool:
+    trigger_kinds = {
+        str(trigger.get("kind") or "").strip()
+        for trigger in (
+            replan_obligation.get("triggers") or []
+            if isinstance(replan_obligation, dict)
+            else []
+        )
+        if isinstance(trigger, dict)
+    }
+    return "blocked_successor_no_progress_repeat" in trigger_kinds and any(
+        goal_vision_repeats_advancement_until_closed(gap.get("advancement_policy"))
+        for gap in (acceptance_gaps or [])
+        if isinstance(gap, dict)
+    )
+
+
+def autonomous_replan_ack_satisfies_obligation(
+    ack: dict[str, Any] | None,
+    *,
+    replan_obligation: dict[str, Any] | None,
+    acceptance_gaps: list[dict[str, Any]] | None,
+) -> bool:
+    """Reject wait-only ACKs for repeat-until-closed blocked successors."""
+
+    if not autonomous_replan_ack_has_frontier_delta(ack):
+        return False
+    if not _blocked_successor_repeat_vision_open(
+        replan_obligation,
+        acceptance_gaps,
+    ):
+        return True
+    delta_contract = ack.get("delta_contract") if isinstance(ack, dict) else {}
+    delta_kinds = {
+        str(item or "").strip()
+        for item in (
+            delta_contract.get("delta_kinds") or []
+            if isinstance(delta_contract, dict)
+            else []
+        )
+        if str(item or "").strip()
+    }
+    return bool(delta_kinds & set(REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS))
+
+
+def align_autonomous_replan_guidance_with_acceptance_policy(
+    replan_obligation: dict[str, Any] | None,
+    *,
+    acceptance_gaps: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Remove wait-only guidance when the active vision requires advancement."""
+
+    if not isinstance(replan_obligation, dict):
+        return replan_obligation
+    if not _blocked_successor_repeat_vision_open(
+        replan_obligation,
+        acceptance_gaps,
+    ):
+        return replan_obligation
+
+    aligned = dict(replan_obligation)
+    aligned["guidance_actions"] = [
+        "discover_safe_successor",
+        "create_runnable_todo",
+        "successor_or_supersede",
+    ]
+    aligned["todo_actions"] = [
+        {
+            **action,
+            "text": (
+                "discover and promote one safe in-scope evidence-backed runnable "
+                "todo, or replace the blocked successor through an explicit "
+                "successor/supersede transition"
+            ),
+        }
+        if isinstance(action, dict)
+        and action.get("action") == "add"
+        and action.get("role") == "agent"
+        else action
+        for action in (replan_obligation.get("todo_actions") or [])
+    ]
+    aligned["recommended_action"] = (
+        "run a bounded autonomous replan for the exact blocked successor: "
+        "create or claim one safe in-scope runnable advancement todo, or record "
+        "an explicit successor/supersede transition; watch-lane continuation "
+        "alone does not satisfy a repeat-until-closed vision"
+    )
+    aligned["satisfying_repair_delta_kinds"] = list(
+        REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS
+    )
+    return aligned
+
+
 def _autonomous_replan_ack_has_delta_kind(
     ack: dict[str, Any] | None,
     *,
@@ -261,6 +397,41 @@ def _autonomous_replan_ack_has_delta_kind(
         for item in (delta_contract.get("delta_kinds") or [])
         if str(item or "").strip()
     }
+
+
+def _watch_lane_ack_covers_dead_monitor_repeat(
+    ack: dict[str, Any] | None,
+    *,
+    replan_obligation: dict[str, Any] | None,
+    acceptance_gaps: list[dict[str, Any]],
+) -> bool:
+    """Keep an as-needed watch ACK valid across unchanged heartbeat receipts."""
+
+    trigger_kinds = {
+        str(trigger.get("kind") or "").strip()
+        for trigger in (
+            replan_obligation.get("triggers") or []
+            if isinstance(replan_obligation, dict)
+            else []
+        )
+        if isinstance(trigger, dict)
+    }
+    if trigger_kinds != {"dead_monitor_repeat"}:
+        return False
+    if not _autonomous_replan_ack_has_delta_kind(
+        ack,
+        delta_kind="watch_lane_continuation",
+    ):
+        return False
+    if not acceptance_gaps or any(
+        gap.get("kind") != "vision_acceptance_gap"
+        for gap in acceptance_gaps
+    ):
+        return False
+    return not any(
+        goal_vision_repeats_advancement_until_closed(gap.get("advancement_policy"))
+        for gap in acceptance_gaps
+    )
 
 
 def autonomous_replan_decision_allowed(
@@ -792,19 +963,21 @@ def build_vision_continuation_audit(
             "todo_completion_alone",
             "autonomous_replan_ack_alone",
             "vision_checkpoint_alone",
+            "registry_registration_alone",
             "no_followup_without_acceptance_evidence",
         ],
         "required_before_closeout": [
             "derive_requirements_from_active_vision_and_current_todo",
             "name_authoritative_evidence_for_each_requirement",
+            "inspect_registry_declared_materials_before_external_research",
             "run_bounded_public_research_when_local_evidence_is_missing",
             "create_successor_or_write_vision_replan_trigger_when_unproven",
         ],
         "recommended_action": (
             "audit active per-agent vision acceptance before todo closeout; "
-            "if evidence is weak or missing, use bounded public research when "
-            "the claim depends on public facts, then keep the vision active with "
-            "a successor todo or --vision-replan-trigger"
+            "if evidence is weak or missing, inspect registry-declared material "
+            "references before bounded public research, then keep the vision "
+            "active with a successor todo or --vision-replan-trigger"
         ),
     }
     if acceptance_requirements:
@@ -850,11 +1023,19 @@ def build_vision_gap_judge(
         evidence_read_instruction = (
             f"{evidence_read_instruction} when goal_id and agent_id are available."
         )
+    registry_read_instruction = (
+        "Before external research, inspect the selected goal's registry-declared "
+        "topic_authority and project_materials metadata, preferring any projected "
+        "agent_material_frontier or required_reads. Use role, freshness, revision, "
+        "boundary, gate_status, and conflict_rule to choose permitted references. "
+        "Registration guides discovery; it neither grants access nor proves acceptance."
+    )
     public_research_instruction = (
-        "If the evidence log is missing, stale, or too weak and the acceptance "
-        "question depends on public facts, run bounded public web research using "
-        "primary or authoritative sources; record confirmed/refuted findings as "
-        "public-safe evidence or a compact vision replan trigger before judging."
+        "If projected evidence, the evidence log, and permitted registry-declared "
+        "references remain missing, stale, or too weak and the acceptance question "
+        "depends on public facts, run bounded public web research using primary or "
+        "authoritative sources; record confirmed/refuted findings as public-safe "
+        "evidence or a compact vision replan trigger before judging."
     )
     return {
         "schema_version": VISION_GAP_JUDGE_SCHEMA_VERSION,
@@ -869,12 +1050,13 @@ def build_vision_gap_judge(
         "agent_judge_instruction": (
             "Judge vision closure: compare active vision acceptance_summary "
             "with projected evidence and agent-scoped evidence-log reads. "
-            "Use bounded public web research when local evidence is insufficient "
-            "and the gap depends on public facts. "
+            "Inspect permitted registry-declared material references before bounded "
+            "public web research. "
             "Mark done only when evidence proves completion, a blocker/user "
             "gate, or superseding/no-follow-up closure; otherwise continue."
         ),
         "evidence_read_instruction": evidence_read_instruction,
+        "registry_read_instruction": registry_read_instruction,
         "external_research_instruction": public_research_instruction,
         "research_writeback_required_when_used": [
             "source_url_or_public_reference",
@@ -1383,6 +1565,9 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                     delta_kind="watch_lane_continuation",
                 )
             ),
+            current_agent_blocker_count=safe_non_negative_int(
+                (agent_todo_summary or {}).get("current_agent_blocker_count")
+            ),
             monitor_no_change_streak_triggered=(
                 monitor_no_change_trigger is not None
             ),
@@ -1747,6 +1932,20 @@ def build_goal_frontier_projection_context_from_status(
         )
         + acceptance_gaps_from_vision_checkpoint(latest_missing_vision_checkpoint)
     )
+    if _terminal_no_followup_resolves_vision_checkpoint(
+        user_todo_summary=user_todo_summary,
+        agent_todo_summary=agent_todo_summary,
+        checkpoint=latest_missing_vision_checkpoint,
+    ):
+        source_acceptance_gaps = [
+            gap
+            for gap in source_acceptance_gaps
+            if gap.get("kind") != VISION_CHECKPOINT_MISSING_TRIGGER
+        ]
+    replan_obligation = align_autonomous_replan_guidance_with_acceptance_policy(
+        replan_obligation,
+        acceptance_gaps=source_acceptance_gaps,
+    )
     frontier_counts = _frontier_advancement_counts(
         agent_todo_summary=agent_todo_summary,
         agent_id=agent_id,
@@ -1767,14 +1966,28 @@ def build_goal_frontier_projection_context_from_status(
         agent_id=agent_id,
     )
     effective_replan_ack = latest_agent_replan_ack or projected_replan_ack
+    watch_lane_ack_covers_dead_monitor_repeat = (
+        _watch_lane_ack_covers_dead_monitor_repeat(
+            effective_replan_ack,
+            replan_obligation=replan_obligation,
+            acceptance_gaps=acceptance_gaps,
+        )
+    )
     if (
         autonomous_replan_is_required(replan_obligation)
-        and autonomous_replan_ack_has_frontier_delta(effective_replan_ack)
+        and autonomous_replan_ack_satisfies_obligation(
+            effective_replan_ack,
+            replan_obligation=replan_obligation,
+            acceptance_gaps=source_acceptance_gaps,
+        )
         and autonomous_replan_ack_matches_frontier(
             effective_replan_ack,
             replan_obligation,
         )
-        and not acceptance_gaps
+        and (
+            not acceptance_gaps
+            or watch_lane_ack_covers_dead_monitor_repeat
+        )
     ):
         replan_obligation = None
         replan_scope = autonomous_replan_scope_decision(
@@ -1910,7 +2123,10 @@ def build_goal_frontier_projection(
     if replan_required:
         blockers.append("autonomous_replan_obligation")
     if isinstance(vision_wait_state, dict):
-        blockers.append("vision_blocked_successor_wait")
+        if vision_wait_state.get("reason_code") == "current_agent_blocker":
+            blockers.append("current_agent_blocker")
+        else:
+            blockers.append("vision_blocked_successor_wait")
 
     compact_acceptance_gaps = [
         item for item in (acceptance_gaps or []) if isinstance(item, dict)

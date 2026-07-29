@@ -59,8 +59,17 @@ fi
 {cli_bin_arg} doctor >/dev/null"""
 
 
-def render_codex_cli_no_clone_preflight(*, cli_bin: str = "loopx") -> str:
+def render_codex_cli_no_clone_preflight(
+    *,
+    cli_bin: str = "loopx",
+    doctor_agent_type: str | None = None,
+) -> str:
     cli_bin_arg = shell_arg(cli_bin)
+    doctor_agent_arg = (
+        f" --agent-type {shell_arg(doctor_agent_type)}"
+        if doctor_agent_type
+        else ""
+    )
     return f"""export PATH="$HOME/.local/bin:$PATH"
 if ! command -v {cli_bin_arg} >/dev/null 2>&1; then
   if command -v curl >/dev/null 2>&1; then
@@ -71,7 +80,7 @@ if ! command -v {cli_bin_arg} >/dev/null 2>&1; then
     exit 1
   fi
 fi
-{cli_bin_arg} doctor >/dev/null"""
+{cli_bin_arg} doctor{doctor_agent_arg} >/dev/null"""
 
 
 def render_quota_guard_command(
@@ -82,6 +91,7 @@ def render_quota_guard_command(
     available_capabilities: Any = None,
     runtime_profile: str | None = None,
     scheduler_execution_context: dict[str, Any] | None = None,
+    heartbeat_turn_receipt: bool = False,
 ) -> str:
     agent_arg = f" --agent-id {shell_arg(agent_id)}" if agent_id else ""
     capability_args = render_available_capability_args(available_capabilities)
@@ -89,11 +99,16 @@ def render_quota_guard_command(
         runtime_profile=runtime_profile,
         scheduler_execution_context=scheduler_execution_context,
     )
+    turn_arg = (
+        ' --turn-instance-id "${LOOPX_TURN:?}"'
+        if heartbeat_turn_receipt
+        else ""
+    )
     return (
         f"{shell_arg(cli_bin)} --format json "
         f"--registry {SHARED_GLOBAL_REGISTRY} "
         f"quota should-run --goal-id {shell_arg(goal_id)}{agent_arg}"
-        f"{capability_args}{scheduler_args}"
+        f"{capability_args}{scheduler_args}{turn_arg}"
     )
 
 
@@ -146,6 +161,24 @@ def render_refresh_state_command(
     return (
         f"{shell_arg(cli_bin)} refresh-state --goal-id {shell_arg(goal_id)}"
         f"{classification_arg}{scale_arg}{outcome_arg}{agent_arg}{scope_arg}"
+    )
+
+
+def render_accountable_progress_refresh_command(
+    goal_id: str,
+    *,
+    cli_bin: str = "loopx",
+    agent_id: str | None = None,
+    progress_scope: str | None = None,
+) -> str:
+    return render_refresh_state_command(
+        goal_id,
+        cli_bin=cli_bin,
+        agent_id=agent_id,
+        progress_scope=progress_scope,
+        classification="<PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
+        delivery_batch_scale="multi_surface",
+        delivery_outcome="outcome_progress",
     )
 
 
@@ -283,6 +316,9 @@ def build_new_project_prompt(
     )
     quota_spend_command = render_quota_spend_command(resolved_goal_id)
     refresh_command = render_refresh_state_command(resolved_goal_id)
+    progress_refresh_command = render_accountable_progress_refresh_command(
+        resolved_goal_id
+    )
     prompt = render_prompt_text(
         project=project_text,
         goal_doc=goal_doc_text,
@@ -297,6 +333,7 @@ def build_new_project_prompt(
         quota_guard_command=quota_guard_command,
         quota_spend_command=quota_spend_command,
         refresh_command=refresh_command,
+        progress_refresh_command=progress_refresh_command,
         cli_bin="loopx",
         spawn_allowed=spawn_allowed,
         allowed_domains=allowed_domains,
@@ -319,6 +356,7 @@ def build_new_project_prompt(
         "quota_guard_command": quota_guard_command,
         "quota_spend_command": quota_spend_command,
         "refresh_command": refresh_command,
+        "progress_refresh_command": progress_refresh_command,
         "cli_preflight": render_cli_preflight(),
         "prompt": prompt,
     }
@@ -385,6 +423,13 @@ def build_codex_cli_bootstrap_message(
         resolved_goal_id,
         cli_bin=cli_bin,
         agent_id=agent_id,
+        progress_scope="agent_lane" if agent_id else None,
+    )
+    progress_refresh_command = render_accountable_progress_refresh_command(
+        resolved_goal_id,
+        cli_bin=cli_bin,
+        agent_id=agent_id,
+        progress_scope="agent_lane" if agent_id else None,
     )
     first_run_validation_checklist = [
         f"{cli_bin} doctor passed after no-clone install repair or existing install",
@@ -407,6 +452,7 @@ def build_codex_cli_bootstrap_message(
         heartbeat_prompt_command=heartbeat_prompt_command,
         quota_guard_command=quota_guard_command,
         refresh_command=refresh_command,
+        progress_refresh_command=progress_refresh_command,
         quota_spend_command=quota_spend_command,
         first_run_validation_checklist=first_run_validation_checklist,
     )
@@ -428,6 +474,7 @@ def build_codex_cli_bootstrap_message(
         "codex_app_default_heartbeat_cadence": "initially 3 minutes, then follow quota scheduler_hint",
         "quota_guard_command": quota_guard_command,
         "refresh_command": refresh_command,
+        "progress_refresh_command": progress_refresh_command,
         "quota_spend_command": quota_spend_command,
         "first_run_validation_checklist": first_run_validation_checklist,
         "message": message,
@@ -473,7 +520,7 @@ def build_codex_cli_tui_bootstrap_smoke_bundle(
         "archive installer works from a temporary GitHub-style tarball or existing install",
         "message-only command prints only the setup paste block, not the Markdown review packet",
         "paste block includes no-clone install repair, project bootstrap/connect, thin heartbeat generation, loop activation, and quota guard",
-        "quota spend remains a later post-delivery command inside the paste block, not a setup or smoke side effect",
+        "accountable progress refresh then quota spend remain later post-delivery commands inside the paste block, not setup or smoke side effects",
         "no raw Codex transcripts, session files, credentials, stdout, stderr, or private paths are read",
     ]
     return {
@@ -490,6 +537,7 @@ def build_codex_cli_tui_bootstrap_smoke_bundle(
         "heartbeat_prompt_json_command": bootstrap["heartbeat_prompt_json_command"],
         "quota_guard_command": bootstrap["quota_guard_command"],
         "refresh_command": bootstrap["refresh_command"],
+        "progress_refresh_command": bootstrap["progress_refresh_command"],
         "quota_spend_command": bootstrap["quota_spend_command"],
         "validation_checklist": validation_checklist,
         "boundary": boundary,
@@ -534,6 +582,8 @@ def build_codex_cli_exec_handoff(
         ),
         "session_probe_command": f"{shell_arg(cli_bin)} codex-cli-session-probe --codex-bin {shell_arg(codex_bin)}",
         "quota_guard_command": bootstrap["quota_guard_command"],
+        "progress_refresh_command": bootstrap["progress_refresh_command"],
+        "refresh_command": bootstrap["refresh_command"],
         "quota_spend_command": bootstrap["quota_spend_command"],
         "heartbeat_prompt_json_command": bootstrap["heartbeat_prompt_json_command"],
         "message_only_command": message_only_command,
@@ -563,6 +613,7 @@ def render_codex_cli_bootstrap_message_text(
     heartbeat_prompt_command: str,
     quota_guard_command: str,
     refresh_command: str,
+    progress_refresh_command: str,
     quota_spend_command: str,
     first_run_validation_checklist: list[str],
 ) -> str:
@@ -688,12 +739,24 @@ production artifacts in public docs or LoopX state.
 8. After setup writeback, refresh state if needed. Do not spend quota for a
 setup-only turn. The configured thin loop spends only after a later validated
 delivery writeback. If I explicitly asked you to do delivery in this same turn
-and you completed a validated delivery segment, spend exactly once:
+and you completed a validated delivery segment, first write one accountable
+progress refresh, then spend exactly once against that record:
+
+```bash
+{progress_refresh_command}
+{quota_spend_command}
+```
+
+If the dashboard or controller needs another update after spend, run the plain
+state-only refresh below. It is quota-neutral and must not carry a delivery
+outcome:
 
 ```bash
 {refresh_command}
-{quota_spend_command}
 ```
+
+Do not append another accountable progress refresh after spend; it would become
+a new unspent delivery record.
 
 End with changed files, validation result, current gate/todo state, and next
 safe action. Later automation may add visible steering turns to this session
@@ -718,6 +781,7 @@ def render_prompt_text(
     quota_guard_command: str,
     quota_spend_command: str,
     refresh_command: str,
+    progress_refresh_command: str,
     cli_bin: str,
     spawn_allowed: bool,
     allowed_domains: list[str],
@@ -862,7 +926,10 @@ def render_prompt_text(
 {cli_bin} read-only-map --goal-id {goal_id}
 ```
 
-9. 如果本轮只更新了 active state、ledger 或外部规划文档，没有产生新的 adapter run，或者 dashboard 仍显示旧 run，追加一个 state-only refresh run；若本轮实际消耗了 automatic delivery compute，则把这个 refresh 放到 quota spend 之后，避免 state refresh 先关闭 active delivery lane：
+9. 如果本轮只更新了 active state、ledger 或外部规划文档，没有产生新的
+   adapter run，追加一个 state-only refresh run，然后停止且不记 quota spend。
+   如果本轮实际消耗了 automatic delivery compute，先不要运行这个 state-only
+   refresh；把它留到第 11 步记账之后：
 
 ```bash
 {refresh_command}
@@ -874,11 +941,24 @@ def render_prompt_text(
    - `{cli_bin} registry`
    - `{cli_bin} status`（在没有项目局部 registry 的目录里也应自动读共享全局 registry）
    - `{cli_bin} check --scan-path <PUBLIC_SAFE_FILE_OR_DIR>`
-11. 如果本轮实际花了 automatic delivery compute（例如 read-only map、adapter tick、实现推进或验证推进），在 validation / writeback 完成后、任何可能关闭 active delivery lane 的 state-only `refresh-state` 之前，只 append 一次 quota spend；需要 dashboard 或 controller 看到新状态时，再在 spend 后 refresh：
+11. 如果本轮实际花了 automatic delivery compute（例如 read-only map、adapter
+   tick、实现推进或验证推进），在 validation / writeback 完成后，先记录本轮
+   accountable delivery：
+
+```bash
+{progress_refresh_command}
+```
+
+   这是 `spend-slot` 将消费的因果记录；普通 state-only refresh 不能替代它。
+   然后只 append 一次 quota spend：
 
 ```bash
 {quota_spend_command}
 ```
+
+   如果 dashboard 或 controller 在 spend 后仍需状态更新，再运行第 9 步的
+   `{refresh_command}`。不要在 spend 后追加另一个 accountable progress
+   refresh，否则它会成为新的未记账 delivery。
 
    不要为 quiet `should_run=false` skip、preflight 失败、或纯 dry-run preview 记账；如果
    `should_run=false` 但实际完成了 `safe_bypass_allowed=true` 的 bounded safe-bypass 工作，要记一次账。
@@ -991,8 +1071,9 @@ mutating a real Codex session.
 - heartbeat_prompt: `{payload.get("heartbeat_prompt_command")}`
 - heartbeat_prompt_json: `{payload.get("heartbeat_prompt_json_command")}`
 - quota_guard: `{payload.get("quota_guard_command")}`
-- refresh_state: `{payload.get("refresh_command")}`
+- accountable_progress_refresh: `{payload.get("progress_refresh_command")}`
 - quota_spend_after_validation: `{payload.get("quota_spend_command")}`
+- optional_state_only_refresh_after_spend: `{payload.get("refresh_command")}`
 
 ## Fresh Repo Install Repair
 
@@ -1033,7 +1114,9 @@ the visible Codex CLI TUI.
 
 - session_probe: `{payload.get("session_probe_command")}`
 - quota_guard: `{payload.get("quota_guard_command")}`
+- accountable_progress_refresh: `{payload.get("progress_refresh_command")}`
 - quota_spend: `{payload.get("quota_spend_command")}`
+- optional_state_only_refresh_after_spend: `{payload.get("refresh_command")}`
 - disabled_reason: {payload.get("disabled_reason")}
 
 ## Boundary

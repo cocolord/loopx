@@ -52,6 +52,18 @@ SIDE_AGENT_REPLAN_OBLIGATION = {
     ],
 }
 
+SIDE_AGENT_DEAD_MONITOR_REPLAN_OBLIGATION = {
+    **GLOBAL_REPLAN_OBLIGATION,
+    "triggers": [
+        {
+            "kind": "dead_monitor_repeat",
+            "source": "run_history",
+            "agent_id": SIDE_AGENT,
+            "monitor_target_id": "fixture-monitor-target",
+        }
+    ],
+}
+
 
 def monitor_item(
     *,
@@ -366,6 +378,30 @@ def watch_lane_continuation_ack_run(
             },
         },
     }
+
+
+def unchanged_heartbeat_monitor_runs() -> list[dict]:
+    return [
+        {
+            "classification": "quota_monitor_poll",
+            "generated_at": generated_at,
+            "agent_id": SIDE_AGENT,
+            "turn_instance_id": turn_instance_id,
+            "recommended_action": "Keep the as-needed watch lane quiet.",
+            "delivery_outcome": "surface_only",
+            "monitor_target": {
+                "schema_version": "quota_monitor_target_v0",
+                "target_id": "fixture-monitor-target",
+                "monitor_mode": "monitor_quiet_until_material_transition",
+                "effective_action": "monitor_quiet_skip",
+                "agent_id": SIDE_AGENT,
+            },
+        }
+        for generated_at, turn_instance_id in (
+            ("2026-07-04T00:03:00+00:00", "heartbeat-turn-2"),
+            ("2026-07-04T00:02:00+00:00", "heartbeat-turn-1"),
+        )
+    ]
 
 
 def material_progress_runs_after_replan_ack(count: int) -> list[dict]:
@@ -795,7 +831,11 @@ def assert_agent_vision_gap_derives_replan() -> None:
     assert audit["selected_todo_is_goal_completion"] is False, guard
     assert audit["closeout_allowed_without_evidence"] is False, guard
     assert "todo_completion_alone" in audit["not_satisfied_by"], guard
+    assert "registry_registration_alone" in audit["not_satisfied_by"], guard
     assert "create_successor_or_write_vision_replan_trigger_when_unproven" in (
+        audit["required_before_closeout"]
+    ), guard
+    assert "inspect_registry_declared_materials_before_external_research" in (
         audit["required_before_closeout"]
     ), guard
     assert "public_safe_evidence_records" in audit["authoritative_evidence_kinds"], guard
@@ -810,6 +850,15 @@ def assert_agent_vision_gap_derives_replan() -> None:
     assert "Judge vision closure" in judge["agent_judge_instruction"], guard
     assert "evidence-log" in judge["agent_judge_instruction"], guard
     assert "public web research" in judge["agent_judge_instruction"], guard
+    assert "registry-declared material references" in (
+        judge["agent_judge_instruction"]
+    ), guard
+    assert "topic_authority and project_materials" in (
+        judge["registry_read_instruction"]
+    ), guard
+    assert "neither grants access nor proves acceptance" in (
+        judge["registry_read_instruction"]
+    ), guard
     assert "primary or authoritative sources" in (
         judge["external_research_instruction"]
     ), guard
@@ -839,6 +888,9 @@ def assert_agent_vision_gap_derives_replan() -> None:
     assert "Judge vision closure" in cli_judge["agent_judge_instruction"], guard
     assert "loopx evidence-log --goal-id replan-decision-plane-fixture" in (
         cli_judge["evidence_read_instruction"]
+    ), guard
+    assert cli_judge["registry_read_instruction"] == (
+        judge["registry_read_instruction"]
     ), guard
     assert "todo_lifecycle_or_protocol_status_is_the_only_proof" in (
         cli_judge["continue_when"]
@@ -1404,6 +1456,9 @@ def assert_state_replan_follows_claimed_frontier_not_monitor_peer() -> None:
     assert monitor_guard.get("autonomous_replan_obligation") is None, monitor_guard
     assert monitor_guard["effective_action"] == "monitor_quiet_skip", monitor_guard
     assert monitor_guard["interaction_contract"]["mode"] == "monitor_quiet_skip", monitor_guard
+    primary_action = monitor_guard["interaction_contract"]["agent_channel"]["primary_action"]
+    assert "idempotent quota receipt" in primary_action, monitor_guard
+    assert "an earlier heartbeat receipt does not satisfy this one" in primary_action, monitor_guard
 
 
 def assert_monitor_schedule_gap_requires_bounded_repair() -> None:
@@ -1600,6 +1655,64 @@ def assert_explicit_as_needed_vision_gap_uses_watch_lane_continuation_ack() -> N
     assert "autonomous_replan_ack_alone" in guard["vision_continuation_audit"]["not_satisfied_by"], guard
 
 
+def assert_as_needed_watch_ack_covers_repeated_heartbeat_receipts() -> None:
+    latest_runs = [
+        *unchanged_heartbeat_monitor_runs(),
+        watch_lane_continuation_ack_run(),
+        agent_vision_gap_run(),
+    ]
+    guard = build_quota_should_run(
+        status_payload(
+            [monitor_item()],
+            replan_obligation=SIDE_AGENT_DEAD_MONITOR_REPLAN_OBLIGATION,
+            latest_runs=latest_runs,
+        ),
+        goal_id=GOAL_ID,
+        agent_id=SIDE_AGENT,
+    )
+    assert guard["decision"] == "skip", guard
+    assert guard["effective_action"] == "monitor_quiet_skip", guard
+    assert guard["goal_frontier_projection"]["replan_required"] is False, guard
+    assert guard.get("autonomous_replan_obligation") is None, guard
+
+    due_guard = build_quota_should_run(
+        status_payload(
+            [monitor_item(next_due_at="2000-01-01T00:00:00+00:00")],
+            replan_obligation=SIDE_AGENT_DEAD_MONITOR_REPLAN_OBLIGATION,
+            latest_runs=latest_runs,
+        ),
+        goal_id=GOAL_ID,
+        agent_id=SIDE_AGENT,
+    )
+    assert due_guard["decision"] == "run", due_guard
+    assert due_guard["effective_action"] == "normal_run", due_guard
+    assert due_guard["work_lane_contract"]["obligation"] == "attempt_due_monitor", due_guard
+    assert due_guard.get("autonomous_replan_obligation") is None, due_guard
+
+
+def assert_repeat_vision_keeps_repeated_heartbeat_replan() -> None:
+    guard = build_quota_should_run(
+        status_payload(
+            [monitor_item()],
+            replan_obligation=SIDE_AGENT_DEAD_MONITOR_REPLAN_OBLIGATION,
+            latest_runs=[
+                *unchanged_heartbeat_monitor_runs(),
+                watch_lane_continuation_ack_run(),
+                agent_vision_acceptance_only_run(
+                    advancement_policy="repeat_until_closed"
+                ),
+            ],
+        ),
+        goal_id=GOAL_ID,
+        agent_id=SIDE_AGENT,
+    )
+    assert guard["decision"] == "autonomous_replan_required", guard
+    assert guard["effective_action"] == "autonomous_replan_required", guard
+    assert guard["goal_frontier_projection"]["replan_required"] is True, guard
+    obligation = guard["autonomous_replan_obligation"]
+    assert obligation["triggers"][0]["kind"] == "dead_monitor_repeat", guard
+
+
 def assert_blocking_handoff_gate_beats_derived_monitor_replan() -> None:
     guard = build_quota_should_run(
         status_payload([monitor_item(), blocking_handoff_review()], replan_obligation=None),
@@ -1651,6 +1764,8 @@ def main() -> None:
     assert_non_frontier_replan_ack_does_not_clear_monitor_replan()
     assert_projected_replan_ack_is_agent_scoped()
     assert_explicit_as_needed_vision_gap_uses_watch_lane_continuation_ack()
+    assert_as_needed_watch_ack_covers_repeated_heartbeat_receipts()
+    assert_repeat_vision_keeps_repeated_heartbeat_replan()
     assert_blocking_handoff_gate_beats_derived_monitor_replan()
     print("quota-replan-decision-plane-smoke ok")
 

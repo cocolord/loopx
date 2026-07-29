@@ -10,6 +10,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPOSITORY_ROOT / "loopx"
 SCRIPTS_ROOT = REPOSITORY_ROOT / "scripts"
 CONTROL_PLANE_ROOT = PACKAGE_ROOT / "control_plane"
+BENCHMARK_READ_MODELS_ROOT = PACKAGE_ROOT / "benchmarks" / "read_models"
 STATUS_MODULE = PACKAGE_ROOT / "status.py"
 QUOTA_MODULE = PACKAGE_ROOT / "quota.py"
 PUBLIC_CONTRACT_ROOTS = (
@@ -47,12 +48,7 @@ STATUS_FORBIDDEN_DEPENDENCY_PREFIXES = (
     "loopx.benchmark_adapters",
     "loopx.presentation",
 )
-STATUS_OUTWARD_DEPENDENCY_DEBT = {
-    (
-        "loopx.status",
-        "loopx.benchmark_adapters.skillsbench_verifier_bootstrap",
-    ),
-}
+STATUS_OUTWARD_DEPENDENCY_DEBT: set[tuple[str, str]] = set()
 
 
 def _module_name(path: Path) -> str:
@@ -192,6 +188,26 @@ def test_control_plane_does_not_gain_outward_dependencies() -> None:
     assert not outward_dependencies, (
         "control-plane code must not depend on presentation, CLI, capability, or "
         f"benchmark-adapter layers; unexpected edges: {sorted(outward_dependencies)}"
+    )
+
+
+def test_benchmark_read_models_stay_out_of_control_plane_runtime() -> None:
+    runtime_root = CONTROL_PLANE_ROOT / "runtime"
+    misplaced = sorted(
+        str(path.relative_to(PACKAGE_ROOT))
+        for path in (
+            *runtime_root.glob("benchmark_*.py"),
+            *runtime_root.glob("skillsbench_*.py"),
+        )
+    )
+
+    assert BENCHMARK_READ_MODELS_ROOT.is_dir()
+    assert (BENCHMARK_READ_MODELS_ROOT / "benchmark_projection.py").is_file()
+    assert (BENCHMARK_READ_MODELS_ROOT / "goal_start_control_score.py").is_file()
+    assert not (runtime_root / "goal_start_control_score.py").exists()
+    assert not misplaced, (
+        "benchmark-specific read models belong to loopx.benchmarks.read_models, "
+        f"not the generic control-plane runtime: {misplaced}"
     )
 
 

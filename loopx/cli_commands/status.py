@@ -6,23 +6,27 @@ from pathlib import Path
 from typing import Any
 
 from ..contract import check_contract, render_contract_markdown
-from ..diagnose import collect_diagnosis, render_diagnosis_markdown
-from ..handoff_budget import build_handoff_interface_budget
-from ..quota import build_quota_should_run
-from ..presentation.renderers.status_markdown import render_status_markdown
-from ..review_packet import build_review_packet, render_review_packet_markdown
-from ..status import (
-    AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK,
-    collect_status,
-)
 from ..control_plane.runtime.status_projection_cache import (
     load_status_projection_cache,
     resolve_status_projection_cache_runtime_root,
     write_status_projection_cache,
 )
 from ..control_plane.todos.contract import normalize_todo_claimed_by
-from ..control_plane.todos.quota_summary import compact_quota_todo_summary_for_payload
-
+from ..control_plane.todos.quota_summary import (
+    compact_agent_lane_todos_for_status_display,
+)
+from ..control_plane.todos.todo_index import (
+    compact_agent_lane_todo_index_for_status_display,
+)
+from ..diagnose import collect_diagnosis, render_diagnosis_markdown
+from ..handoff_budget import build_handoff_interface_budget
+from ..presentation.renderers.status_markdown import render_status_markdown
+from ..quota import build_quota_should_run
+from ..review_packet import build_review_packet, render_review_packet_markdown
+from ..status import (
+    AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK,
+    collect_status,
+)
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -86,40 +90,6 @@ def _trim_run_history_for_status_display(
         }
 
 
-def _compact_agent_lane_todos_for_status_display(payload: dict[str, object]) -> None:
-    queue = payload.get("attention_queue")
-    if not isinstance(queue, dict):
-        return
-    items = queue.get("items")
-    if not isinstance(items, list):
-        return
-    compacted = 0
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        for key in ("user_todos", "agent_todos"):
-            summary = item.get(key)
-            if not isinstance(summary, dict):
-                continue
-            compact = compact_quota_todo_summary_for_payload(summary)
-            compaction = compact.get("payload_compaction")
-            if isinstance(compaction, dict):
-                compaction["full_detail_cold_path"] = (
-                    "status without --agent-id, todo list, or active state"
-                )
-            item[key] = compact
-            compacted += 1
-    if compacted:
-        payload["agent_lane_todo_summary_compaction"] = {
-            "schema_version": "agent_lane_status_todo_summary_compaction_v0",
-            "compacted_summary_count": compacted,
-            "reason": (
-                "status --agent-id keeps agent-lane display payloads bounded; "
-                "full todo detail remains on cold paths"
-            ),
-        }
-
-
 def register_status_commands(
     subparsers: argparse._SubParsersAction,
     add_subcommand_format: Callable[[argparse.ArgumentParser], None],
@@ -160,6 +130,16 @@ def register_status_commands(
         help=(
             "Registered agent id for adding agent-lane next-action projection "
             "to matching status queue items."
+        ),
+    )
+    status_parser.add_argument(
+        "--available-capability",
+        dest="available_capabilities",
+        action="append",
+        help=(
+            "Declare a capability available in the current execution envelope. "
+            "Repeat for multiple capabilities; capability-gated status fields "
+            "remain absent by default."
         ),
     )
     status_parser.add_argument(
@@ -267,6 +247,16 @@ def register_status_commands(
     review_packet_parser.add_argument(
         "--agent-id",
         help="Registered agent id for adding read-only agent-member status to the review packet.",
+    )
+    review_packet_parser.add_argument(
+        "--available-capability",
+        dest="available_capabilities",
+        action="append",
+        help=(
+            "Declare a capability available in the current execution envelope. "
+            "Repeat for multiple capabilities; capability-gated review fields "
+            "remain absent by default."
+        ),
     )
     review_packet_parser.add_argument("--limit", type=int, default=5)
 
@@ -377,6 +367,7 @@ def handle_status_command(
                 include_task_graph=args.include_task_graph,
                 goal_id=args.goal_id,
                 max_age_seconds=args.projection_cache_ttl_seconds,
+                available_capabilities=args.available_capabilities,
             )
         if payload is None:
             payload = collect_status(
@@ -386,6 +377,7 @@ def handle_status_command(
                 limit=collection_limit,
                 include_task_graph=args.include_task_graph,
                 goal_id=args.goal_id,
+                available_capabilities=args.available_capabilities,
             )
             if args.write_projection_cache:
                 cache_metadata = write_status_projection_cache(
@@ -397,6 +389,7 @@ def handle_status_command(
                     goal_id=args.goal_id,
                     payload=payload,
                     max_age_seconds=args.projection_cache_ttl_seconds,
+                    available_capabilities=args.available_capabilities,
                 )
                 payload["projection_cache"] = cache_metadata
             elif cache_metadata:
@@ -408,7 +401,8 @@ def handle_status_command(
                 display_limit=display_limit,
                 collection_limit=collection_limit,
             )
-            _compact_agent_lane_todos_for_status_display(payload)
+            compact_agent_lane_todos_for_status_display(payload)
+            compact_agent_lane_todo_index_for_status_display(payload)
     except Exception as exc:
         payload = {
             "ok": False,
@@ -668,12 +662,15 @@ def _sync_next_action_projection_warning_from_guard(
     guard: dict[str, object],
 ) -> None:
     warning = guard.get("next_action_projection_warning")
-    if not isinstance(warning, dict):
-        return
-    item["next_action_projection_warning"] = warning
     project_asset = item.get("project_asset")
-    if isinstance(project_asset, dict):
-        project_asset["next_action_projection_warning"] = warning
+    targets = (item, project_asset)
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        if isinstance(warning, dict):
+            target["next_action_projection_warning"] = warning
+        else:
+            target.pop("next_action_projection_warning", None)
 
 
 def _agent_reward_memory_projection(
@@ -739,7 +736,11 @@ def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str)
         if not goal_id:
             continue
         try:
-            guard = build_quota_should_run(payload, goal_id=goal_id, agent_id=safe_agent_id)
+            guard = build_quota_should_run(
+                payload,
+                goal_id=goal_id,
+                agent_id=safe_agent_id,
+            )
         except Exception:
             continue
         next_action = guard.get("agent_lane_next_action")
@@ -811,6 +812,43 @@ def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str)
                 project_asset["agent_reward_memory"] = reward_memory_projection
             reward_memory_attached += 1
             changed = True
+        latest_action = guard.get("latest_run_recommended_action")
+        for target in (item, project_asset):
+            if not isinstance(target, dict):
+                continue
+            existing_recommendation = target.get("agent_lane_recommendation")
+            had_latest_action = bool(
+                target.get("latest_run_recommended_action")
+                or target.get("latest_run_recommended_action_source")
+            )
+            for field in (
+                "agent_lane_recommendation",
+                "latest_run_recommended_action",
+                "latest_run_recommended_action_source",
+            ):
+                target.pop(field, None)
+            if isinstance(existing_recommendation, dict):
+                existing_agent_id = normalize_todo_claimed_by(
+                    existing_recommendation.get("agent_id")
+                )
+                if existing_agent_id == safe_agent_id:
+                    target["agent_lane_recommendation"] = existing_recommendation
+                elif latest_action:
+                    target["agent_lane_recommendation"] = {
+                        "schema_version": existing_recommendation.get(
+                            "schema_version"
+                        )
+                        or "agent_lane_recommendation_v0",
+                        "progress_scope": "agent_lane",
+                        "agent_id": safe_agent_id,
+                        "recommended_action": latest_action,
+                    }
+            if had_latest_action and latest_action:
+                target["latest_run_recommended_action"] = latest_action
+                target["latest_run_recommended_action_source"] = (
+                    "agent_lane_recommendation"
+                )
+        changed = True
         if not changed:
             continue
     if (
@@ -930,6 +968,8 @@ def handle_review_packet_command(
             scan_roots=_scan_roots(args),
             limit=max(0, args.limit),
             include_task_graph=not args.handoff_only,
+            goal_id=args.goal_id,
+            available_capabilities=args.available_capabilities,
         )
         if args.agent_id:
             attach_agent_lane_next_actions(status_payload, agent_id=args.agent_id)

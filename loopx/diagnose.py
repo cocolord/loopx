@@ -446,6 +446,8 @@ def collect_diagnosis(
         runtime_root_override=runtime_root_override,
         scan_roots=scan_roots,
         limit=limit,
+        goal_id=goal_id,
+        available_capabilities=available_capabilities,
     )
     goal_ids = _goal_ids_for_packet(status_payload, goal_id=goal_id, limit=limit)
     item_by_goal = {

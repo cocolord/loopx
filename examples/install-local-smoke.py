@@ -214,6 +214,8 @@ def main() -> int:
         assert f"- skill: {codex_home / 'skills' / 'loopx-pr-review'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-project'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-self-repair'}" in install.stdout, install.stdout
+        assert "project skill source:" in install.stdout, install.stdout
+        assert "install explicitly per project" in install.stdout, install.stdout
         assert f"codex skills: {codex_home / 'skills'}" in install.stdout, install.stdout
         assert f"claude skills: {home / '.claude' / 'skills'}" in install.stdout, install.stdout
         assert "loopx OpenCode bridge: skipped (opt-in" in install.stdout, install.stdout
@@ -299,6 +301,19 @@ def main() -> int:
 
         skill = codex_home / "skills" / "loopx-project" / "SKILL.md"
         assert not skill.parent.is_symlink(), skill.parent
+        skill_readback = json.loads(
+            (codex_home / "skills" / ".loopx-skill-install.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert skill_readback["integration_mode"] == "fixed_install_script"
+        assert skill_readback["source"]["revision"] == source_commit
+        assert set(skill_readback["materialized_skill_ids"]) == {
+            "loopx-doc-registry",
+            "loopx-pr-review",
+            "loopx-project",
+            "loopx-self-repair",
+        }
         skill_text = skill.read_text(encoding="utf-8")
         compact_skill_text = " ".join(skill_text.split())
         for phrase in (
@@ -353,6 +368,10 @@ def main() -> int:
         assert "Guide agentloop" not in pr_review_metadata_text, pr_review_metadata_text
         auto_research_skill = codex_home / "skills" / "loopx-auto-research" / "SKILL.md"
         assert not auto_research_skill.exists(), auto_research_skill
+        material_skill = codex_home / "skills" / "loopx-material" / "SKILL.md"
+        assert not material_skill.exists(), material_skill
+        quality_skill = codex_home / "skills" / "loopx-change-quality" / "SKILL.md"
+        assert not quality_skill.exists(), quality_skill
         loopx_prompt = codex_home / "prompts" / "loopx.md"
         assert not loopx_prompt.exists(), loopx_prompt
         loopx_command_skill = codex_home / "skills" / "loopx" / "SKILL.md"
@@ -494,6 +513,13 @@ def main() -> int:
         assert doctor_payload["skill"]["exists"] is True, doctor_payload
         assert doctor_payload["skill"]["delivery_hints"] is True, doctor_payload
         assert "loopx-auto-research" not in doctor_payload["skills"], doctor_payload
+        assert "loopx-material" not in doctor_payload["skills"], doctor_payload
+        assert "loopx-change-quality" not in doctor_payload["skills"], doctor_payload
+        assert {
+            "loopx-material",
+            "loopx-change-quality",
+        }.issubset(set(doctor_payload["project_scoped_skill_ids"])), doctor_payload
+        assert doctor_payload["globally_visible_project_skills"] == [], doctor_payload
         assert doctor_payload["skills"]["loopx-project"]["exists"] is True, doctor_payload
         assert doctor_payload["skills"]["loopx-project"]["required_phrases"] is True, doctor_payload
         assert doctor_payload["skills"]["loopx-pr-review"]["exists"] is True, doctor_payload
@@ -531,6 +557,7 @@ def main() -> int:
             "installed_skill_delivery_hints",
             "installed_required_skills",
             "installed_required_skill_routes",
+            "project_scoped_skills_absent_globally",
         ):
             assert doctor_checks[check_id]["ok"] is True, doctor_payload
 
@@ -676,7 +703,8 @@ def main() -> int:
         assert payload["ok"] is True, payload
         assert payload["quota_guard_command"] == (
             'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" '
-            "quota should-run --goal-id installer-smoke-goal"
+            'quota should-run --goal-id installer-smoke-goal '
+            '--turn-instance-id "${LOOPX_TURN:?}"'
         ), payload
         assert payload["quota_spend_command"] == (
             'loopx --registry "$HOME/.codex/loopx/registry.global.json" '
@@ -689,7 +717,9 @@ def main() -> int:
         assert "--delivery-outcome outcome_progress" in payload["progress_refresh_state_command"], payload
         assert "<PUBLIC_SAFE_PROGRESS_CLASSIFICATION>" in payload["progress_refresh_state_command"], payload
         assert "follow `interaction_contract`" in payload["task_body"], payload
-        assert "spend post-writeback" in payload["task_body"], payload
+        assert "`LOOPX_TURN=<current_time_iso>`; reuse." in payload["task_body"], payload
+        assert "guard receipt; 2 stalls->replan" in payload["task_body"], payload
+        assert "accountable refresh->spend" in payload["task_body"], payload
         assert payload["cli_bin"] == "loopx", payload
 
         canary_cli = subprocess.run(
@@ -717,8 +747,14 @@ def main() -> int:
         assert "loopx-canary doctor" in canary_payload["cli_preflight"], canary_payload
         assert "loopx-canary --format json" in canary_payload["quota_guard_command"], canary_payload
         assert "loopx-canary heartbeat-prompt --compact" in canary_payload["task_body"], canary_payload
-        assert "refresh with explicit delivery" in canary_payload["task_body"], canary_payload
-        assert "scale/outcome for progress artifacts" in canary_payload["task_body"], canary_payload
+        canary_task_body = canary_payload["task_body"]
+        progress_command = canary_payload["progress_refresh_state_command"]
+        spend_command = canary_payload["quota_spend_command"]
+        assert progress_command in canary_task_body, canary_payload
+        assert spend_command in canary_task_body, canary_payload
+        assert canary_task_body.index(progress_command) < canary_task_body.index(
+            spend_command
+        ), canary_payload
 
         fresh_install = run_install(env, "install-smoke-fresh")
         assert "loopx installed locally" in fresh_install.stdout, fresh_install.stdout

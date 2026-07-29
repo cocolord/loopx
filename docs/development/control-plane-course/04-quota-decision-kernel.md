@@ -1,6 +1,7 @@
 # 第 4 讲：Quota 决策内核与 Interaction Contract
 
-> 核心问题：`quota should-run` 看起来像一个布尔查询，为什么它实际上是 LoopX control plane 的决策编译器？
+> **本讲结论：** `quota should-run` 是只读决策编译器：它把 source facts 编译成 typed
+> interaction contract 与 scheduler hint；host 消费决定，不重新实现决定。
 
 建议时长：100 分钟。讲解 60 分钟、决策表推演 25 分钟、代码导航 15 分钟。
 
@@ -13,6 +14,32 @@
 3. 解释 decision pipeline 中 boundary、gate、capability、workspace、frontier、repair 的顺序。
 4. 判断何时应该 bounded delivery、quiet no-op、monitor poll、wait 或 self-repair。
 5. 新增规则时避免在多个 host 或输出字段中重复实现同一语义。
+
+## 本讲技术契约
+
+| 边界 | LoopX 中的答案 |
+| --- | --- |
+| Input snapshot | Goal、todo、gate、capability、workspace、monitor、vision 与 health projection |
+| Decision owner | `build_quota_should_run` 按有序规则编译本轮义务 |
+| Output contract | `interaction_contract`、`TurnEnvelope` 与 `scheduler_hint` |
+| Effect owner | 无；quota path 必须保持只读，host/agent 只消费 typed decision |
+| Re-evaluation | 状态或环境变化后重新编译，不复用旧布尔值推断新一轮 |
+
+## 先判五个具体 Turn
+
+在读 quota payload 之前，先对五组 source facts 做产品判断：
+
+| Source facts | 正确的本轮模式 | 为什么 | 禁止的捷径 |
+| --- | --- | --- | --- |
+| PR checks pending，monitor 未到期，没有其他 work | wait / monitor quiet | 没有新 observation，也没有 runnable successor | 因 goal active 就调用模型 |
+| PR checks 失败，已形成同 agent 的 fix successor | bounded delivery | 外部变化已经翻译成合法 advancement todo | 在 host prompt 里直接决定怎么修 |
+| Auto ML Harness 推荐候选，但资源槽已满 | wait / deferred | planner proposal 不等于 capacity、claim 或 launch authority | 按排名直接启动昂贵实验 |
+| 研究实验只有 dev lift，holdout successor 可运行 | bounded delivery | promotion 条件未满足，但下一验证步骤明确 | 把 dev score 当 terminal success |
+| 所有普通 todo 已关闭，但 vision acceptance 仍有 gap | replan / repair | checklist 关闭不等于目标完成 | 用 `open_count=0` 推断 stop |
+
+`build_quota_should_run` 的工作就是把这些 source facts 按稳定 precedence 编译成
+interaction contract。后面的字段、mode 和 scheduler hint 都应能回到这张表中的某个
+判断，而不是各自发明一套“是否继续”。
 
 ## 为什么叫 Quota，却不只是配额
 
@@ -279,7 +306,7 @@ identity
 
 但 self-repair 和 projection gap 可能在多个阶段插入，因为它们修复的是决策输入本身。新增规则时应在 `rule-seam-map` 中明确它的输入和 precedence。
 
-## 八个典型 Case
+## 九个典型 Case
 
 ### Case A：有 runnable todo
 
@@ -374,6 +401,24 @@ same-agent runnable advancement = none
 若只统计“run history 末尾连续出现了几次同类 monitor poll”，M1 和 M2 会互相打断，两个实际停滞的 target 都可能永远到不了阈值。正确 source 是每个 monitor todo 自己的 `consecutive_no_change`：M2 的 poll 不重置 M1；M1 的 material transition 也只重置 M1。
 
 Quota 扫描 monitor lanes 后，只要任一 lane 达到阈值、且当前 agent 没有 runnable advancement，就形成 `monitor_no_change_streak` replan obligation。若存在可执行 advancement，则 normal delivery 优先；若 advancement 只是 blocked，则不能用它掩盖 monitor 已经停滞的事实。
+
+### Case I：Harness 推荐两个候选，但只有一个资源槽
+
+```text
+Explore Harness = analysis_only
+candidate T1, T2 = ranked and scope-compatible
+short_pool capacity = 1
+short_pool active usage = 1
+T1/T2 resume_when = capacity_available:short_pool
+```
+
+结果：Harness packet 可以帮助解释当前 portfolio，但 quota frontier 仍为空；本轮应 wait，
+而不是 claim、launch 或 spend。已有 external task 的 monitor 也不因为 planner 产生新排名
+就提前 poll。资源 readback 释放槽位后，Kernel 重新计算 `resume_when`，只暴露合法候选。
+
+如果 Harness 从 Graph 读到一条新 `refutes` edge，也只能形成 retirement/replan proposal。
+Graph、Harness 和 quota 分别拥有 evidence、advisory planning 与 action legality，不能把三个
+判断压成一个 `candidate_ready=true`。
 
 ## `action_required` 与 `open_count`
 
@@ -568,13 +613,18 @@ if not (
     return "invalid", False
 
 if not (
-    total > 0
-    and done == total
+    done == total
     and open_count == deferred_count == monitor_due_count == 0
     and not monitor_open_items
 ):
     return "invalid", False
 ```
+
+这里的 `total == 0` 不是天然有效。只有 Active State 显式声明了对应的 todo
+section，且 summary 带有匹配 role/source 的 `source_proof`，零条来源才是合法的空集合；
+整个 section 缺失仍然 fail-closed。`items` 只是最多展示 12 条的有界投影，因此
+`total > 0` 时允许 `0 < len(items) <= total`，完整性由 counts 与
+`terminal_closure_proof.item_count` 证明，不能要求展示列表长度等于总数。
 
 第二次验证整个 frontier：
 

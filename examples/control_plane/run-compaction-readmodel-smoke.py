@@ -12,11 +12,14 @@ if str(ROOT) not in sys.path:
 from loopx import status as status_module  # noqa: E402
 from loopx.control_plane.goals import goal_frontier as goal_frontier_read_model  # noqa: E402
 from loopx.control_plane.goals.goal_vision import compact_goal_vision_packet  # noqa: E402
-from loopx.control_plane.runtime import (  # noqa: E402
+from loopx.benchmarks.read_models import (  # noqa: E402
     benchmark_comparison as benchmark_comparison_read_model,
 )
 from loopx.control_plane.runtime import (  # noqa: E402
     run_compaction as run_compaction_read_model,
+)
+from loopx.control_plane.runtime.active_user_assisted_pilot import (  # noqa: E402
+    compact_active_user_assisted_pilot,
 )
 from loopx.control_plane.runtime.run_ingest_health import (  # noqa: E402
     worker_bridge_ingest_health_note,
@@ -141,7 +144,7 @@ def _direct_compact_run(run: dict[str, object]) -> dict[str, object]:
         benchmark_experiment_report_replay_decision=(
             status_module.benchmark_experiment_report_replay_decision
         ),
-        compact_active_user_assisted_pilot=status_module.compact_active_user_assisted_pilot,
+        compact_active_user_assisted_pilot=compact_active_user_assisted_pilot,
         compact_session_runtime_projection_from_run=(
             status_module.compact_session_runtime_projection_from_run
         ),

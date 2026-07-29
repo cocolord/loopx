@@ -391,12 +391,14 @@ loopx todo complete \
   --next-claimed-by <registered-agent>
 ```
 
-`--next-user-todo` defaults to `user_gate` for backward compatibility. Select
-`user_action` explicitly for a reminder that stays visible without setting
-`blocks_agent`. Add a separate `continuous_monitor` todo when the PR lifecycle
-needs periodic readback. Reserve `user_gate` for an exact owner/controller
-authority boundary such as merging an aggregate branch into `main`, release,
-benchmark launch, credentials, or protected production action.
+`--next-user-todo` requires an explicit
+`--next-user-task-class user_gate|user_action`. Use `user_action` for a reminder
+that stays visible without setting `blocks_agent`; reserve `user_gate` for an
+exact owner/controller authority boundary such as merging an aggregate branch
+into `main`, release, benchmark launch, credentials, or protected production
+action. Omitting the task class fails before writeback so LoopX never guesses
+an authorization boundary. Add a separate `continuous_monitor` todo when the
+PR lifecycle needs periodic readback.
 
 For an experimental feature stack, a stable integration branch may collect
 small feature PRs while review reminders remain open. Each feature still uses a
@@ -404,6 +406,47 @@ dedicated worktree and branch; its PR targets the integration branch. The
 aggregate integration-branch PR to `main` is the review/merge boundary. This
 keeps review latency from suspending unrelated work without weakening the final
 delivery gate.
+
+Terminal PR state does not silently complete a review reminder: merged PRs may
+still need post-merge review. When the owner explicitly acknowledges that an
+exact review action is complete, persist a typed acknowledgement receipt with
+the exact bound `user_action` and GitHub PR:
+
+```bash
+loopx issue-fix pr-review-ack \
+  --url https://github.com/owner/repo/pull/123 \
+  --goal-id <goal-id> \
+  --todo-id <review-todo-id> \
+  --agent-id <bound-agent> \
+  --owner-acknowledged
+```
+
+The receipt is fail-closed, idempotent per todo revision, and read back after
+append. It binds the goal, todo revision, agent, provider, repository, PR
+number, and canonical permalink without parsing reminder prose. Reopening or
+materially editing the todo invalidates the prior acknowledgement.
+
+Use `pr-review-reconcile` as the single reconciliation path. It may be invoked
+explicitly or by a due `continuous_monitor` through any scheduler or host
+adapter. Supplying `--owner-acknowledged` first records the same typed receipt.
+Reconciliation validates the current todo revision before provider access and
+again before completion, then closes the reminder only for the exact terminal
+PR. A missing receipt, stale revision, unavailable provider, or unsupported
+forge leaves the reminder open. Quota projection has no provider side effects.
+
+Heartbeat hosts with `external_evidence_poll` may run the bounded batch form
+before quota:
+
+```bash
+loopx heartbeat-prequota -g <goal-id> -a <bound-agent>
+```
+
+The batch reads only persisted exact acknowledgement bindings, skips stale or
+already reconciled todos before provider access, and performs no quota spend.
+Provider failures are reported as degraded results and do not block the
+subsequent quota guard. Binding, acknowledgement, and reconciliation are kernel
+contracts; `loopx-project` may document the workflow but is not a runtime
+dependency.
 
 If an agent takes ownership at completion time, include the claim in the same
 locked lifecycle write:

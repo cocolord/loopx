@@ -322,12 +322,16 @@ under that contract, not as competing sources of truth.
 
 If the response has `should_run=false` and not `safe_bypass_allowed=true`, do
 not run implementation or adapter work for that goal in this turn. When
-`effective_action=monitor_quiet_skip`, append at most one no-spend
-`quota monitor-poll --goal-id <STABLE_GOAL_ID> --source heartbeat --execute`
-event, rerun `quota should-run`, and follow
+running from a heartbeat, pass its `<current_time_iso>` as
+`quota should-run --turn-instance-id <HEARTBEAT_TURN_ID>` and reuse that id for
+same-heartbeat retries. This commits one idempotent receipt on every heartbeat;
+when `effective_action=monitor_quiet_skip`, the same guard also commits the
+no-spend stall observation and returns the follow-up decision. Follow
 `autonomous_replan_required` / `execution_obligation.must_attempt_work=true` if
-the next guard exposes it; otherwise quietly report or record the public-safe
-`reason` only when there is no operator gate to ask. Keep the heartbeat
+the guard exposes it. If `heartbeat_receipt.status=write_failed`, retry with the
+same turn id rather than manually appending another poll. Otherwise quietly
+report or record the public-safe `reason` only when there is no operator gate to
+ask. Keep the heartbeat
 automation active: unchanged monitor-only polls are liveness-preserving no-ops,
 not self-stop signals. If the command exits non-zero, fail closed: run
 `loopx doctor` / `loopx status` and fix status collection before
@@ -411,6 +415,29 @@ If `project_asset` is absent or the source is legacy/raw fallback, do not infer
 owner, gate, or stop-condition authority from raw queue fields.
 
 ## Set Up Recurring Heartbeats
+
+When the exact host is Codex App connected to a remote workspace over SSH and
+`automation_update` is unavailable because of that host boundary, use the
+visible Goal integration instead of reporting a missing-automation blocker:
+
+```bash
+loopx --format json agent-onboard \
+  --agent-type codex-app-ssh \
+  --project . \
+  --goal-id <STABLE_GOAL_ID> \
+  --agent-id <REGISTERED_AGENT_ID>
+```
+
+Run the returned `activation_input_command`, read `task_body`, and set the
+current visible task to `/goal <task_body>`. In Codex App, use the available
+Goal control directly; do not ask the user to run `heartbeat-prompt` or paste
+the body manually when the host exposes Goal control. Surface the exact
+pasteable gate only when Goal control is also unavailable.
+
+The generated `codex_app_ssh_goal` body is bounded by the `/goal` 4000-character
+limit. It uses an interactive `agent_cli_loop` scheduler context, omits
+heartbeat turn receipts, and must not create/update automations, apply RRULE
+cadence, or invent `LOOPX_TURN`.
 
 When a user or controller wants a recurring Codex App heartbeat for a connected
 goal, prefer the generator instead of hand-copying the quota lifecycle:
@@ -710,6 +737,28 @@ Use `approve`, `reject`, or `defer`. The dry-run writes nothing; the real append
 creates an `operator_gate_*` compact run so `loopx status` and the
 dashboard can tell whether the project agent may run the approved command. This
 is not a human reward signal and does not grant write-control.
+
+## Qualify Non-Trivial Final Diffs
+
+Before a non-trivial delivery or merge, inspect the current goal configuration.
+When `change_quality_qualification.enabled` is true, load
+`loopx-change-quality` and follow its exact-scope workflow:
+
+```bash
+loopx --format json change-quality prepare \
+  --goal-id <STABLE_GOAL_ID> \
+  --repo-path .
+```
+
+The policy keeps two decisions separate: `safe_fix` permits at most one bounded
+repair pass, while `strict_receipt` requires a passing receipt for the exact
+final diff. Any edit invalidates the old fingerprint. Record and verify the
+final receipt, then pass `--goal-id <STABLE_GOAL_ID>` to `canary premerge`.
+
+If the host cannot load skills, use the self-contained prepare packet as the
+review contract. Turn may carry the packet or receipt reference, but it does
+not own policy or enforcement. Do not invent a receipt, reuse one from an older
+diff, or turn subjective style advice into a blocker.
 
 ## Refresh State After Non-Adapter Work
 

@@ -150,8 +150,10 @@ from loopx.benchmark_adapters.skillsbench_turn_route import (  # noqa: E402
 )
 from loopx.benchmark_core import (  # noqa: E402
     build_benchmark_launch_observable_handle,
+    build_benchmark_live_worker_phase,
     canonical_lifecycle,
     compact_benchmark_canonical_lifecycle,
+    compact_benchmark_live_worker_phase,
     read_container_file_via_compose_copy,
     run_container_command_with_exit_status,
     run_container_command_with_output_capture,
@@ -175,13 +177,19 @@ from loopx.benchmark_trajectory import (
     normalized_loopx_cli_call,
     summarize_public_acp_trajectory,
 )
-from loopx.control_plane.runtime.goal_start_control_score import (
+from loopx.benchmarks.read_models.goal_start_control_score import (
     build_goal_start_product_mode_control_score,
     goal_start_public_command_records as _goal_start_public_command_records,
     goal_start_public_text_list as _goal_start_public_text_list,
     goal_start_public_todo_id_list as _goal_start_public_todo_id_list,
 )
-from loopx.control_plane.turn_driver import loopx_turn_execution_committed
+from loopx.benchmarks.read_models.skillsbench_verifier_attribution import (
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution,
+)
+from loopx.control_plane.turn_driver import (
+    loopx_turn_execution_committed,
+    loopx_turn_execution_has_durable_effects,
+)
 
 
 class SkillsBenchRunnerInterrupted(RuntimeError):
@@ -190,6 +198,10 @@ class SkillsBenchRunnerInterrupted(RuntimeError):
 
 class SkillsBenchProductModeNoLifecycleRequests(RuntimeError):
     """Product-mode agent made no required case-local LoopX lifecycle request."""
+
+
+class SkillsBenchLoopXTurnTerminalFailureStall(RuntimeError):
+    """A terminal failed Turn did not let BenchFlow close the case."""
 
 
 from scripts import skillsbench_runner_constants as _runner_constants
@@ -429,6 +441,19 @@ VERIFIER_UV_BOOTSTRAP_MIRROR_BEGIN = (
 VERIFIER_UV_BOOTSTRAP_MIRROR_END = verifier_bootstrap.VERIFIER_UV_BOOTSTRAP_MIRROR_END
 DEFAULT_DOCKER_PIP_INDEX_URL = verifier_bootstrap.DEFAULT_DOCKER_PIP_INDEX_URL
 DEFAULT_DOCKER_PIP_INDEX_HOST = "pypi.tuna.tsinghua.edu.cn"
+PRIMARY_DOCKER_PIP_INDEX_URL = "https://pypi.org/simple"
+PRIMARY_DOCKER_PIP_INDEX_HOST = "pypi.org"
+DEFAULT_DOCKER_PIP_INDEX_MODE = "mirror"
+DOCKER_PIP_INDEX_MODES = {
+    "mirror": (DEFAULT_DOCKER_PIP_INDEX_URL, DEFAULT_DOCKER_PIP_INDEX_HOST),
+    "primary": (PRIMARY_DOCKER_PIP_INDEX_URL, PRIMARY_DOCKER_PIP_INDEX_HOST),
+}
+DEFAULT_DOCKER_APT_SOURCE_MODE = "mirror"
+DOCKER_APT_SOURCE_MODES = ("mirror", "primary")
+DEFAULT_DOCKER_APT_TRANSPORT_MODE = "default"
+DOCKER_APT_TRANSPORT_MODES = ("default", "proxy-compatible")
+DEFAULT_DOCKER_PIP_BUILD_MODE = "isolated"
+DOCKER_PIP_BUILD_MODES = ("isolated", "no-isolation")
 DOCKER_HOST_CPU_ENV = "LOOPX_SKILLSBENCH_DOCKER_CPUS"
 SANDBOX_PATH_RE = re.compile(r"/(?:app|root|workspace|tmp)/[A-Za-z0-9_./-]+")
 LOOPX_CLI_RE = re.compile(r"(?:^|\s|/)loopx(?:\s|$)")
@@ -1136,15 +1161,18 @@ def _effective_local_codex_exec_timeout_sec(args: argparse.Namespace) -> int:
         configured_raw is None
         and bool(getattr(args, "host_local_acp_launch", False))
     ):
+        outer_timeout = max(0, int(getattr(args, "outer_timeout_sec", 0) or 0))
         if getattr(args, "route", "") == "codex-app-server-goal-baseline":
-            outer_timeout = max(0, int(getattr(args, "outer_timeout_sec", 0) or 0))
             return max(configured, outer_timeout)
         bridge_idle_timeout = _effective_local_codex_bridge_idle_timeout_sec(args)
         if bridge_idle_timeout > 0:
             return max(
                 1,
+                outer_timeout,
                 bridge_idle_timeout + HOST_LOCAL_ACP_AGENT_TIMEOUT_MARGIN_SEC,
             )
+        if outer_timeout > 0:
+            return outer_timeout
     if configured_raw is None and idle_timeout > 0:
         return min(configured, idle_timeout)
     return configured
@@ -2024,9 +2052,19 @@ def install_benchflow_docker_exec_output_capture(
 
     prerequisites = plan.setdefault("runner_prerequisites", {})
     existing = getattr(env, "_loopx_output_capture_original_exec", None)
-    if existing is not None:
+    installed_exec = getattr(env, "_loopx_output_capture_exec", None)
+    current_exec = getattr(env, "exec", None)
+    if (
+        existing is not None
+        and installed_exec is not None
+        and current_exec is installed_exec
+    ):
+        prerequisites["host_local_acp_docker_exec_capture_status"] = (
+            "already_installed"
+        )
         return existing
-    original_exec = getattr(env, "exec", None)
+    reinstalling_after_rebind = existing is not None
+    original_exec = current_exec
     compose_fn = getattr(env, "_run_docker_compose_command", None)
     if not callable(original_exec) or not callable(compose_fn):
         prerequisites["host_local_acp_docker_exec_capture_status"] = "unsupported"
@@ -2068,8 +2106,16 @@ def install_benchflow_docker_exec_output_capture(
         )
 
     setattr(env, "_loopx_output_capture_original_exec", original_exec)
+    setattr(env, "_loopx_output_capture_exec", exec_with_output_capture)
     setattr(env, "exec", exec_with_output_capture)
-    prerequisites["host_local_acp_docker_exec_capture_status"] = "installed"
+    prerequisites["host_local_acp_docker_exec_capture_status"] = (
+        "reinstalled_after_exec_rebind"
+        if reinstalling_after_rebind
+        else "installed"
+    )
+    prerequisites["host_local_acp_docker_exec_capture_rebound"] = (
+        reinstalling_after_rebind
+    )
     prerequisites["host_local_acp_docker_exec_capture_required"] = True
     prerequisites["host_local_acp_docker_exec_capture_compose_copy"] = True
     prerequisites["host_local_acp_docker_exec_capture_raw_output_recorded"] = False
@@ -2079,6 +2125,8 @@ def install_benchflow_docker_exec_output_capture(
 def _host_local_acp_codex_exec_preflight_command(
     args: argparse.Namespace,
     plan: dict[str, Any],
+    *,
+    sandbox_bridge_command: str | None = None,
 ) -> list[str]:
     local_acp_relay_command = getattr(args, "local_acp_relay_command", None)
     if local_acp_relay_command:
@@ -2117,7 +2165,10 @@ def _host_local_acp_codex_exec_preflight_command(
                 str(Path(relay_trace_dir) / "codex-exec-preflight"),
             ]
         )
-    if _host_local_acp_codex_exec_preflight_requires_bridge_action(args):
+    if _host_local_acp_codex_exec_preflight_requires_bridge_action(
+        args,
+        sandbox_bridge_command=sandbox_bridge_command,
+    ):
         command.extend(
             [
                 "--remote-command-file-bridge-command",
@@ -2145,6 +2196,17 @@ def _host_local_acp_codex_exec_preflight_command(
         )
         if agent_command:
             command.extend(["--remote-command-file-bridge-agent-command", agent_command])
+    if sandbox_bridge_command:
+        command = _set_option_value(
+            command,
+            "--remote-command-file-bridge-command",
+            sandbox_bridge_command,
+        )
+        command = _set_option_value(
+            command,
+            "--remote-command-file-bridge-agent-command",
+            sandbox_bridge_command,
+        )
     return command
 
 
@@ -2153,13 +2215,20 @@ def _host_local_acp_codex_exec_preflight_should_run(
 ) -> bool:
     """Return whether the host-local Codex exec path must be probed first."""
 
-    if bool(getattr(args, "setup_only_public_preflight", False)):
-        return False
     route = str(getattr(args, "route", "") or "")
-    if bool(getattr(args, "host_local_acp_launch", False)) and route in {
-        CODEX_APP_SERVER_GOAL_BASELINE_ROUTE,
-        CODEX_CLI_GOAL_BASELINE_ROUTE,
-    }:
+    local_codex_provider = str(
+        getattr(args, "local_codex_provider", "exact-host") or "exact-host"
+    )
+    if (
+        bool(getattr(args, "host_local_acp_launch", False))
+        and route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE
+    ):
+        return False
+    if (
+        bool(getattr(args, "host_local_acp_launch", False))
+        and route == CODEX_CLI_GOAL_BASELINE_ROUTE
+        and local_codex_provider != "reverse-channel"
+    ):
         return False
     if bool(getattr(args, "host_local_acp_codex_exec_preflight", False)):
         return True
@@ -2172,12 +2241,30 @@ def _host_local_acp_codex_exec_preflight_should_run(
 
 def _host_local_acp_codex_exec_preflight_requires_bridge_action(
     args: argparse.Namespace,
+    *,
+    sandbox_bridge_command: str | None = None,
+    require_materialized_sandbox_bridge: bool = False,
 ) -> bool:
+    route = str(getattr(args, "route", "") or "")
+    local_codex_provider = str(
+        getattr(args, "local_codex_provider", "exact-host") or "exact-host"
+    )
     return bool(
         getattr(args, "host_local_acp_launch", False)
-        and str(getattr(args, "route", "") or "")
-        in HOST_LOCAL_BRIDGE_ROUTES
-        and str(getattr(args, "remote_command_file_bridge_solver_command", "") or "")
+        and (
+            route in HOST_LOCAL_BRIDGE_ROUTES
+            or (
+                route == CODEX_CLI_GOAL_BASELINE_ROUTE
+                and local_codex_provider == "reverse-channel"
+            )
+        )
+        and (
+            require_materialized_sandbox_bridge
+            or bool(sandbox_bridge_command)
+            or str(
+                getattr(args, "remote_command_file_bridge_solver_command", "") or ""
+            )
+        )
         and (
             bool(getattr(args, "remote_command_file_bridge_ready", False))
             or bool(getattr(args, "remote_command_file_bridge_probe", False))
@@ -2308,6 +2395,22 @@ def _host_local_acp_codex_exec_preflight_bridge_success_observed(
     return action_count > 0 and successful_action_count > 0
 
 
+def _host_local_acp_codex_exec_preflight_retry_allowed(
+    *,
+    category: str,
+    bridge_summary: dict[str, Any],
+) -> bool:
+    if category == "codex_reverse_channel_unavailable":
+        return True
+    return bool(
+        category == "codex_exec_first_action_timeout"
+        and int(bridge_summary.get("request_count") or 0) == 0
+        and int(bridge_summary.get("preflight_operation_count") or 0) == 0
+        and int(bridge_summary.get("task_facing_operation_count") or 0) == 0
+        and bridge_summary.get("raw_material_recorded") is False
+    )
+
+
 def _first_bridge_failure_category(bridge_summary: dict[str, Any]) -> str:
     counts = bridge_summary.get("failure_category_counts")
     if isinstance(counts, dict):
@@ -2320,12 +2423,15 @@ def _first_bridge_failure_category(bridge_summary: dict[str, Any]) -> str:
 def _run_host_local_acp_codex_exec_preflight(
     args: argparse.Namespace,
     plan: dict[str, Any],
+    *,
+    sandbox_bridge_command: str | None = None,
 ) -> None:
     prerequisites = plan.setdefault("runner_prerequisites", {})
     prerequisites["host_local_acp_codex_exec_preflight_requested"] = True
     prerequisites["host_local_acp_codex_exec_preflight_status"] = "running"
     bridge_action_required = _host_local_acp_codex_exec_preflight_requires_bridge_action(
-        args
+        args,
+        sandbox_bridge_command=sandbox_bridge_command,
     )
     prerequisites["host_local_acp_codex_exec_preflight_bridge_action_required"] = (
         bridge_action_required
@@ -2334,7 +2440,11 @@ def _run_host_local_acp_codex_exec_preflight(
         1,
         int(getattr(args, "host_local_acp_codex_exec_preflight_attempts", 1) or 1),
     )
-    command = _host_local_acp_codex_exec_preflight_command(args, plan)
+    command = _host_local_acp_codex_exec_preflight_command(
+        args,
+        plan,
+        sandbox_bridge_command=sandbox_bridge_command,
+    )
     target_env = _host_local_acp_target_env({}, args=args)
     prerequisites["host_local_acp_target_env_forwarded"] = bool(target_env)
     prerequisites["host_local_acp_target_env_key_count"] = len(target_env)
@@ -2387,6 +2497,7 @@ def _run_host_local_acp_codex_exec_preflight(
     )
     for attempt in range(1, attempts + 1):
         prerequisites["host_local_acp_codex_exec_preflight_attempt_count"] = attempt
+        prerequisites.pop("host_local_acp_codex_exec_failure_category", None)
         if preflight_trace_dir:
             preflight_trace_dir.mkdir(parents=True, exist_ok=True)
             for trace_file in preflight_trace_dir.glob("*.compact.json"):
@@ -2515,9 +2626,9 @@ def _run_host_local_acp_codex_exec_preflight(
         category = str(
             prerequisites.get("host_local_acp_codex_exec_failure_category") or ""
         )
-        if (
-            category == "codex_reverse_channel_unavailable"
-            and attempt < attempts
+        if attempt < attempts and _host_local_acp_codex_exec_preflight_retry_allowed(
+            category=category,
+            bridge_summary=bridge_summary,
         ):
             time.sleep(2.0)
             continue
@@ -2678,9 +2789,11 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "schema_version",
         "agent_execution_mode",
         "benchflow_run_stage",
+        "benchflow_case_worker_status",
         "host_local_acp_launch_status",
         "host_local_acp_install_stage",
         "host_local_acp_install_failed_stage",
+        "host_local_acp_install_failure_exception_type",
         "codex_acp_runtime_launch_preflight_stage",
         "codex_acp_runtime_launch_preflight_status",
         "benchflow_agent_runtime_layer_status",
@@ -2703,16 +2816,20 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_intermediate_soft_verify_orphan_cleanup_status",
         "host_local_acp_attempt_cleanup_status",
         "benchflow_setup_stall_cleanup_status",
+        "benchflow_loopx_turn_terminal_failure_status",
+        "benchflow_loopx_turn_terminal_failure_category",
         "remote_command_file_bridge_consumption_status",
         "remote_command_file_bridge_agent_operation_trace_status",
         "remote_command_file_bridge_agent_transport_mode",
         "host_local_acp_sandbox_bridge_mode",
         "host_local_acp_session_adapter_status",
         "host_local_acp_docker_exec_capture_status",
+        "host_local_acp_docker_exec_capture_lifecycle_guard",
         "host_local_acp_pwd_probe_status",
         "host_local_acp_pwd_probe_exception_type",
         "host_local_acp_pwd_probe_stdout_type",
         "host_local_acp_codex_exec_preflight_status",
+        "host_local_acp_codex_exec_preflight_placement",
         "host_local_acp_codex_exec_preflight_stage",
         "host_local_acp_codex_exec_preflight_first_blocker",
         "host_local_acp_codex_exec_failure_category",
@@ -2758,6 +2875,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "host_local_acp_docker_exec_capture_required",
         "host_local_acp_docker_exec_capture_compose_copy",
         "host_local_acp_docker_exec_capture_raw_output_recorded",
+        "host_local_acp_docker_exec_capture_rebound",
         "host_local_acp_docker_exec_capture_preflight",
         "host_local_acp_sandbox_bridge_configured",
         "host_local_acp_sandbox_bridge_path_recorded",
@@ -2877,6 +2995,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_final_verifier_timeout_triggered",
         "benchflow_final_verifier_timeout_raw_command_recorded",
         "benchflow_final_verifier_timeout_raw_output_recorded",
+        "benchflow_final_verifier_started",
         "benchflow_verifier_completion_poll_enabled",
         "benchflow_verifier_completion_poll_timeout_triggered",
         "benchflow_verifier_completion_poll_raw_command_recorded",
@@ -2886,11 +3005,19 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_setup_stall_raw_logs_read",
         "benchflow_setup_stall_before_agent_lifecycle",
         "benchflow_agent_install_started",
+        "benchflow_lifecycle_private_logs_read",
         "benchflow_setup_stall_task_cancel_requested",
         "benchflow_setup_stall_task_cancel_acknowledged",
         "benchflow_setup_stall_task_cancel_timeout",
         "benchflow_setup_stall_cleanup_requested",
         "benchflow_setup_stall_cleanup_raw_logs_read",
+        "benchflow_loopx_turn_terminal_failure_watchdog_enabled",
+        "benchflow_loopx_turn_terminal_failure_observed",
+        "benchflow_loopx_turn_terminal_failure_triggered",
+        "benchflow_loopx_turn_terminal_failure_raw_material_recorded",
+        "benchflow_loopx_turn_terminal_failure_task_cancel_requested",
+        "benchflow_loopx_turn_terminal_failure_task_cancel_acknowledged",
+        "benchflow_loopx_turn_terminal_failure_task_cancel_timeout",
         "runner_interrupted_before_official_result",
         "runner_interruption_compact_closeout_expected",
         "runner_interruption_raw_material_recorded",
@@ -2903,8 +3030,14 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
     )
     if lifecycle:
         compact["benchmark_canonical_lifecycle"] = lifecycle
+    live_worker_phase = compact_benchmark_live_worker_phase(
+        value.get("benchmark_live_worker_phase")
+    )
+    if live_worker_phase:
+        compact["benchmark_live_worker_phase"] = live_worker_phase
     for field in (
         "codex_acp_runtime_launch_preflight_rc",
+        "benchflow_lifecycle_receipt_sequence",
         "benchflow_agent_timeout_requested_sec",
         "benchflow_agent_timeout_original_sec",
         "benchflow_agent_timeout_effective_sec",
@@ -2954,6 +3087,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_setup_stall_cleanup_term_sent_count",
         "benchflow_setup_stall_cleanup_kill_sent_count",
         "benchflow_setup_stall_cleanup_alive_after_count",
+        "benchflow_loopx_turn_terminal_failure_grace_sec",
         "verifier_dependency_cache_env_key_count",
         "goal_start_planned_todo_count_expected",
         "remote_command_file_bridge_solver_trace_count",
@@ -3138,11 +3272,98 @@ def _write_public_runner_prerequisites(plan: dict[str, Any]) -> Path | None:
     if path is None:
         return None
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    _write_text_atomic(
+        path,
         json.dumps(compact, indent=2, sort_keys=True, default=_json_default) + "\n",
-        encoding="utf-8",
     )
     return path
+
+
+def _write_public_runner_lifecycle_receipt(
+    plan: dict[str, Any],
+    *,
+    run_stage: str | None = None,
+    worker_status: str | None = None,
+    host_local_acp_status: str | None = None,
+    host_local_acp_install_stage: str | None = None,
+    agent_install_started: bool | None = None,
+) -> Path | None:
+    """Persist one public-safe live phase without inspecting private output."""
+
+    prerequisites = plan.setdefault("runner_prerequisites", {})
+    previous_live_phase = compact_benchmark_live_worker_phase(
+        prerequisites.get("benchmark_live_worker_phase")
+    )
+    previous_ready = previous_live_phase.get("phase_ready")
+    if not isinstance(previous_ready, dict):
+        previous_ready = {}
+    if run_stage is not None:
+        prerequisites["benchflow_run_stage"] = run_stage
+    if worker_status is not None:
+        prerequisites["benchflow_case_worker_status"] = worker_status
+    if host_local_acp_status is not None:
+        prerequisites["host_local_acp_launch_status"] = host_local_acp_status
+    if host_local_acp_install_stage is not None:
+        prerequisites["host_local_acp_install_stage"] = host_local_acp_install_stage
+    if agent_install_started is not None:
+        prerequisites["benchflow_agent_install_started"] = agent_install_started
+    current_worker_status = str(
+        prerequisites.get("benchflow_case_worker_status") or ""
+    )
+    worker_running_statuses = {
+        "worker_running",
+        "sandbox_installing",
+        "sandbox_installed",
+        "sandbox_install_failed",
+        "agent_install_started",
+        "acp_connecting",
+        "acp_connected",
+        "acp_connect_failed",
+        "agent_active",
+        "worker_completed",
+        "setup_stalled",
+    }
+    runtime_preparing_statuses = {
+        "runtime_preparing",
+        "worker_prepared",
+        *worker_running_statuses,
+    }
+    terminal_disposition = {
+        "worker_completed": "completed",
+        "sandbox_install_failed": "failed",
+        "acp_connect_failed": "failed",
+        "setup_stalled": "failed",
+    }.get(
+        current_worker_status,
+        str(previous_live_phase.get("terminal_disposition") or "open"),
+    )
+    prerequisites["benchmark_live_worker_phase"] = (
+        build_benchmark_live_worker_phase(
+            runtime_preparing=bool(
+                previous_ready.get("runtime_preparing")
+                or current_worker_status in runtime_preparing_statuses
+            ),
+            worker_prepared=bool(
+                previous_ready.get("worker_prepared")
+                or current_worker_status == "worker_prepared"
+                or current_worker_status in worker_running_statuses
+            ),
+            worker_running=bool(
+                previous_ready.get("worker_running")
+                or current_worker_status in worker_running_statuses
+            ),
+            agent_active=bool(
+                previous_ready.get("agent_active")
+                or current_worker_status == "agent_active"
+            ),
+            terminal_disposition=terminal_disposition,
+        )
+    )
+    prerequisites["benchflow_lifecycle_private_logs_read"] = False
+    prerequisites["benchflow_lifecycle_receipt_sequence"] = (
+        int(prerequisites.get("benchflow_lifecycle_receipt_sequence") or 0) + 1
+    )
+    return _write_public_runner_prerequisites(plan)
 
 
 def _read_public_runner_prerequisites(plan: dict[str, Any]) -> dict[str, Any]:
@@ -3772,6 +3993,10 @@ def install_benchflow_verifier_prep_timeout_override(
         return "/verifier/test.sh" in command
 
     async def _run_with_override(self: Any, phase: str, original: Any) -> Any:
+        if phase == "verify":
+            prerequisites["benchflow_final_verifier_started"] = True
+            if isinstance(trace, dict):
+                trace["benchflow_final_verifier_started"] = True
         if not enabled and not final_timeout_enabled and not soft_timeout_enabled:
             return await original(self)
 
@@ -4544,6 +4769,19 @@ def _runner_prerequisite_failure_attribution(
             label = f"{label}_{category}"
         return label, label, [label, "skillsbench_runner_setup_error"]
 
+    if value.get("host_local_acp_launch_status") == "sandbox_install_failed":
+        label = "skillsbench_host_local_acp_sandbox_install_failed"
+        labels = [label]
+        failed_stage = re.sub(
+            r"[^a-z0-9]+",
+            "_",
+            str(value.get("host_local_acp_install_failed_stage") or "").lower(),
+        ).strip("_")
+        if failed_stage:
+            labels.append(f"{label}_{failed_stage[:80]}")
+        labels.append("skillsbench_runner_setup_error")
+        return label, label, labels
+
     if (
         value.get("remote_command_file_bridge_agent_operation_trace_required") is True
         and not orchestrated_driver_counts_as_product_mode
@@ -4632,10 +4870,6 @@ def _runner_prerequisite_failure_attribution(
                 "skillsbench_runner_setup_error",
             ],
         )
-
-    if value.get("host_local_acp_launch_status") == "sandbox_install_failed":
-        label = "skillsbench_host_local_acp_sandbox_install_failed"
-        return label, label, [label, "skillsbench_runner_setup_error"]
 
     if value.get("host_local_acp_launch_status") == "installing_sandbox":
         label = "skillsbench_host_local_acp_sandbox_install_incomplete"
@@ -5877,6 +6111,8 @@ def _public_task_staging(value: Any) -> dict[str, Any]:
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
     for field in (
+        "dockerfile_apt_source_mode",
+        "dockerfile_apt_transport_mode",
         "dockerfile_pip_index_host",
         "bootstrap_light_blocker_kind",
         "dockerfile_uv_bootstrap_version",
@@ -5930,6 +6166,21 @@ def _public_task_staging(value: Any) -> dict[str, Any]:
 
 
 def _discover_prepared_task_staging(plan: dict[str, Any]) -> dict[str, Any]:
+    docker_apt_source_mode = _docker_apt_source_mode(
+        str(
+            plan.get("docker_apt_source_mode")
+            or DEFAULT_DOCKER_APT_SOURCE_MODE
+        )
+    )
+    docker_apt_transport_mode = _docker_apt_transport_mode(
+        str(
+            plan.get("docker_apt_transport_mode")
+            or DEFAULT_DOCKER_APT_TRANSPORT_MODE
+        )
+    )
+    _, docker_pip_index_host = _docker_pip_index(
+        str(plan.get("docker_pip_index_mode") or DEFAULT_DOCKER_PIP_INDEX_MODE)
+    )
     jobs_dir = Path(str(plan.get("jobs_dir") or "")).expanduser()
     job_name = str(plan.get("job_name") or "")
     task_id = str(plan.get("task_id") or "")
@@ -5966,6 +6217,14 @@ def _discover_prepared_task_staging(plan: dict[str, Any]) -> dict[str, Any]:
             DOCKER_APP_SKILLS_MOUNT_BEGIN in dockerfile_text
         ),
         "apt_retry_patch_applied": DOCKER_APT_RETRY_BEGIN in dockerfile_text,
+        "dockerfile_apt_source_mode": (
+            docker_apt_source_mode if DOCKER_APT_RETRY_BEGIN in dockerfile_text else ""
+        ),
+        "dockerfile_apt_transport_mode": (
+            docker_apt_transport_mode
+            if DOCKER_APT_RETRY_BEGIN in dockerfile_text
+            else ""
+        ),
         "dockerfile_ubuntu_apt_mirror_patch_applied": (
             dockerfile_runtime.UBUNTU_APT_MIRROR_BEGIN in dockerfile_text
         ),
@@ -6112,7 +6371,7 @@ def _discover_prepared_task_staging(plan: dict[str, Any]) -> dict[str, Any]:
                 "dockerfile_pip_install_risk_detected": True,
                 "dockerfile_pip_bootstrap_patch_required": True,
                 "dockerfile_pip_bootstrap_patch_applied": True,
-                "dockerfile_pip_index_host": DEFAULT_DOCKER_PIP_INDEX_HOST,
+                "dockerfile_pip_index_host": docker_pip_index_host,
             }
         )
     return discovered
@@ -6207,6 +6466,17 @@ def _requested_build_stall_timeout_sec(args: argparse.Namespace) -> int:
 
 def _effective_build_stall_timeout_sec(args: argparse.Namespace) -> int:
     return _requested_build_stall_timeout_sec(args)
+
+
+def _effective_setup_only_stage_timeout_sec(args: argparse.Namespace) -> int:
+    sandbox_timeout_sec = max(
+        1,
+        int(getattr(args, "sandbox_setup_timeout", 0) or 0),
+    )
+    build_stall_timeout_sec = _effective_build_stall_timeout_sec(args)
+    if build_stall_timeout_sec <= 0:
+        return sandbox_timeout_sec
+    return min(sandbox_timeout_sec, build_stall_timeout_sec)
 
 
 def build_compose_setup_diagnostic(
@@ -7679,25 +7949,53 @@ def patch_dockerfile_benchmark_egress_proxy_env(
     return metadata
 
 
-def patch_dockerfile_apt_retry(dockerfile: Path) -> bool:
-    """Add public-safe apt retry/no-cache defaults to staged Dockerfiles."""
+def patch_dockerfile_apt_retry(
+    dockerfile: Path,
+    *,
+    transport_mode: str = DEFAULT_DOCKER_APT_TRANSPORT_MODE,
+) -> bool:
+    """Add public-safe apt retry/no-cache defaults to apt-using stages."""
 
     if not dockerfile_needs_apt_retry_patch(dockerfile):
         return False
+    transport_mode = _docker_apt_transport_mode(transport_mode)
     text = _strip_marker_block(
         dockerfile.read_text(encoding="utf-8"),
         DOCKER_APT_RETRY_BEGIN,
         DOCKER_APT_RETRY_END,
+    )
+    proxy_compatible_config = (
+        "        'Acquire::http::Pipeline-Depth \"0\";' \\\n"
+        "        'Acquire::https::Pipeline-Depth \"0\";' \\\n"
+        "        'Acquire::ForceIPv4 \"true\";' \\\n"
+        if transport_mode == "proxy-compatible"
+        else ""
+    )
+    proxy_compatible_source_upgrade = (
+        "      find /etc/apt -type f \\\n"
+        "        \\( -name '*.list' -o -name '*.sources' \\) \\\n"
+        "        -exec sed -i \\\n"
+        '          -e "s#http://archive.ubuntu.com/ubuntu#https://archive.ubuntu.com/ubuntu#g" \\\n'
+        '          -e "s#http://security.ubuntu.com/ubuntu#https://security.ubuntu.com/ubuntu#g" \\\n'
+        '          -e "s#http://ports.ubuntu.com/ubuntu-ports#https://ports.ubuntu.com/ubuntu-ports#g" \\\n'
+        '          -e "s#http://deb.debian.org/debian-security#https://deb.debian.org/debian-security#g" \\\n'
+        '          -e "s#http://security.debian.org/debian-security#https://security.debian.org/debian-security#g" \\\n'
+        '          -e "s#http://deb.debian.org/debian#https://deb.debian.org/debian#g" \\\n'
+        "          {} +; \\\n"
+        if transport_mode == "proxy-compatible"
+        else ""
     )
     block = (
         f"{DOCKER_APT_RETRY_BEGIN}\n"
         "RUN set -eux; \\\n"
         "    if mkdir -p /etc/apt/apt.conf.d 2>/dev/null && "
         "[ -w /etc/apt/apt.conf.d ]; then \\\n"
+        f"{proxy_compatible_source_upgrade}"
         "      printf '%s\\n' \\\n"
         "        'Acquire::Retries \"5\";' \\\n"
         "        'Acquire::http::No-Cache \"true\";' \\\n"
         "        'Acquire::https::No-Cache \"true\";' \\\n"
+        f"{proxy_compatible_config}"
         "        'Acquire::Check-Valid-Until \"false\";' \\\n"
         "        > /etc/apt/apt.conf.d/80-loopx-retry; \\\n"
         "      rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb; \\\n"
@@ -7706,16 +8004,43 @@ def patch_dockerfile_apt_retry(dockerfile: Path) -> bool:
         "    fi\n"
         f"{DOCKER_APT_RETRY_END}"
     )
-    patched_lines: list[str] = []
-    inserted = False
-    for line in text.splitlines():
-        patched_lines.append(line)
-        stripped = line.strip()
-        if stripped.startswith("FROM ") and not inserted:
-            patched_lines.extend(["", *block.splitlines(), ""])
-            inserted = True
-    if not inserted:
-        patched_lines = [*block.splitlines(), "", *text.splitlines()]
+    lines = text.splitlines()
+    stage_starts: list[int] = []
+    heredoc_delimiter: str | None = None
+    for index, line in enumerate(lines):
+        if heredoc_delimiter is not None:
+            if line.strip() == heredoc_delimiter:
+                heredoc_delimiter = None
+            continue
+        heredoc_delimiter = dockerfile_runtime.dockerfile_heredoc_delimiter(line)
+        if _is_dockerfile_from_instruction(line.strip()):
+            stage_starts.append(index)
+
+    if not stage_starts:
+        patched_lines = [*block.splitlines(), "", *lines]
+    else:
+        patched_lines = lines[: stage_starts[0]]
+        for position, start in enumerate(stage_starts):
+            end = (
+                stage_starts[position + 1]
+                if position + 1 < len(stage_starts)
+                else len(lines)
+            )
+            stage_lines = lines[start:end]
+            from_line = stage_lines[0].strip().lower()
+            stage_uses_apt = bool(
+                re.search(
+                    r"\bapt(?:-get)?\s+update\b",
+                    "\n".join(stage_lines),
+                    flags=re.IGNORECASE,
+                )
+            )
+            if stage_uses_apt and " scratch" not in from_line:
+                patched_lines.extend(
+                    [stage_lines[0], "", *block.splitlines(), "", *stage_lines[1:]]
+                )
+            else:
+                patched_lines.extend(stage_lines)
     patched = "\n".join(patched_lines).rstrip() + "\n"
     if patched == dockerfile.read_text(encoding="utf-8"):
         return False
@@ -7723,20 +8048,58 @@ def patch_dockerfile_apt_retry(dockerfile: Path) -> bool:
     return True
 
 
-def patch_dockerfile_pip_bootstrap(dockerfile: Path) -> bool:
+def _docker_pip_index(mode: str) -> tuple[str, str]:
+    try:
+        return DOCKER_PIP_INDEX_MODES[mode]
+    except KeyError as exc:
+        raise ValueError(f"unsupported Docker pip index mode: {mode}") from exc
+
+
+def _docker_pip_build_mode(mode: str) -> str:
+    if mode not in DOCKER_PIP_BUILD_MODES:
+        raise ValueError(f"unsupported Docker pip build mode: {mode}")
+    return mode
+
+
+def _docker_apt_source_mode(mode: str) -> str:
+    if mode not in DOCKER_APT_SOURCE_MODES:
+        raise ValueError(f"unsupported Docker apt source mode: {mode}")
+    return mode
+
+
+def _docker_apt_transport_mode(mode: str) -> str:
+    if mode not in DOCKER_APT_TRANSPORT_MODES:
+        raise ValueError(f"unsupported Docker apt transport mode: {mode}")
+    return mode
+
+
+def patch_dockerfile_pip_bootstrap(
+    dockerfile: Path,
+    *,
+    index_url: str = DEFAULT_DOCKER_PIP_INDEX_URL,
+    build_mode: str = DEFAULT_DOCKER_PIP_BUILD_MODE,
+) -> bool:
     """Add public-safe pip retry/index defaults to staged Dockerfiles."""
 
     if not dockerfile_needs_pip_bootstrap_patch(dockerfile):
         return False
+    build_mode = _docker_pip_build_mode(build_mode)
     original = dockerfile.read_text(encoding="utf-8")
     text = _strip_marker_block(
         original,
         DOCKER_PIP_BOOTSTRAP_BEGIN,
         DOCKER_PIP_BOOTSTRAP_END,
     )
+    if build_mode == "no-isolation":
+        text, _ = dockerfile_runtime.add_pip_no_build_isolation_flags(text)
+        text, _ = (
+            dockerfile_runtime.add_pip_no_isolation_build_prerequisite_steps(
+                text
+            )
+        )
     block = (
         f"{DOCKER_PIP_BOOTSTRAP_BEGIN}\n"
-        f"ARG LOOPX_SKILLSBENCH_PIP_INDEX_URL={DEFAULT_DOCKER_PIP_INDEX_URL}\n"
+        f"ARG LOOPX_SKILLSBENCH_PIP_INDEX_URL={index_url}\n"
         "ENV PIP_INDEX_URL=${LOOPX_SKILLSBENCH_PIP_INDEX_URL} \\\n"
         "    PIP_DEFAULT_TIMEOUT=120 \\\n"
         "    PIP_RETRIES=10 \\\n"
@@ -7796,6 +8159,12 @@ def patch_dockerfile_codex_acp_runtime_tools(dockerfile: Path) -> bool:
     )
     block = (
         f"{DOCKER_CODEX_ACP_RUNTIME_TOOLS_BEGIN}\n"
+        "ARG LOOPX_SKILLSBENCH_RUNTIME_UBUNTU_APT_MIRROR="
+        f"{dockerfile_runtime.DEFAULT_UBUNTU_APT_MIRROR_BASE}\n"
+        "ARG LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_APT_MIRROR="
+        f"{dockerfile_runtime.DEFAULT_DEBIAN_APT_MIRROR_BASE}\n"
+        "ARG LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_SECURITY_MIRROR="
+        f"{dockerfile_runtime.DEFAULT_DEBIAN_SECURITY_MIRROR_BASE}\n"
         "RUN set -eux; \\\n"
         "    if command -v curl >/dev/null 2>&1 && \\\n"
         "       command -v tar >/dev/null 2>&1 && \\\n"
@@ -7814,7 +8183,19 @@ def patch_dockerfile_codex_acp_runtime_tools(dockerfile: Path) -> bool:
         "        'Acquire::https::No-Cache \"true\";' \\\n"
         "        'Acquire::Check-Valid-Until \"false\";' \\\n"
         "        > /etc/apt/apt.conf.d/80-loopx-retry; \\\n"
-        "      apt-get update -qq; \\\n"
+        "      if ! apt-get update -qq; then \\\n"
+        "        find /etc/apt -type f \\\n"
+        "          \\( -name '*.list' -o -name '*.sources' \\) \\\n"
+        "          -exec sed -i \\\n"
+        '            -e "s#https\\?://archive.ubuntu.com/ubuntu#${LOOPX_SKILLSBENCH_RUNTIME_UBUNTU_APT_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://security.ubuntu.com/ubuntu#${LOOPX_SKILLSBENCH_RUNTIME_UBUNTU_APT_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://deb.debian.org/debian-security#${LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_SECURITY_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://security.debian.org/debian-security#${LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_SECURITY_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://deb.debian.org/debian#${LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_APT_MIRROR}#g" \\\n'
+        "            {} +; \\\n"
+        "        rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb; \\\n"
+        "        apt-get update -qq; \\\n"
+        "      fi; \\\n"
         "      apt-get install -y -qq --no-install-recommends ca-certificates curl tar xz-utils; \\\n"
         "      rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb; \\\n"
         "    elif command -v apk >/dev/null 2>&1; then \\\n"
@@ -7967,6 +8348,10 @@ def stage_task_for_sandbox(
     sandbox: str,
     include_task_skills: bool = True,
     benchmark_egress_proxy_env: Mapping[str, str] | None = None,
+    docker_apt_source_mode: str = DEFAULT_DOCKER_APT_SOURCE_MODE,
+    docker_apt_transport_mode: str = DEFAULT_DOCKER_APT_TRANSPORT_MODE,
+    docker_pip_index_mode: str = DEFAULT_DOCKER_PIP_INDEX_MODE,
+    docker_pip_build_mode: str = DEFAULT_DOCKER_PIP_BUILD_MODE,
     docker_gcr_mirror_prefix: str = "",
     verifier_dependency_cache_enabled: bool = False,
     loopx_case_runtime_required: bool = False,
@@ -7974,6 +8359,14 @@ def stage_task_for_sandbox(
     """Return the task path to run, staging Docker tasks when setup needs it."""
 
     task_path = task_path.expanduser().resolve()
+    docker_apt_source_mode = _docker_apt_source_mode(docker_apt_source_mode)
+    docker_apt_transport_mode = _docker_apt_transport_mode(
+        docker_apt_transport_mode
+    )
+    docker_pip_index_url, docker_pip_index_host = _docker_pip_index(
+        docker_pip_index_mode
+    )
+    docker_pip_build_mode = _docker_pip_build_mode(docker_pip_build_mode)
     metadata: dict[str, Any] = {
         "schema_version": "skillsbench_task_staging_v0",
         "original_task_name": task_path.name,
@@ -7982,6 +8375,8 @@ def stage_task_for_sandbox(
         "staged": False,
         "app_skills_mount_patch_applied": False,
         "apt_retry_patch_applied": False,
+        "dockerfile_apt_source_mode": "",
+        "dockerfile_apt_transport_mode": "",
         "dockerfile_ubuntu_apt_mirror_patch_required": False,
         "dockerfile_ubuntu_apt_mirror_patch_applied": False,
         "dockerfile_ubuntu_apt_mirror_host": "",
@@ -8067,12 +8462,14 @@ def stage_task_for_sandbox(
         task_path / "environment" / "Dockerfile"
     )
     needs_ubuntu_apt_mirror_patch = (
-        dockerfile_runtime.needs_ubuntu_apt_mirror_patch(
+        docker_apt_source_mode == "mirror"
+        and dockerfile_runtime.needs_ubuntu_apt_mirror_patch(
             task_path / "environment" / "Dockerfile"
         )
     )
     needs_debian_apt_mirror_patch = (
-        dockerfile_runtime.needs_debian_apt_mirror_patch(
+        docker_apt_source_mode == "mirror"
+        and dockerfile_runtime.needs_debian_apt_mirror_patch(
             task_path / "environment" / "Dockerfile"
         )
     )
@@ -8137,6 +8534,9 @@ def stage_task_for_sandbox(
     metadata["apt_setup_risk_detected"] = needs_apt_retry_patch
     metadata["apt_retry_patch_required"] = needs_apt_retry_patch
     metadata["apt_risk_preflight_blocked"] = False
+    if needs_apt_retry_patch:
+        metadata["dockerfile_apt_source_mode"] = docker_apt_source_mode
+        metadata["dockerfile_apt_transport_mode"] = docker_apt_transport_mode
     metadata["dockerfile_ubuntu_apt_mirror_patch_required"] = (
         needs_ubuntu_apt_mirror_patch
     )
@@ -8157,7 +8557,8 @@ def stage_task_for_sandbox(
         needs_venv_pip_invocation_patch
     )
     if needs_pip_bootstrap_patch:
-        metadata["dockerfile_pip_index_host"] = DEFAULT_DOCKER_PIP_INDEX_HOST
+        metadata["dockerfile_pip_index_host"] = docker_pip_index_host
+        metadata["dockerfile_pip_build_mode"] = docker_pip_build_mode
     metadata["dockerfile_gcr_mirror_patch_required"] = needs_gcr_mirror_patch
     metadata["dockerfile_elan_toolchain_retry_patch_required"] = (
         needs_elan_toolchain_retry_patch
@@ -8301,21 +8702,26 @@ def stage_task_for_sandbox(
                 staged_path / "environment" / "Dockerfile"
             )
         )
-    dockerfile_proxy_metadata = patch_dockerfile_benchmark_egress_proxy_env(
-        staged_path / "environment" / "Dockerfile",
-        proxy_env=benchmark_egress_proxy_env,
-    )
     apt_retry_patched = patch_dockerfile_apt_retry(
-        staged_path / "environment" / "Dockerfile"
+        staged_path / "environment" / "Dockerfile",
+        transport_mode=docker_apt_transport_mode,
     )
-    ubuntu_apt_mirror_patched = dockerfile_runtime.patch_ubuntu_apt_mirror(
-        staged_path / "environment" / "Dockerfile"
+    ubuntu_apt_mirror_patched = bool(
+        needs_ubuntu_apt_mirror_patch
+        and dockerfile_runtime.patch_ubuntu_apt_mirror(
+            staged_path / "environment" / "Dockerfile"
+        )
     )
-    debian_apt_mirror_patched = dockerfile_runtime.patch_debian_apt_mirror(
-        staged_path / "environment" / "Dockerfile"
+    debian_apt_mirror_patched = bool(
+        needs_debian_apt_mirror_patch
+        and dockerfile_runtime.patch_debian_apt_mirror(
+            staged_path / "environment" / "Dockerfile"
+        )
     )
     pip_bootstrap_patched = patch_dockerfile_pip_bootstrap(
-        staged_path / "environment" / "Dockerfile"
+        staged_path / "environment" / "Dockerfile",
+        index_url=docker_pip_index_url,
+        build_mode=docker_pip_build_mode,
     )
     venv_pip_invocation_patched = dockerfile_runtime.patch_venv_pip_invocations(
         staged_path / "environment" / "Dockerfile"
@@ -8344,6 +8750,10 @@ def stage_task_for_sandbox(
     )
     runtime_tools_patched = patch_dockerfile_codex_acp_runtime_tools(
         staged_path / "environment" / "Dockerfile"
+    )
+    dockerfile_proxy_metadata = patch_dockerfile_benchmark_egress_proxy_env(
+        staged_path / "environment" / "Dockerfile",
+        proxy_env=benchmark_egress_proxy_env,
     )
     staged_verifier_script = proxy_runtime.skillsbench_verifier_script(staged_path)
     uv_mirror_metadata = verifier_bootstrap.patch_verifier_uv_bootstrap_mirror(
@@ -8393,7 +8803,10 @@ def stage_task_for_sandbox(
                 venv_pip_invocation_patched
             ),
             "dockerfile_pip_index_host": (
-                DEFAULT_DOCKER_PIP_INDEX_HOST if pip_bootstrap_patched else ""
+                docker_pip_index_host if pip_bootstrap_patched else ""
+            ),
+            "dockerfile_pip_build_mode": (
+                docker_pip_build_mode if pip_bootstrap_patched else ""
             ),
             "dockerfile_gcr_mirror_patch_applied": gcr_mirror_patched,
             "dockerfile_gcr_mirror_raw_prefix_recorded": False,
@@ -8508,6 +8921,20 @@ def stage_task_for_sandbox(
 def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     task_id = args.task_id
     route = args.route
+    docker_apt_source_mode = _docker_apt_source_mode(
+        getattr(args, "docker_apt_source_mode", DEFAULT_DOCKER_APT_SOURCE_MODE)
+    )
+    docker_apt_transport_mode = _docker_apt_transport_mode(
+        getattr(
+            args,
+            "docker_apt_transport_mode",
+            DEFAULT_DOCKER_APT_TRANSPORT_MODE,
+        )
+    )
+    _, docker_pip_index_host = _docker_pip_index(args.docker_pip_index_mode)
+    docker_pip_build_mode = _docker_pip_build_mode(
+        getattr(args, "docker_pip_build_mode", DEFAULT_DOCKER_PIP_BUILD_MODE)
+    )
     route_slug = route.replace("-", "_")
     intermediate_soft_verify_policy = product_mode_soft_verify_policy_for_route(
         route,
@@ -8737,6 +9164,13 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         ),
         "run_group_id": str(args.run_group_id or ""),
         "sandbox": args.sandbox,
+        "local_codex_provider": str(
+            getattr(args, "local_codex_provider", "exact-host") or "exact-host"
+        ),
+        "docker_apt_source_mode": docker_apt_source_mode,
+        "docker_apt_transport_mode": docker_apt_transport_mode,
+        "docker_pip_index_mode": args.docker_pip_index_mode,
+        "docker_pip_build_mode": docker_pip_build_mode,
         "max_rounds": args.max_rounds,
         "independent_goal_retry": {
             "schema_version": "skillsbench_independent_goal_retry_config_v0",
@@ -8800,6 +9234,12 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "setup_only_public_preflight": bool(
             getattr(args, "setup_only_public_preflight", False)
         ),
+        "setup_only_agent_install_canary": bool(
+            getattr(args, "setup_only_agent_install_canary", False)
+        ),
+        "setup_only_stage_timeout_sec": (
+            _effective_setup_only_stage_timeout_sec(args)
+        ),
         "setup_only_public_preflight_json": str(setup_only_preflight_path),
         "controller_trace_json": str(controller_trace_path),
         "build_stall_timeout_requested_sec": _requested_build_stall_timeout_sec(args),
@@ -8846,7 +9286,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "dockerfile_venv_pip_invocation_patch_required": False,
             "dockerfile_venv_pip_invocation_patch_applied": False,
             "dockerfile_pip_index_host": (
-                DEFAULT_DOCKER_PIP_INDEX_HOST
+                docker_pip_index_host
                 if setup_preflight.get("dockerfile_pip_bootstrap_patch_required")
                 else ""
             ),
@@ -9312,6 +9752,11 @@ def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
         "app_server_reasoning_effort",
         "app_server_goal_prompt_style",
         "sandbox",
+        "local_codex_provider",
+        "docker_apt_source_mode",
+        "docker_apt_transport_mode",
+        "docker_pip_index_mode",
+        "docker_pip_build_mode",
         "run_group_id",
         "job_name",
         "rollout_name",
@@ -9328,6 +9773,7 @@ def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
         "agent_idle_timeout_sec",
         "build_stall_timeout_requested_sec",
         "build_stall_timeout_sec",
+        "setup_only_stage_timeout_sec",
         "local_codex_task_output_quiet_timeout_sec",
     )
     for field in int_fields:
@@ -9346,6 +9792,8 @@ def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
         "fail_fast_on_verifier_bootstrap_risk",
         "verifier_bootstrap_fail_fast_defaulted",
         "bootstrap_light_fail_fast_defaulted",
+        "setup_only_public_preflight",
+        "setup_only_agent_install_canary",
         "global_ledger_sync_enabled",
         "ledger_inherit_enabled",
     ):
@@ -11603,6 +12051,177 @@ def _merge_host_local_acp_relay_trace_summary(
         )
 
 
+def _loopx_turn_terminal_failure_checkpoint(
+    plan: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Read the public trace needed to identify a stranded failed Turn."""
+
+    if plan.get("route") != LOOPX_TURN_AGENT_CLI_ROUTE:
+        return None
+    trace: dict[str, Any] = {}
+    _merge_host_local_acp_relay_trace_summary(plan, trace)
+    executions = trace.get("loopx_turn_executions")
+    latest = (
+        executions[-1]
+        if isinstance(executions, list)
+        and executions
+        and isinstance(executions[-1], Mapping)
+        else None
+    )
+    if latest is None or loopx_turn_execution_committed(latest):
+        return None
+    receipt = latest.get("receipt")
+    receipt = receipt if isinstance(receipt, Mapping) else {}
+    validation = latest.get("validation")
+    validation = validation if isinstance(validation, Mapping) else {}
+    result_kind = receipt.get("result_kind") or latest.get("result_kind")
+    failed_phase = receipt.get("failed_phase")
+    terminal_failure = bool(
+        latest.get("status") in {"failed", "validation_failed"}
+        or receipt.get("status") == "failed"
+        or failed_phase
+    )
+    validation_terminal_failure = bool(
+        failed_phase == "validation"
+        or result_kind == "validation_failed"
+        or validation.get("status") == "failed"
+    )
+    if (
+        not terminal_failure
+        or loopx_turn_execution_has_durable_effects(latest)
+        or (
+            trace.get("host_local_acp_codex_exec_failure_trace_present") is not True
+            and not validation_terminal_failure
+        )
+    ):
+        return None
+
+    def safe_label(value: Any, *, default: str) -> str:
+        text = str(value or "")
+        if re.fullmatch(r"[A-Za-z0-9_.:-]{1,120}", text):
+            return text
+        return default
+
+    return {
+        "schema_version": "skillsbench_loopx_turn_terminal_failure_checkpoint_v0",
+        "status": safe_label(latest.get("status"), default="failed"),
+        "result_kind": safe_label(
+            result_kind,
+            default="unknown",
+        ),
+        "failed_phase": safe_label(
+            failed_phase,
+            default="unknown",
+        ),
+        "failure_category": safe_label(
+            trace.get("host_local_acp_codex_exec_failure_category")
+            or (
+                "loopx_turn_validation_failed"
+                if validation_terminal_failure
+                else None
+            ),
+            default="unknown",
+        ),
+        "durable_effects_observed": False,
+        "raw_material_recorded": False,
+    }
+
+
+async def _await_benchflow_task_with_loopx_turn_closeout_watchdog(
+    task: asyncio.Task[Any],
+    plan: dict[str, Any],
+    *,
+    grace_seconds: float = DEFAULT_LOOPX_TURN_TERMINAL_FAILURE_GRACE_SEC,
+    poll_interval_seconds: float = LOOPX_TURN_TERMINAL_FAILURE_POLL_SEC,
+    cancel_timeout_seconds: float = 5.0,
+) -> Any:
+    """Let BenchFlow close normally, but fail closed when a failed Turn strands it."""
+
+    prerequisites = plan.setdefault("runner_prerequisites", {})
+    enabled = bool(
+        plan.get("route") == LOOPX_TURN_AGENT_CLI_ROUTE
+        and (
+            prerequisites.get("host_local_acp_launch") is True
+            or prerequisites.get("agent_execution_mode") == "host_local_acp"
+        )
+    )
+    prerequisites["benchflow_loopx_turn_terminal_failure_watchdog_enabled"] = enabled
+    prerequisites["benchflow_loopx_turn_terminal_failure_grace_sec"] = max(
+        0,
+        int(grace_seconds),
+    )
+    prerequisites["benchflow_loopx_turn_terminal_failure_raw_material_recorded"] = (
+        False
+    )
+    if not enabled:
+        return await task
+
+    failure_observed_at: float | None = None
+    while True:
+        done, _pending = await asyncio.wait(
+            {task},
+            timeout=max(0.01, poll_interval_seconds),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if done:
+            return await task
+        if prerequisites.get("benchflow_final_verifier_started") is True:
+            return await task
+        checkpoint = _loopx_turn_terminal_failure_checkpoint(plan)
+        if checkpoint is None:
+            continue
+        if failure_observed_at is None:
+            failure_observed_at = asyncio.get_running_loop().time()
+            prerequisites[
+                "benchflow_loopx_turn_terminal_failure_observed"
+            ] = True
+            prerequisites["benchflow_loopx_turn_terminal_failure_status"] = str(
+                checkpoint["status"]
+            )
+            prerequisites["benchflow_loopx_turn_terminal_failure_category"] = str(
+                checkpoint["failure_category"]
+            )
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                run_stage="loopx_turn_terminal_failure_waiting_for_closeout",
+                worker_status="agent_active",
+            )
+        if (
+            asyncio.get_running_loop().time() - failure_observed_at
+            < max(0.0, grace_seconds)
+        ):
+            continue
+
+        prerequisites["benchflow_loopx_turn_terminal_failure_triggered"] = True
+        prerequisites[
+            "benchflow_loopx_turn_terminal_failure_task_cancel_requested"
+        ] = True
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            run_stage="loopx_turn_terminal_failure_closeout_stalled",
+            worker_status="agent_active",
+        )
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=max(0.01, cancel_timeout_seconds))
+        except asyncio.CancelledError:
+            prerequisites[
+                "benchflow_loopx_turn_terminal_failure_task_cancel_acknowledged"
+            ] = True
+        except asyncio.TimeoutError:
+            prerequisites[
+                "benchflow_loopx_turn_terminal_failure_task_cancel_timeout"
+            ] = True
+        except Exception:
+            prerequisites[
+                "benchflow_loopx_turn_terminal_failure_task_cancel_acknowledged"
+            ] = True
+        cleanup_host_local_acp_attempt_children(plan)
+        raise SkillsBenchLoopXTurnTerminalFailureStall(
+            "SkillsBench LoopX Turn terminal failure did not close BenchFlow"
+        )
+
+
 def _round_count_key(round_index: int) -> str:
     return str(max(0, int(round_index)))
 
@@ -13717,6 +14336,16 @@ async def run_benchflow_case(
         sandbox=args.sandbox,
         include_task_skills=bool(args.include_task_skills),
         benchmark_egress_proxy_env=_benchmark_egress_proxy_env(args),
+        docker_apt_source_mode=getattr(
+            args, "docker_apt_source_mode", DEFAULT_DOCKER_APT_SOURCE_MODE
+        ),
+        docker_apt_transport_mode=getattr(
+            args,
+            "docker_apt_transport_mode",
+            DEFAULT_DOCKER_APT_TRANSPORT_MODE,
+        ),
+        docker_pip_index_mode=args.docker_pip_index_mode,
+        docker_pip_build_mode=args.docker_pip_build_mode,
         docker_gcr_mirror_prefix=args.docker_gcr_mirror_prefix,
         verifier_dependency_cache_enabled=(
             verifier_dependency_cache_policy_enabled
@@ -13757,7 +14386,11 @@ async def run_benchflow_case(
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
 
-    prerequisites["benchflow_run_stage"] = "benchflow_import"
+    _write_public_runner_lifecycle_receipt(
+        plan,
+        run_stage="benchflow_import",
+        worker_status="runtime_preparing",
+    )
     import benchflow.acp.runtime as benchflow_acp_runtime
     import benchflow.rollout as benchflow_rollout_module
     import benchflow.sandbox.setup as benchflow_sandbox_setup_module
@@ -13779,7 +14412,11 @@ async def run_benchflow_case(
         prerequisites["host_local_acp_connect_as_unpack_return_arity"] = (
             connect_as_return_arity
         )
-    prerequisites["benchflow_run_stage"] = "runtime_prepare"
+    _write_public_runner_lifecycle_receipt(
+        plan,
+        run_stage="runtime_prepare",
+        worker_status="runtime_preparing",
+    )
 
     host_local_acp_command = _host_local_acp_launch_command(args, plan)
     runtime_mounts = (
@@ -13796,6 +14433,47 @@ async def run_benchflow_case(
         *loopx_source_mounts,
         *verifier_dependency_cache_mounts,
     ]
+
+    async def run_host_local_acp_codex_exec_preflight_after_environment(
+        env: Any,
+    ) -> None:
+        prerequisites = plan.setdefault("runner_prerequisites", {})
+        prerequisites["host_local_acp_codex_exec_preflight_placement"] = (
+            "after_sandbox_setup_before_agent"
+        )
+        sandbox_bridge_command = _host_local_acp_docker_bridge_command(
+            env,
+            args,
+            plan,
+        )
+        if (
+            _host_local_acp_codex_exec_preflight_requires_bridge_action(
+                args,
+                require_materialized_sandbox_bridge=True,
+            )
+            and not sandbox_bridge_command
+        ):
+            prerequisites["host_local_acp_codex_exec_preflight_status"] = "failed"
+            prerequisites["host_local_acp_codex_exec_preflight_ready"] = False
+            prerequisites["host_local_acp_codex_exec_preflight_first_blocker"] = (
+                "skillsbench_host_local_acp_sandbox_bridge_missing_after_setup"
+            )
+            prerequisites["host_local_acp_codex_exec_failure_category"] = (
+                "codex_sandbox_bridge_unavailable"
+            )
+            raise RuntimeError(
+                "host-local ACP sandbox bridge missing after environment setup"
+            )
+        try:
+            await asyncio.to_thread(
+                _run_host_local_acp_codex_exec_preflight,
+                args,
+                plan,
+                sandbox_bridge_command=sandbox_bridge_command,
+            )
+        finally:
+            _write_public_runner_config(plan)
+            _write_public_runner_prerequisites(plan)
 
     async def connect_host_local_acp(
         env: Any,
@@ -13822,7 +14500,11 @@ async def run_benchflow_case(
         from benchflow.acp.transport import StdioTransport
 
         prerequisites = plan.setdefault("runner_prerequisites", {})
-        prerequisites["host_local_acp_launch_status"] = "connecting"
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            worker_status="acp_connecting",
+            host_local_acp_status="connecting",
+        )
         local_acp_command = list(host_local_acp_command)
         sandbox_bridge_command = _host_local_acp_docker_bridge_command(
             env,
@@ -13893,7 +14575,11 @@ async def run_benchflow_case(
             )
             if model:
                 await asyncio.wait_for(client.set_model(model), timeout=60)
-            prerequisites["host_local_acp_launch_status"] = "connected"
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                worker_status="acp_connected",
+                host_local_acp_status="connected",
+            )
             if isinstance(controller_trace, dict):
                 controller_trace["native_goal_worker_route"] = (
                     args.route == "codex-app-server-goal-baseline"
@@ -13925,7 +14611,11 @@ async def run_benchflow_case(
                 return client, session, session_adapter, agent_name
             return client, session, agent_name
         except Exception:
-            prerequisites["host_local_acp_launch_status"] = "failed"
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                worker_status="acp_connect_failed",
+                host_local_acp_status="failed",
+            )
             with contextlib.suppress(Exception):
                 await client.close()
             raise
@@ -14243,7 +14933,16 @@ async def run_benchflow_case(
         )
         prerequisites["codex_acp_runtime_launch_preflight_status"] = "skipped"
         prerequisites["codex_acp_runtime_launch_preflight_raw_logs_read"] = False
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            worker_status="sandbox_installing",
+            host_local_acp_status="installing_sandbox",
+        )
         try:
+            prerequisites["host_local_acp_docker_exec_capture_lifecycle_guard"] = (
+                "install_agent_boundary"
+            )
+            install_benchflow_docker_exec_output_capture(self._env, plan=plan)
             prerequisites["host_local_acp_install_stage"] = (
                 "docker_exec_capture_preflight"
             )
@@ -14395,20 +15094,32 @@ async def run_benchflow_case(
                         "host_local_acp_after_sandbox_install"
                     )
                 await seed_product_mode_case_state(self._env)
-        except Exception:
+        except Exception as exc:
             prerequisites["host_local_acp_install_failed_stage"] = str(
                 prerequisites.get("host_local_acp_install_stage") or "unknown"
             )
-            prerequisites["host_local_acp_launch_status"] = "sandbox_install_failed"
+            prerequisites["host_local_acp_install_failure_exception_type"] = type(
+                exc
+            ).__name__
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                worker_status="sandbox_install_failed",
+                host_local_acp_status="sandbox_install_failed",
+                host_local_acp_install_stage=str(
+                    prerequisites.get("host_local_acp_install_stage") or "unknown"
+                ),
+            )
             raise
-        prerequisites["host_local_acp_install_stage"] = "sandbox_installed"
-        prerequisites["host_local_acp_launch_status"] = "sandbox_installed"
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            worker_status="sandbox_installed",
+            host_local_acp_status="sandbox_installed",
+            host_local_acp_install_stage="sandbox_installed",
+        )
         self._phase = "installed"
 
     async def install_agent_with_launch_preflight(self: Any) -> Any:
         prerequisites = plan.setdefault("runner_prerequisites", {})
-        prerequisites["benchflow_agent_install_started"] = True
-        prerequisites["benchflow_run_stage"] = "agent_install_started"
         original_timeout = getattr(self, "_timeout", None)
         requested_timeout = _effective_benchflow_agent_timeout_sec(args)
         prerequisites["benchflow_agent_timeout_requested_sec"] = requested_timeout
@@ -14434,6 +15145,12 @@ async def run_benchflow_case(
                 effective_timeout != original_timeout
             )
             self._timeout = effective_timeout
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            run_stage="agent_install_started",
+            worker_status="agent_install_started",
+            agent_install_started=True,
+        )
         if args.host_local_acp_launch:
             return await install_agent_host_local_acp(self)
         result = await original_install_agent(self)
@@ -14527,6 +15244,13 @@ async def run_benchflow_case(
     if _is_case_loopx_route(args.route) and not args.host_local_acp_launch:
         if not setup_only_public_preflight:
             pre_agent_hooks.append(seed_product_mode_case_state)
+    if (
+        not setup_only_public_preflight
+        and _host_local_acp_codex_exec_preflight_should_run(args)
+    ):
+        pre_agent_hooks.append(
+            run_host_local_acp_codex_exec_preflight_after_environment
+        )
 
     agent_env: dict[str, str] = {}
     if runtime_mounts:
@@ -14574,7 +15298,11 @@ async def run_benchflow_case(
     )
     prerequisites["benchflow_setup_stall_timeout_sec"] = build_stall_timeout_sec
     prerequisites["benchflow_setup_stall_raw_logs_read"] = False
-    prerequisites["benchflow_run_stage"] = "before_benchflow_run"
+    _write_public_runner_lifecycle_receipt(
+        plan,
+        run_stage="before_benchflow_run",
+        worker_status="worker_prepared",
+    )
 
     def agent_lifecycle_started() -> bool:
         if prerequisites.get("benchflow_agent_install_started") is True:
@@ -14600,39 +15328,63 @@ async def run_benchflow_case(
         return False
 
     async def run_benchflow_with_setup_stall_watchdog() -> None:
-        prerequisites["benchflow_run_stage"] = "benchflow_run_started"
+        async def await_task_completion(monitored_task: asyncio.Task[Any]) -> None:
+            await monitored_task
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                run_stage="benchflow_run_completed",
+                worker_status="worker_completed",
+            )
+
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            run_stage="benchflow_run_started",
+            worker_status="worker_running",
+        )
         task = asyncio.create_task(benchflow_run(config))
+        monitored_task = asyncio.create_task(
+            _await_benchflow_task_with_loopx_turn_closeout_watchdog(
+                task,
+                plan,
+            )
+        )
         if build_stall_timeout_sec <= 0:
-            await task
-            prerequisites["benchflow_run_stage"] = "benchflow_run_completed"
+            await await_task_completion(monitored_task)
             return
         done, _pending = await asyncio.wait(
-            {task},
+            {monitored_task},
             timeout=build_stall_timeout_sec,
             return_when=asyncio.FIRST_COMPLETED,
         )
         if done:
-            await task
-            prerequisites["benchflow_run_stage"] = "benchflow_run_completed"
+            await await_task_completion(monitored_task)
             return
         if agent_lifecycle_started():
-            prerequisites["benchflow_run_stage"] = (
-                "benchflow_run_continues_after_agent_lifecycle_started"
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                run_stage="benchflow_run_continues_after_agent_lifecycle_started",
+                worker_status="agent_active",
             )
-            await task
-            prerequisites["benchflow_run_stage"] = "benchflow_run_completed"
+            await await_task_completion(monitored_task)
             return
         prerequisites["benchflow_setup_stall_timeout_triggered"] = True
         prerequisites["benchflow_setup_stall_before_agent_lifecycle"] = True
-        prerequisites["benchflow_run_stage"] = "build_or_setup_stall_before_agent"
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            run_stage="build_or_setup_stall_before_agent",
+            worker_status="setup_stalled",
+        )
         prerequisites["benchflow_setup_stall_task_cancel_requested"] = True
         task.cancel()
+        monitored_task.cancel()
         try:
             await asyncio.wait_for(task, timeout=5)
         except asyncio.CancelledError:
             prerequisites["benchflow_setup_stall_task_cancel_acknowledged"] = True
         except asyncio.TimeoutError:
             prerequisites["benchflow_setup_stall_task_cancel_timeout"] = True
+        with contextlib.suppress(asyncio.CancelledError):
+            await monitored_task
         cleanup_benchflow_setup_stall_children(plan)
         raise asyncio.TimeoutError(
             "skillsbench docker compose build/setup stall timeout before agent lifecycle"
@@ -14671,10 +15423,20 @@ async def run_benchflow_case(
                 config=config,
                 task_staging=plan.get("task_staging"),
                 setup_preflight=plan.get("task_setup_preflight"),
-                stage_timeout_sec=float(args.sandbox_setup_timeout),
+                stage_timeout_sec=float(
+                    _effective_setup_only_stage_timeout_sec(args)
+                ),
                 progress_callback=lambda progress: _write_setup_only_public_preflight(
                     plan,
                     progress,
+                ),
+                environment_ready_hook=(
+                    run_host_local_acp_codex_exec_preflight_after_environment
+                    if _host_local_acp_codex_exec_preflight_should_run(args)
+                    else None
+                ),
+                agent_install_canary=bool(
+                    getattr(args, "setup_only_agent_install_canary", False)
                 ),
             )
             plan["setup_only_public_preflight_result"] = setup_only_result
@@ -14743,7 +15505,7 @@ def reduce_result(
     from loopx.benchmark import (
         build_skillsbench_benchflow_result_benchmark_run,
     )
-    from loopx.control_plane.runtime.skillsbench_post_run_debug import (
+    from loopx.benchmarks.read_models.skillsbench_post_run_debug import (
         build_skillsbench_post_run_debug_gate,
     )
     from loopx.status import compact_benchmark_run
@@ -14840,7 +15602,7 @@ def reduce_result(
                         if item not in existing_labels:
                             existing_labels.append(item)
                     compact["failure_attribution_labels"] = existing_labels
-    verifier_bootstrap.apply_skillsbench_verifier_bootstrap_missing_score_attribution(
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution(
         compact,
         task_staging=task_staging,
         setup_preflight=_public_task_setup_preflight(
@@ -15598,6 +16360,72 @@ def _recover_runner_failure_score_from_verifier_artifact(
     return True
 
 
+def _apply_runner_failure_attempt_accounting_from_public_activity(
+    compact: dict[str, Any],
+    runner_prerequisites: Mapping[str, Any],
+) -> None:
+    """Count a solver attempt when public bridge evidence proves task work."""
+
+    task_operation_count = _nonbool_int(
+        runner_prerequisites.get(
+            "remote_command_file_bridge_agent_task_facing_operation_count"
+        )
+    )
+    raw_task_success_count = runner_prerequisites.get(
+        "remote_command_file_bridge_agent_task_facing_success_count"
+    )
+    if isinstance(raw_task_success_count, int) and not isinstance(
+        raw_task_success_count, bool
+    ):
+        task_success_count = max(0, raw_task_success_count)
+    else:
+        raw_request_count = runner_prerequisites.get(
+            "remote_command_file_bridge_agent_request_count"
+        )
+        raw_success_count = runner_prerequisites.get(
+            "remote_command_file_bridge_agent_success_count"
+        )
+        if (
+            isinstance(raw_request_count, int)
+            and not isinstance(raw_request_count, bool)
+            and raw_request_count >= task_operation_count
+            and isinstance(raw_success_count, int)
+            and not isinstance(raw_success_count, bool)
+            and 0 <= raw_success_count <= raw_request_count
+        ):
+            non_task_operation_count = raw_request_count - task_operation_count
+            task_success_count = max(
+                0,
+                raw_success_count - non_task_operation_count,
+            )
+        else:
+            task_success_count = 0
+    if task_operation_count <= 0 or task_success_count <= 0:
+        return
+
+    from loopx.benchmark_core import (
+        BenchmarkFailureClass,
+        build_benchmark_attempt_accounting,
+        canonical_lifecycle,
+    )
+
+    failure_label = str(compact.get("score_failure_attribution") or "")
+    compact["attempt_accounting"] = build_benchmark_attempt_accounting(
+        lifecycle=canonical_lifecycle(
+            process_started=True,
+            runner_accepted_args=True,
+            job_root_materialized=True,
+            trial_started=True,
+            worker_started=True,
+        ),
+        failure_label=failure_label,
+        failure_class=BenchmarkFailureClass.SOLVER_FAILED,
+        solver_attempted=True,
+        verifier_attempted=False,
+        official_score_attempted=False,
+    )
+
+
 def build_runner_failure_compact(
     args: argparse.Namespace,
     plan: dict[str, Any],
@@ -15612,7 +16440,7 @@ def build_runner_failure_compact(
         skillsbench_runner_error_attribution,
         skillsbench_runner_error_fingerprint,
     )
-    from loopx.control_plane.runtime.skillsbench_post_run_debug import (
+    from loopx.benchmarks.read_models.skillsbench_post_run_debug import (
         build_skillsbench_post_run_debug_gate,
     )
     from loopx.status import compact_benchmark_run
@@ -15740,6 +16568,11 @@ def build_runner_failure_compact(
         "no_raw_trajectory_read": True,
         "no_leaderboard_upload_requested": True,
     }
+    if runner_prerequisites:
+        _apply_runner_failure_attempt_accounting_from_public_activity(
+            compact,
+            runner_prerequisites,
+        )
     reduced = compact_benchmark_run(compact)
     if reduced is None:
         raise RuntimeError("SkillsBench runner failure reducer produced non-compact run")
@@ -15768,7 +16601,7 @@ def build_runner_failure_compact(
     if not recovered:
         _recover_runner_failure_score_from_verifier_artifact(reduced, plan)
     _apply_codex_cli_goal_countability_guard_attribution(reduced)
-    verifier_bootstrap.apply_skillsbench_verifier_bootstrap_missing_score_attribution(
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution(
         reduced,
         task_staging=_effective_public_task_staging(plan),
         setup_preflight=_public_task_setup_preflight(
@@ -16329,8 +17162,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help=(
             "Materialize the BenchFlow job root and environment, then stop "
-            "before agent install, agent execution, and verification. Emit only "
-            "a compact public-safe setup classification."
+            "before agent execution and verification. By default this also "
+            "stops before agent install. Emit only a compact public-safe setup "
+            "classification."
+        ),
+    )
+    parser.add_argument(
+        "--setup-only-agent-install-canary",
+        action="store_true",
+        help=(
+            "With --setup-only-public-preflight, exercise the configured agent "
+            "install path and stop before agent execution and verification."
         ),
     )
     parser.add_argument(
@@ -16351,6 +17193,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--local-codex-bin",
         default="codex",
         help="Codex CLI binary for --local-codex-participant-ping.",
+    )
+    parser.add_argument(
+        "--local-codex-provider",
+        choices=("exact-host", "reverse-channel"),
+        default="exact-host",
+        help=(
+            "Structured host placement for Codex. reverse-channel enables the "
+            "fixed pre-agent bridge receipt for split-control launches."
+        ),
     )
     parser.add_argument(
         "--local-codex-sandbox",
@@ -16562,6 +17413,48 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--docker-apt-source-mode",
+        choices=DOCKER_APT_SOURCE_MODES,
+        default=DEFAULT_DOCKER_APT_SOURCE_MODE,
+        help=(
+            "Apt source policy used by staged Dockerfile repair. mirror "
+            "preserves the default fixed mirrors; primary keeps the task's "
+            "original sources as a bounded fallback after a typed mirror "
+            "network failure."
+        ),
+    )
+    parser.add_argument(
+        "--docker-apt-transport-mode",
+        choices=DOCKER_APT_TRANSPORT_MODES,
+        default=DEFAULT_DOCKER_APT_TRANSPORT_MODE,
+        help=(
+            "Apt transport policy used by staged Dockerfile repair. default "
+            "preserves current retry behavior; proxy-compatible additionally "
+            "disables HTTP(S) pipelining and forces IPv4 without recording "
+            "or changing proxy endpoints."
+        ),
+    )
+    parser.add_argument(
+        "--docker-pip-index-mode",
+        choices=tuple(DOCKER_PIP_INDEX_MODES),
+        default=DEFAULT_DOCKER_PIP_INDEX_MODE,
+        help=(
+            "Public package index used by the staged Dockerfile pip bootstrap "
+            "repair. mirror preserves the default; primary provides a bounded "
+            "fallback after a typed mirror-network setup failure."
+        ),
+    )
+    parser.add_argument(
+        "--docker-pip-build-mode",
+        choices=DOCKER_PIP_BUILD_MODES,
+        default=DEFAULT_DOCKER_PIP_BUILD_MODE,
+        help=(
+            "Build-isolation policy used by the staged Dockerfile pip bootstrap. "
+            "isolated preserves the default; no-isolation is a bounded fallback "
+            "after a typed build-dependency subprocess failure."
+        ),
+    )
+    parser.add_argument(
         "--docker-gcr-mirror-prefix",
         default=os.environ.get("LOOPX_SKILLSBENCH_GCR_MIRROR_PREFIX", ""),
         help=(
@@ -16725,6 +17618,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error(
             "--setup-only-public-preflight is incompatible with --plan-only "
             "and --reduce-only"
+        )
+    if (
+        args.setup_only_agent_install_canary
+        and not args.setup_only_public_preflight
+    ):
+        parser.error(
+            "--setup-only-agent-install-canary requires "
+            "--setup-only-public-preflight"
         )
     if args.setup_only_public_preflight and (args.append_history or args.update_ledger):
         parser.error(
@@ -16992,14 +17893,6 @@ async def _async_main_with_observable_handle(
         finally:
             _write_public_runner_config(plan)
             _write_public_runner_prerequisites(plan)
-
-    if (
-        _host_local_acp_codex_exec_preflight_should_run(args)
-        and args.host_local_acp_launch
-        and not args.reduce_only
-        and not args.setup_only_public_preflight
-    ):
-        _run_host_local_acp_codex_exec_preflight(args, plan)
 
     if not args.reduce_only:
         _write_public_runner_config(plan)
@@ -17485,6 +18378,40 @@ async def async_independent_goal_retry_main(args: argparse.Namespace) -> dict[st
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     logging.getLogger().setLevel(logging.WARNING)
+    if args.local_codex_participant_ping:
+        payload = codex_runtime.materialize_local_codex_participant(
+            codex_bin=args.local_codex_bin,
+            timeout_sec=args.local_codex_ping_timeout_sec,
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
+        return 0 if payload.get("codex_cli_invoked") is True else 1
+    if args.local_driver_worker_handshake_preflight:
+        ensure_skillsbench_dependency_python(args)
+        payload = inspect_skillsbench_worker_handshake(
+            skillsbench_root=args.skillsbench_root,
+            dataset=args.dataset,
+            task_id=args.task_id,
+            local_codex_cli_participant_ready=args.local_codex_cli_participant_ready,
+            local_acp_relay_command=args.local_acp_relay_command,
+            probe_local_acp_relay=args.local_acp_relay_probe,
+            local_acp_relay_probe_timeout_sec=args.local_acp_relay_probe_timeout_sec,
+            probe_host_local_acp_transport=args.host_local_acp_transport_probe,
+            host_local_acp_transport_probe_timeout_sec=(
+                args.host_local_acp_transport_probe_timeout_sec
+            ),
+            probe_remote_command_file_bridge=args.remote_command_file_bridge_probe,
+            remote_command_file_bridge_probe_command=(
+                args.remote_command_file_bridge_probe_command
+            ),
+            remote_command_file_bridge_probe_timeout_sec=(
+                args.remote_command_file_bridge_probe_timeout_sec
+            ),
+            remote_command_file_bridge_ready=args.remote_command_file_bridge_ready,
+            remote_executor_ready=True,
+            remote_task_data_ready=True,
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
+        return 0
     if (
         args.route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE
         and not args.plan_only
@@ -17759,40 +18686,6 @@ def main(argv: list[str] | None = None) -> int:
         }
         print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
         return 2
-    if args.local_codex_participant_ping:
-        payload = codex_runtime.materialize_local_codex_participant(
-            codex_bin=args.local_codex_bin,
-            timeout_sec=args.local_codex_ping_timeout_sec,
-        )
-        print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
-        return 0 if payload.get("codex_cli_invoked") is True else 1
-    if args.local_driver_worker_handshake_preflight:
-        ensure_skillsbench_dependency_python(args)
-        payload = inspect_skillsbench_worker_handshake(
-            skillsbench_root=args.skillsbench_root,
-            dataset=args.dataset,
-            task_id=args.task_id,
-            local_codex_cli_participant_ready=args.local_codex_cli_participant_ready,
-            local_acp_relay_command=args.local_acp_relay_command,
-            probe_local_acp_relay=args.local_acp_relay_probe,
-            local_acp_relay_probe_timeout_sec=args.local_acp_relay_probe_timeout_sec,
-            probe_host_local_acp_transport=args.host_local_acp_transport_probe,
-            host_local_acp_transport_probe_timeout_sec=(
-                args.host_local_acp_transport_probe_timeout_sec
-            ),
-            probe_remote_command_file_bridge=args.remote_command_file_bridge_probe,
-            remote_command_file_bridge_probe_command=(
-                args.remote_command_file_bridge_probe_command
-            ),
-            remote_command_file_bridge_probe_timeout_sec=(
-                args.remote_command_file_bridge_probe_timeout_sec
-            ),
-            remote_command_file_bridge_ready=args.remote_command_file_bridge_ready,
-            remote_executor_ready=True,
-            remote_task_data_ready=True,
-        )
-        print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
-        return 0
     task_ids = _batch_task_ids(args)
     batch_mode = len(task_ids) > 1
     independent_retry_mode = _independent_goal_retry_enabled(args) and not args.plan_only

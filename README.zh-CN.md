@@ -17,6 +17,12 @@ loop 状态：目标、用户决策、agent todo、认领关系、scope、schedu
 quota、证据、run history 和 handoff 留在同一层轻量状态里。该等人的地方明确等人，
 不该空等的安全侧路继续推进，每一次自动执行都留下边界、验证面和写回轨迹。
 
+一个形象化理解是：LoopX 是
+**[面向长程 Agent 的可执行看板](docs/development/control-plane-course/00-concept-primer.md)**。
+卡片带有稳定身份、权限、证据和 continuation；移动卡片要经过 claim、gate、monitor、
+validate、writeback 等 typed operator；Capability 可以增加 Issue Fix、Auto Research
+等领域泳道，但不会再造一套控制面。看板是 projection，LoopX state 才是事实源。
+
 注册 agent 彼此平级：由 todo claim / lease、任务边界、能力门和 typed
 continuation 决定下一步谁执行，不需要一个长期拥有全局权限的 leader agent。
 
@@ -60,6 +66,16 @@ LoopX 会生成并刷新 heartbeat body；起始 3 分钟之后，cadence 由
 `quota should-run.scheduler_hint` 负责退避和重置，用户不需要手动配置这些细节。
 高级迁移和故障恢复见 [Getting Started](docs/guides/getting-started.md)。
 
+如果 Codex App 通过 SSH 连接远程项目，且该 host 不提供 automation tool，请使用
+精确 host 类型：
+
+```bash
+loopx agent-onboard --agent-type codex-app-ssh --project .
+```
+
+返回的 activation packet 会把当前可见任务接成 `/goal <task_body>`，不会创建
+heartbeat automation 或 RRULE 调度。
+
 ### Codex CLI
 
 适合希望保留可见 TUI、随时观察和接管的用户。从项目 repo 打开 Codex CLI：
@@ -69,20 +85,11 @@ cd /path/to/your-project
 codex
 ```
 
-然后在 TUI 里粘贴一条消息：
+然后在 TUI 里粘贴一条消息。下面的粘贴块故意保持为源码单行，直接整行复制到
+TUI，不要手动加入换行：
 
 ```text
-请在这个可见 Codex CLI TUI 中把当前 repo 接入 LoopX。普通使用不要 clone LoopX
-仓库。若 `loopx` 不在 PATH，请使用官方 no-clone installer 安装或修复：
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
-
-然后运行 `loopx doctor`。只在当前项目根目录操作：如果项目已存在 LoopX 状态，
-请复用，不要新建或覆盖 goal；如果尚未接入，优先用 `loopx connect`，只有明确
-缺少 goal 状态且需要初始化时才用 `loopx bootstrap`。确保 `.loopx/`、
-`.codex/goals/`、`.local/` 不会被提交。请留在这个 TUI，不要使用隐藏 headless
-执行；项目连接后，生成 thin task body 并把当前 Codex CLI goal 设置为
-`/goal <thin task_body>`。然后停止，不要在接入这轮开始长任务，只汇报 goal id、
-当前 user gate、top agent todo 和下一步安全动作。
+请在这个可见 Codex CLI TUI 中把当前 repo 接入 LoopX。普通使用不要 clone LoopX 仓库。若 `loopx` 不在 PATH，请使用官方 no-clone installer 安装或修复：curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash; export PATH="$HOME/.local/bin:$PATH"。然后运行 `loopx doctor`。只在当前项目根目录操作：如果项目已存在 LoopX 状态，请复用，不要新建或覆盖 goal；如果尚未接入，优先用 `loopx connect`，只有明确缺少 goal 状态且需要初始化时才用 `loopx bootstrap`。确保 `.loopx/`、`.codex/goals/`、`.local/` 不会被提交。请留在这个 TUI，不要使用隐藏 headless 执行；项目连接后，生成 thin task body 并把当前 Codex CLI goal 设置为 `/goal <thin task_body>`。然后停止，不要在接入这轮开始长任务，只汇报 goal id、当前 user gate、top agent todo 和下一步安全动作。
 ```
 
 这条消息就是安装、连接、可见 `/goal` 设置和状态检查。更细的生成模板、idle/proof 边界见
@@ -103,6 +110,11 @@ Cursor、其他终端 agent 或手动 shell 都走同一个 no-clone installer�
 走 agent-first 路径，例如能运行 shell/CLI、支持 goal/task 指令、能接入 automation
 或 heartbeat、或者自身有 loop/scheduler。否则 LoopX 仍可记录项目状态，但用户需要把
 下面的 shell 命令手动跑完。
+
+如果你已经有远端 Agent runner、custom CLI 或 workflow supervisor，直接阅读
+[把 LoopX 嵌入你的 Agent Runner](docs/guides/custom-agent-runner-integration.zh-CN.md)。
+它用一页讲清 CLI、轻量 skill/re-entry instruction、自驱动 tick、去中心化 Agent
+接力和验证边界。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
@@ -314,6 +326,21 @@ benchmark 证据边界。
 第一次修改 LoopX control plane，可以从
 [控制面开发者 9 讲](docs/development/control-plane-course/README.md)开始，按真实 CLI
 执行路径、组合状态推理、核心函数、分层质量门禁和 smoke 建立代码心智模型。
+
+### 给开发者：四种运行责任
+
+| 角色 | 负责什么 |
+| --- | --- |
+| **Agent** | 通过 host/runtime 完成方案、分析、工具使用和一次有界执行 |
+| **Provider** | 调用外部系统，返回 observation、effect result 与 readback |
+| **Capability** | 定义调用者结果，归一化并验证 provider 输出，提出 typed transition |
+| **Kernel** | 持久化 todo、gate、monitor、已接受 writeback、quota、恢复与调度 |
+
+执行路径是 `Agent -> Capability -> Provider`，控制结果沿
+`Provider readback -> Capability transition -> Kernel` 返回。Extension 负责可选
+provider 的打包和生命周期，不是另一个控制面 owner。详见
+[核心架构](docs/architecture.md)与
+[Extension / Capability 参考](docs/reference/extensions.md)。
 
 项目角色与维护权限见 [GOVERNANCE.md](GOVERNANCE.md)，创建者与贡献者归属见
 [AUTHORS.md](AUTHORS.md)，关键公开演进见

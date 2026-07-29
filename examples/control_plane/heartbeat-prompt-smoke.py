@@ -160,9 +160,8 @@ def main() -> int:
         assert "automation_update" in task_body and "stop" in task_body, task_body
         assert "lark_event_inbox" in task_body, task_body
         assert "drain" in task_body and "ACK" in task_body, task_body
-        assert "Graph-on" in task_body and "sync" in task_body and "sinks" in task_body, task_body
-        assert "row/result-id readback before" in task_body and "delivery" in task_body, task_body
-        assert "Explore Harness" in task_body and "independent" in task_body, task_body
+        assert "Graph-on" not in task_body, task_body
+        assert "Generic Kanban" not in task_body, task_body
         if prompt_payload is not payload:
             assert "drain_command" in task_body, task_body
             assert "writeback" in task_body, task_body
@@ -176,7 +175,8 @@ def main() -> int:
     assert "Observed capabilities -> `--available-capability`; never user gates." in thin_task, thin_task
     assert payload["quota_guard_command"] == (
         'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" '
-        "quota should-run --goal-id public-heartbeat-goal"
+        'quota should-run --goal-id public-heartbeat-goal '
+        '--turn-instance-id "${LOOPX_TURN:?}"'
     ), payload
     assert payload["quota_spend_command"] == (
         'loopx --registry "$HOME/.codex/loopx/registry.global.json" '
@@ -189,6 +189,17 @@ def main() -> int:
     assert payload["resolved_active_state"] == str(ACTIVE_STATE), payload
     assert compact_payload["quota_guard_command"] == payload["quota_guard_command"], compact_payload
     assert compact_payload["quota_spend_command"] == payload["quota_spend_command"], compact_payload
+    for prompt_label, prompt_payload in (
+        ("full", payload),
+        ("compact", compact_payload),
+        ("brief", brief_payload),
+    ):
+        task_body = str(prompt_payload["task_body"])
+        progress_refresh = str(prompt_payload["progress_refresh_state_command"])
+        quota_spend = str(prompt_payload["quota_spend_command"])
+        state_only_refresh = str(prompt_payload["refresh_state_command"])
+        assert task_body.index(progress_refresh) < task_body.index(quota_spend), prompt_label
+        assert task_body.index(quota_spend) < task_body.rindex(state_only_refresh), prompt_label
     assert len(str(compact_payload["task_body"])) < len(str(payload["task_body"])) * 0.47, (
         len(str(compact_payload["task_body"])),
         len(str(payload["task_body"])),
@@ -206,7 +217,7 @@ def main() -> int:
         "including non_blocking",
         "safe_bypass_allowed=true",
         "safe_bypass_kind=outcome_floor_recovery",
-        "unchanged monitor-only polls are not self-stop signals",
+        "receipts do not self-stop",
         "ranker/cross-domain evidence artifact",
         "status/log/metric/marker poll",
         "heartbeat_recommendation",
@@ -227,7 +238,8 @@ def main() -> int:
         "loopx todo add --goal-id public-heartbeat-goal --role user --task-class user_gate|user_action",
         "owner todos and `--role agent` for agent todos, not prose",
         'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
-        "progress: `loopx refresh-state --goal-id public-heartbeat-goal",
+        "Accountable refresh, then spend",
+        "Optional state-only post-spend",
         "No spend for quiet skips",
     ):
         assert phrase in compact_task, phrase
@@ -255,7 +267,8 @@ def main() -> int:
         scoped_payload
     )
     assert scoped_payload["quota_guard_command"].endswith(
-        "quota should-run --goal-id public-heartbeat-goal --agent-id codex-side-bypass"
+        "quota should-run --goal-id public-heartbeat-goal --agent-id codex-side-bypass "
+        '--turn-instance-id "${LOOPX_TURN:?}"'
     ), scoped_payload
     assert scoped_payload["quota_spend_command"].endswith(
         "quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute --agent-id codex-side-bypass"
@@ -285,6 +298,10 @@ def main() -> int:
     assert "--available-capability external_evidence_poll" in capability_task_body, (
         capability_task_body
     )
+    assert "heartbeat-prequota" in capability_task_body, capability_task_body
+    assert capability_scoped_payload["pr_review_pre_quota_command"] == (
+        "loopx heartbeat-prequota -g public-heartbeat-goal -a codex-side-bypass"
+    ), capability_scoped_payload
     assert "productization showcase docs lane" in normalized(str(profile_scoped_payload["task_body"])), (
         profile_scoped_payload
     )
@@ -305,29 +322,27 @@ def main() -> int:
         "todo continuation",
         "no cross-agent authority",
         "no scope in todo metadata",
+        "No runtime `loopx-project`",
+        "heartbeat-prequota",
         'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run '
         "--goal-id loopx-meta --agent-id codex-product-capability --available-capability network "
         "--available-capability external_evidence_poll",
         "follow `interaction_contract`",
-        "User NOTIFY: concrete Chinese actions even non_blocking false/0",
-        'never only "owner gate"',
+        "NOTIFY Chinese actions incl. non_blocking false/0",
+        'not only "owner gate"',
         "具体 user todo 未投影，需修复 LoopX 状态投影",
-        "Quiet only if DONT_NOTIFY+false/0",
+        "DONT_NOTIFY+false/0 only: quiet",
         "Observed capabilities -> `--available-capability`; never user gates",
         "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend)",
         "else RRULE/ack/fail",
-        "spend post-writeback",
-        "Plans/done->todo/rationale; 2 stalls->self-repair",
+        "writeback: accountable refresh->spend; optional state-only after",
+        "guard receipt; 2 stalls->replan",
         "`lark_event_inbox`: reply_due",
         "drain_command/reply-readback/ACK",
-        "Graph-on: sync sinks",
-        "row/result-id readback before delivery",
-        "retry/blocker/successor",
-        "Explore Harness independent",
-        "P0 blocked: safe P1/P2; monitor-only quiet/no-spend",
+        "P0 blocked: safe P1/P2; monitor quiet/no-spend",
         "No project branches",
         "Do not consume learning queue unless asked",
-        "Stop for private material, credentials, destructive git, or unauthorized production actions",
+        "Stop: private material, credentials, destructive git, unauthorized prod",
     ):
         assert phrase in live_peer_task, phrase
     for phrase in (
@@ -367,12 +382,15 @@ def main() -> int:
         "Thin dispatcher",
         "Thin dispatcher; detail",
         "loopx heartbeat-prompt --compact --goal-id public-heartbeat-goal --active-state /tmp/public-heartbeat-goal/ACTIVE_GOAL_STATE.md",
-        "Preflight and quota guard",
+        "Guard/retry; `LOOPX_TURN=<current_time_iso>`",
         'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id public-heartbeat-goal',
         "User NOTIFY: Chinese actions incl. non_blocking at false/0",
         "Only DONT_NOTIFY+false/0: quiet",
-        "Otherwise obey user channel",
-        "status/log/metric/marker poll",
+        "follow user channel",
+        "monitor_quiet_skip",
+        "receipt/stall done",
+        "retry same id",
+        "one read-only poll",
         "safe_bypass_kind=outcome_floor_recovery",
         "ranker/cross-domain evidence recovery",
         "state priority slice",
@@ -383,7 +401,8 @@ def main() -> int:
         "goal_boundary",
         "bounded segment/batch",
         "validate/writeback/todos",
-        "explicit delivery scale/outcome for progress artifacts",
+        "Progress refresh",
+        "Optional state-only post-spend",
         'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
         "No spend for quiet skips",
     ):
@@ -402,24 +421,24 @@ def main() -> int:
     thin_task = normalized(str(thin_payload["task_body"]))
     for phrase in (
         "Advance `public-heartbeat-goal` from /tmp/public-heartbeat-goal/ACTIVE_GOAL_STATE.md",
-        "Skills: `loopx-project`; surprise/tiny/conflict",
+        "No runtime `loopx-project`",
         "`loopx-self-repair`",
         "LoopX CLI = truth",
-        "registry/state/status/history/repo",
+        "state/status/repo",
         "`quota should-run`; follow `interaction_contract`",
-        "User NOTIFY: concrete Chinese actions even non_blocking false/0",
-        'never only "owner gate"',
-        "Quiet only if DONT_NOTIFY+false/0",
+        "NOTIFY Chinese actions incl. non_blocking false/0",
+        'not only "owner gate"',
+        "DONT_NOTIFY+false/0 only: quiet",
         "具体 user todo 未投影，需修复 LoopX 状态投影",
         "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend)",
         "else RRULE/ack/fail",
-        "Batch/no-op; spend post-writeback",
-        "Plans/done->todo/rationale; 2 stalls->self-repair",
+        "writeback: accountable refresh->spend; optional state-only after",
+        "guard receipt; 2 stalls->replan",
         "P0 blocked: safe P1/P2",
-        "monitor-only quiet/no-spend",
+        "monitor quiet/no-spend",
         "No project branches",
         "Do not consume learning queue unless asked",
-        "Stop for private material, credentials, destructive git, or unauthorized production actions",
+        "Stop: private material, credentials, destructive git, unauthorized prod",
     ):
         assert phrase in thin_task, phrase
     assert "if absent say" not in thin_task, thin_task
@@ -478,10 +497,12 @@ def main() -> int:
         "gate blocks only the gated delivery path",
         "one bounded safe-bypass step",
         "include the projected user actions or todos concretely",
-        "quota monitor-poll --goal-id",
-        "--source heartbeat --execute",
+        "LOOPX_TURN",
+        "<current_time_iso>",
+        "idempotent receipt for every turn",
+        "Do not append a second manual monitor poll",
         "delivery edits",
-        "unchanged monitor-only polls are not self-stop signals",
+        "unchanged monitor-only receipts are not self-stop signals",
         "safe_bypass_kind=outcome_floor_recovery",
         "ranker/cross-domain evidence artifact",
         "explicitly a monitor",
@@ -544,9 +565,6 @@ def main() -> int:
         "loopx todo add --goal-id <GOAL_ID> --role user --task-class user_action",
         "Use `--role agent` for project-agent follow-up work",
         "docs/project-agent-todo-contract.md",
-        "Graph-on: material refresh must sync configured sinks",
-        "row/result-id readback before final delivery",
-        "Explore Harness stays independent",
         'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute',
         "loopx refresh-state --goal-id <GOAL_ID>",
         "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
@@ -597,10 +615,12 @@ def main() -> int:
         "gate blocks only the gated delivery path",
         "one bounded safe-bypass step",
         "include those todos",
-        "quota monitor-poll --goal-id",
-        "--source heartbeat --execute",
-        "delivery edits",
-        "unchanged monitor-only polls are not self-stop signals",
+        "LOOPX_TURN",
+        "--turn-instance-id",
+        "receipt/stall is written",
+        "On receipt write failure",
+        "No edits/spend",
+        "receipts do not self-stop",
         "explicitly a monitor",
         "status/log/metric/marker surfaces",
         "New eval/fail/complete/blocker",
@@ -655,7 +675,7 @@ def main() -> int:
         "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
         "--delivery-batch-scale multi_surface",
         "--delivery-outcome outcome_progress",
-        "readiness does not infer from classification names",
+        "Spend consumes this causal record",
         "Do not append spend for quiet `should_run=false` skips",
         "safe_bypass_kind=outcome_floor_recovery",
         "ranker/cross-domain evidence artifact",
@@ -701,8 +721,9 @@ def main() -> int:
             "Choose one bounded, verifiable progress segment from that audit",
             "Public-safe repo publication is not an operator gate by itself",
             "Run the smallest useful validation",
-            'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute',
             "loopx refresh-state --goal-id <GOAL_ID>",
+            'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute',
+            "If the dashboard or controller needs a state-only update after spend",
             "Return a compact final report",
         ),
     )
@@ -780,6 +801,8 @@ def main() -> int:
     assert "do not infer scale/outcome from the classification name" in normalized(project_skill), project_skill
     assert "no-progress self-repair guard" in project_skill, project_skill
     assert "2 consecutive stalled turns" in normalized(project_skill), project_skill
+    assert "one idempotent receipt on every heartbeat" in normalized(project_skill), project_skill
+    assert "retry with the same turn id" in normalized(project_skill), project_skill
     assert "unchanged monitor-only polls are liveness-preserving no-ops" in normalized(project_skill), project_skill
     assert "Routine public repo publication is a boundary decision" in project_skill, project_skill
     assert "Do not reintroduce a user gate for public-safe publication itself" in project_skill, project_skill
@@ -981,6 +1004,10 @@ def main() -> int:
                             "repo": str(project),
                             "state_file": f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md",
                             "adapter": {"kind": "generic_project_goal_v0", "status": "connected"},
+                            "explore_graph": {"enabled": True},
+                            "control_plane": {
+                                "lark_kanban": {"heartbeat_sync_enabled": True}
+                            },
                             "coordination": {
                                 "registered_agents": ["codex-main-control", "codex-side-bypass"],
                                 "agent_model": "peer_v1",
@@ -1057,6 +1084,9 @@ def main() -> int:
         )
         assert cli_registry_default_payload["active_state_source"].startswith("registry:"), cli_registry_default_payload
         assert cli_registry_default_payload["resolved_active_state"] == str(state_file), cli_registry_default_payload
+        assert "sink_activation" not in cli_registry_default_payload
+        assert "Explore Graph" not in cli_registry_default_payload["task_body"]
+        assert "Generic Kanban" not in cli_registry_default_payload["task_body"]
         assert cli_registry_default_payload["expanded_prompt_command"] == (
             "loopx heartbeat-prompt --full --goal-id public-heartbeat-goal "
             "--agent-id codex-main-control --agent-scope 'primary review and coordination'"

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import base64
 import json
+import shlex
+import socket
 import subprocess
 import sys
 import tempfile
@@ -103,11 +105,18 @@ def _flaky_fake_ssh(
     state_dir: Path,
     *,
     first_tunnel_exits: bool,
+    startup_tunnel_exit_count: int = 0,
     probe_delay_sec: float = 0.0,
     probe_failure_exit_code: int = 42,
+    local_dependency_generation_path: Path | None = None,
 ) -> None:
     generation_path = state_dir / "tunnel-generation"
     probe_count_path = state_dir / "probe-count"
+    local_dependency_generation_value = (
+        str(local_dependency_generation_path)
+        if local_dependency_generation_path
+        else None
+    )
     path.write_text(
         f"""#!/usr/bin/env python3
 import signal
@@ -119,8 +128,15 @@ log_path = Path({str(log_path)!r})
 generation_path = Path({str(generation_path)!r})
 probe_count_path = Path({str(probe_count_path)!r})
 first_tunnel_exits = {first_tunnel_exits!r}
+startup_tunnel_exit_count = {startup_tunnel_exit_count!r}
 probe_delay_sec = {probe_delay_sec!r}
 probe_failure_exit_code = {probe_failure_exit_code!r}
+local_dependency_generation_path_value = {local_dependency_generation_value!r}
+local_dependency_generation_path = (
+    Path(local_dependency_generation_path_value)
+    if local_dependency_generation_path_value
+    else None
+)
 args = sys.argv[1:]
 with log_path.open("a", encoding="utf-8") as handle:
     handle.write(repr(args) + "\\n")
@@ -129,6 +145,9 @@ if "-R" in args:
     generation = int(generation_path.read_text() or "0") if generation_path.exists() else 0
     generation += 1
     generation_path.write_text(str(generation), encoding="utf-8")
+    if generation <= startup_tunnel_exit_count:
+        time.sleep(0.05)
+        sys.exit(42)
     if first_tunnel_exits and generation == 1:
         time.sleep(0.25)
         sys.exit(42)
@@ -147,8 +166,19 @@ if "LOOPX_REVERSE_TUNNEL_PROBE" in remote_command:
     time.sleep(probe_delay_sec)
     generation = int(generation_path.read_text() or "0") if generation_path.exists() else 0
     count = int(probe_count_path.read_text() or "0") if probe_count_path.exists() else 0
+    local_dependency_generation = (
+        int(local_dependency_generation_path.read_text() or "0")
+        if local_dependency_generation_path
+        and local_dependency_generation_path.exists()
+        else 0
+    )
     probe_count_path.write_text(str(count + 1), encoding="utf-8")
-    if first_tunnel_exits or generation >= 2 or count == 0:
+    if (
+        first_tunnel_exits
+        or generation >= 2
+        or local_dependency_generation >= 2
+        or count == 0
+    ):
         print("HTTP/1.1 200 Connection Established")
         sys.exit(0)
     sys.exit(probe_failure_exit_code)
@@ -172,6 +202,62 @@ sys.exit(0)
         encoding="utf-8",
     )
     path.chmod(0o755)
+
+
+def _managed_local_endpoint(path: Path) -> None:
+    path.write_text(
+        """#!/usr/bin/env python3
+import signal
+import socket
+import sys
+from pathlib import Path
+
+port = int(sys.argv[1])
+generation_path = Path(sys.argv[2])
+generation = (
+    int(generation_path.read_text() or "0")
+    if generation_path.exists()
+    else 0
+)
+generation += 1
+generation_path.write_text(str(generation), encoding="utf-8")
+
+listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+listener.bind(("127.0.0.1", port))
+listener.listen(16)
+listener.settimeout(0.05)
+
+if generation == 1:
+    connection, _address = listener.accept()
+    connection.close()
+    listener.close()
+    raise SystemExit(0)
+
+running = True
+def stop(_sig, _frame):
+    global running
+    running = False
+
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
+while running:
+    try:
+        connection, _address = listener.accept()
+    except TimeoutError:
+        continue
+    connection.close()
+listener.close()
+""",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def _unused_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
 
 
 def test_supervisor_holds_tunnel_and_redacts_private_command() -> None:
@@ -261,7 +347,7 @@ def test_supervisor_reconnects_after_tunnel_process_exit() -> None:
                 "--private-log-path",
                 str(private_log),
                 "--tunnel-ready-timeout-sec",
-                "2",
+                "5",
                 "--probe-interval-sec",
                 "0.05",
                 "--tunnel-health-interval-sec",
@@ -271,7 +357,7 @@ def test_supervisor_reconnects_after_tunnel_process_exit() -> None:
                 "--tunnel-reconnect-attempts",
                 "1",
                 "--tunnel-reconnect-ready-timeout-sec",
-                "2",
+                "5",
                 "--run-timeout-sec",
                 "5",
             ],
@@ -305,12 +391,142 @@ def test_supervisor_reconnects_after_tunnel_process_exit() -> None:
         assert tunnel_launch_count == 2, tunnel_launch_count
 
 
-def test_supervisor_preserves_live_tunnel_and_fails_closed() -> None:
-    with tempfile.TemporaryDirectory(prefix="skillsbench-tunnel-fail-closed-") as tmp:
+def test_supervisor_retries_tunnel_exit_before_initial_ready() -> None:
+    with tempfile.TemporaryDirectory(prefix="skillsbench-tunnel-startup-") as tmp:
         root = Path(tmp)
         fake_ssh = root / "ssh"
         ssh_log = root / "ssh.log"
-        synced_dir = root / "synced"
+        _flaky_fake_ssh(
+            fake_ssh,
+            ssh_log,
+            root,
+            first_tunnel_exits=False,
+            startup_tunnel_exit_count=1,
+            probe_delay_sec=0.1,
+        )
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--ssh-bin",
+                str(fake_ssh),
+                "--ssh-destination",
+                "opaque-benchmark-host.example",
+                "--remote-command",
+                "run-long-skillsbench --batch-size 6",
+                "--tunnel-ready-timeout-sec",
+                "2",
+                "--probe-interval-sec",
+                "0.05",
+                "--tunnel-health-interval-sec",
+                "0.05",
+                "--tunnel-reconnect-attempts",
+                "1",
+                "--tunnel-reconnect-ready-timeout-sec",
+                "2",
+                "--run-timeout-sec",
+                "5",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        assert proc.returncode == 0, proc.stderr or proc.stdout
+        payload = json.loads(proc.stdout)
+        assert payload["ok"] is True, payload
+        assert payload["tunnel_ready"] is True, payload
+        assert payload["remote_command_exit_code"] == 0, payload
+        liveness = payload["tunnel_liveness"]
+        assert liveness["state"] == "reconnected", liveness
+        assert liveness["reconnect_attempt_count"] == 1, liveness
+        assert liveness["reconnect_success_count"] == 1, liveness
+        assert liveness["reconnect_failure_count"] == 0, liveness
+        assert liveness["last_probe_status"] == "http_connect_ready", liveness
+        public_text = json.dumps(payload, sort_keys=True)
+        assert "opaque-benchmark-host.example" not in public_text
+        assert "run-long-skillsbench" not in public_text
+        tunnel_launch_count = sum(
+            1
+            for line in ssh_log.read_text(encoding="utf-8").splitlines()
+            if "'-R'" in line
+        )
+        assert tunnel_launch_count == 2, tunnel_launch_count
+
+
+def test_supervisor_fails_after_startup_retry_budget_is_exhausted() -> None:
+    with tempfile.TemporaryDirectory(prefix="skillsbench-tunnel-startup-fail-") as tmp:
+        root = Path(tmp)
+        fake_ssh = root / "ssh"
+        ssh_log = root / "ssh.log"
+        _flaky_fake_ssh(
+            fake_ssh,
+            ssh_log,
+            root,
+            first_tunnel_exits=False,
+            startup_tunnel_exit_count=2,
+            probe_delay_sec=0.1,
+        )
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--ssh-bin",
+                str(fake_ssh),
+                "--ssh-destination",
+                "opaque-benchmark-host.example",
+                "--remote-command",
+                "run-long-skillsbench --batch-size 6",
+                "--tunnel-ready-timeout-sec",
+                "2",
+                "--probe-interval-sec",
+                "0.05",
+                "--tunnel-health-interval-sec",
+                "0.05",
+                "--tunnel-reconnect-attempts",
+                "1",
+                "--tunnel-reconnect-ready-timeout-sec",
+                "2",
+                "--run-timeout-sec",
+                "5",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        assert proc.returncode == 2, proc.stderr or proc.stdout
+        payload = json.loads(proc.stdout)
+        assert payload["ok"] is False, payload
+        assert payload["first_blocker"] == (
+            "reverse_tunnel_process_exited_before_ready"
+        ), payload
+        assert payload["tunnel_ready"] is False, payload
+        liveness = payload["tunnel_liveness"]
+        assert liveness["state"] == "failed", liveness
+        assert liveness["reconnect_attempt_count"] == 1, liveness
+        assert liveness["reconnect_success_count"] == 0, liveness
+        assert liveness["reconnect_failure_count"] == 1, liveness
+        public_text = json.dumps(payload, sort_keys=True)
+        assert "opaque-benchmark-host.example" not in public_text
+        assert "run-long-skillsbench" not in public_text
+        tunnel_launch_count = sum(
+            1
+            for line in ssh_log.read_text(encoding="utf-8").splitlines()
+            if "'-R'" in line
+        )
+        assert tunnel_launch_count == 2, tunnel_launch_count
+
+
+def test_supervisor_preserves_live_tunnel_until_remote_completion() -> None:
+    with tempfile.TemporaryDirectory(prefix="skillsbench-tunnel-preserved-") as tmp:
+        root = Path(tmp)
+        fake_ssh = root / "ssh"
+        ssh_log = root / "ssh.log"
         _flaky_fake_ssh(fake_ssh, ssh_log, root, first_tunnel_exits=False)
 
         proc = subprocess.run(
@@ -323,12 +539,6 @@ def test_supervisor_preserves_live_tunnel_and_fails_closed() -> None:
                 "opaque-benchmark-host.example",
                 "--remote-command",
                 "run-long-skillsbench --batch-size 6",
-                "--remote-public-artifact-root",
-                "/opaque/private/jobs",
-                "--remote-public-artifact-glob",
-                "job/*/benchmark_run.compact.json",
-                "--local-public-artifact-dir",
-                str(synced_dir),
                 "--tunnel-ready-timeout-sec",
                 "2",
                 "--probe-interval-sec",
@@ -348,21 +558,179 @@ def test_supervisor_preserves_live_tunnel_and_fails_closed() -> None:
             check=False,
             timeout=10,
         )
-        assert proc.returncode == 75, proc.stderr or proc.stdout
+        assert proc.returncode == 0, proc.stderr or proc.stdout
         payload = json.loads(proc.stdout)
-        assert payload["first_blocker"] == (
-            "reverse_tunnel_liveness_unrecoverable"
-        ), payload
-        assert payload["tunnel_ready"] is False, payload
+        assert payload["ok"] is True, payload
+        assert payload["remote_command_exit_code"] == 0, payload
+        assert payload["tunnel_ready"] is True, payload
         liveness = payload["tunnel_liveness"]
-        assert liveness["state"] == "failed", liveness
+        assert liveness["state"] == "degraded", liveness
         assert liveness["reconnect_attempt_count"] == 0, liveness
-        assert liveness["last_probe_status"] == (
-            "new_connect_admission_failed_tunnel_preserved"
-        ), liveness
+        assert liveness["health_probe_failure_count"] >= 2, liveness
+        assert liveness["health_probe_inconclusive_count"] >= 1, liveness
+        assert liveness["max_consecutive_failure_count"] == 2, liveness
+        public_liveness = payload["public_liveness"]
+        assert public_liveness["state"] == "succeeded", public_liveness
+        assert public_liveness["terminal"] is True, public_liveness
+        assert public_liveness["process_alive"] is False, public_liveness
+        assert "first_blocker" not in payload, payload
         ssh_log_text = ssh_log.read_text(encoding="utf-8")
         assert ssh_log_text.count("'-R'") == 1, ssh_log_text
         assert "benchmark_remote_public_artifact_collection_v0" not in ssh_log_text
+
+
+def test_supervisor_recovers_managed_local_forward_dependency() -> None:
+    with tempfile.TemporaryDirectory(prefix="skillsbench-local-forward-recovery-") as tmp:
+        root = Path(tmp)
+        fake_ssh = root / "ssh"
+        ssh_log = root / "ssh.log"
+        local_endpoint = root / "managed-local-endpoint"
+        local_generation = root / "local-generation"
+        local_port = _unused_loopback_port()
+        _flaky_fake_ssh(
+            fake_ssh,
+            ssh_log,
+            root,
+            first_tunnel_exits=False,
+            local_dependency_generation_path=local_generation,
+        )
+        _managed_local_endpoint(local_endpoint)
+        managed_command = " ".join(
+            shlex.quote(part)
+            for part in (
+                sys.executable,
+                str(local_endpoint),
+                str(local_port),
+                str(local_generation),
+            )
+        )
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--ssh-bin",
+                str(fake_ssh),
+                "--ssh-destination",
+                "opaque-benchmark-host.example",
+                "--remote-command",
+                "run-long-skillsbench --batch-size 6",
+                "--remote-forward",
+                f"127.0.0.1:18180:127.0.0.1:{local_port}",
+                "--local-forward-managed-command",
+                managed_command,
+                "--local-forward-ready-timeout-sec",
+                "1",
+                "--local-forward-probe-timeout-sec",
+                "0.1",
+                "--local-forward-restart-attempts",
+                "2",
+                "--tunnel-ready-timeout-sec",
+                "2",
+                "--probe-interval-sec",
+                "0.05",
+                "--tunnel-health-interval-sec",
+                "0.05",
+                "--tunnel-health-failure-threshold",
+                "2",
+                "--tunnel-reconnect-attempts",
+                "1",
+                "--run-timeout-sec",
+                "5",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+
+        assert proc.returncode == 0, proc.stderr or proc.stdout
+        payload = json.loads(proc.stdout)
+        assert payload["ok"] is True, payload
+        assert payload["remote_command_exit_code"] == 0, payload
+        dependency = payload["local_forward_dependency"]
+        assert dependency["configured"] is True, dependency
+        assert dependency["state"] == "recovered", dependency
+        assert dependency["start_attempt_count"] == 1, dependency
+        assert dependency["start_success_count"] == 1, dependency
+        assert dependency["restart_attempt_count"] == 1, dependency
+        assert dependency["restart_success_count"] == 1, dependency
+        assert dependency["managed_process_owned"] is True, dependency
+        assert dependency["raw_command_recorded"] is False, dependency
+        assert dependency["raw_output_recorded"] is False, dependency
+        liveness = payload["tunnel_liveness"]
+        assert liveness["health_probe_failure_count"] >= 1, liveness
+        assert liveness["max_consecutive_failure_count"] == 1, liveness
+        assert liveness["reconnect_attempt_count"] == 0, liveness
+        assert int(local_generation.read_text(encoding="utf-8")) == 2
+        public_text = json.dumps(payload, sort_keys=True)
+        assert managed_command not in public_text
+        assert str(local_endpoint) not in public_text
+        assert ssh_log.read_text(encoding="utf-8").count("'-R'") == 1
+
+
+def test_supervisor_fails_before_launch_when_managed_dependency_is_unavailable() -> None:
+    with tempfile.TemporaryDirectory(prefix="skillsbench-local-forward-startup-") as tmp:
+        root = Path(tmp)
+        fake_ssh = root / "ssh"
+        ssh_log = root / "ssh.log"
+        failing_endpoint = root / "private-failing-endpoint-command"
+        failing_endpoint.write_text(
+            "#!/usr/bin/env python3\nraise SystemExit(42)\n",
+            encoding="utf-8",
+        )
+        failing_endpoint.chmod(0o755)
+        _fake_ssh(fake_ssh, ssh_log)
+        local_port = _unused_loopback_port()
+        managed_command = " ".join(
+            shlex.quote(part)
+            for part in (sys.executable, str(failing_endpoint))
+        )
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--ssh-bin",
+                str(fake_ssh),
+                "--ssh-destination",
+                "opaque-benchmark-host.example",
+                "--remote-command",
+                "run-long-skillsbench --batch-size 6",
+                "--remote-forward",
+                f"127.0.0.1:18180:127.0.0.1:{local_port}",
+                "--local-forward-managed-command",
+                managed_command,
+                "--local-forward-ready-timeout-sec",
+                "0.2",
+                "--local-forward-probe-timeout-sec",
+                "0.05",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+
+        assert proc.returncode == 2, proc.stderr or proc.stdout
+        payload = json.loads(proc.stdout)
+        assert payload["first_blocker"] == (
+            "local_forward_dependency_unavailable"
+        ), payload
+        assert payload["tunnel_started"] is False, payload
+        dependency = payload["local_forward_dependency"]
+        assert dependency["state"] == "failed", dependency
+        assert dependency["start_attempt_count"] == 1, dependency
+        assert dependency["start_success_count"] == 0, dependency
+        assert dependency["failure_count"] == 1, dependency
+        assert dependency["raw_command_recorded"] is False, dependency
+        assert dependency["raw_output_recorded"] is False, dependency
+        public_text = json.dumps(payload, sort_keys=True)
+        assert managed_command not in public_text
+        assert str(failing_endpoint) not in public_text
+        assert not ssh_log.exists()
 
 
 def test_supervisor_keeps_running_when_ssh_probe_transport_is_unavailable() -> None:
@@ -916,7 +1284,11 @@ def test_supervisor_holds_json_bridge_and_materializes_remote_client() -> None:
 if __name__ == "__main__":
     test_supervisor_holds_tunnel_and_redacts_private_command()
     test_supervisor_reconnects_after_tunnel_process_exit()
-    test_supervisor_preserves_live_tunnel_and_fails_closed()
+    test_supervisor_retries_tunnel_exit_before_initial_ready()
+    test_supervisor_fails_after_startup_retry_budget_is_exhausted()
+    test_supervisor_preserves_live_tunnel_until_remote_completion()
+    test_supervisor_recovers_managed_local_forward_dependency()
+    test_supervisor_fails_before_launch_when_managed_dependency_is_unavailable()
     test_supervisor_keeps_running_when_ssh_probe_transport_is_unavailable()
     test_supervisor_timeout_does_not_sync_live_artifacts()
     test_liveness_probe_cannot_cross_deadline_and_sync_artifacts()

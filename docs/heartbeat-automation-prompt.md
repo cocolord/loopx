@@ -43,6 +43,12 @@ Do not paste the full lifecycle protocol into the visible goal text, and do not
 use a short goal text such as "advance TODO" as the recurring automation body.
 The short text names the goal; the generated task body enforces quota, gates,
 steering audit, writeback, refresh, and spend accounting.
+
+Ark Managed Agent is not an automation profile. Its integration uses one
+transport-neutral goal prompt and lets the goal runtime own inner iteration;
+see the host integration protocol instead of adapting this recurring
+automation contract.
+
 For Codex App, the generated quota command carries the compact explicit runtime
 profile `--runtime-profile codex_app_heartbeat` (generated commands use the
 equivalent compact alias `--codex-app`). The prompt does not restate the
@@ -293,7 +299,7 @@ if ! command -v loopx >/dev/null 2>&1; then
   fi
 fi
 loopx doctor >/dev/null
-loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id <GOAL_ID> --runtime-profile codex_app_heartbeat
+loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id <GOAL_ID> --runtime-profile codex_app_heartbeat --turn-instance-id "${LOOPX_TURN:?}"
 
 If that preflight still fails, do not do implementation work, adapter work,
 file edits, research, project exploration, or quota spend in this turn. Return
@@ -341,8 +347,8 @@ If the result says should_run=false:
   still read the active state and do exactly one bounded safe-bypass step from
   the Priority Stack, such as read-only steering analysis, documentation, or
   another P0/P1 item that does not depend on that gate. If you do a safe-bypass
-  step, validate it, write back progress/critic/next action, optionally refresh
-  state, append exactly one spend event, and report compactly. If
+  step, validate it, write back progress/critic/next action, refresh accountable
+  progress, append exactly one spend event, and report compactly. If
   `interaction_contract.user_channel.notify=NOTIFY` or
   `user_todo_summary.open_count > 0`, include the projected user actions or
   todos concretely and do not say there is "no new user action". If
@@ -350,18 +356,16 @@ If the result says should_run=false:
   agent todo it can execute next. If no useful
   safe-bypass step exists, report the pending gate compactly instead of doing
   work.
-- If effective_action=monitor_quiet_skip, append at most one no-spend monitor
-  evidence event for this heartbeat:
-
-  loopx --registry "$HOME/.codex/loopx/registry.global.json" quota monitor-poll --goal-id <GOAL_ID> --source heartbeat --execute
-
-  Then rerun quota should-run. If it remains monitor-only after an explicit
-  frontier delta such as watch-lane continuation or no-follow-up, return quiet
+- Give each heartbeat a stable turn id by copying its `<current_time_iso>` into
+  `LOOPX_TURN`; reuse that id for guard retries in the same
+  heartbeat. `quota should-run` commits one idempotent receipt for every turn.
+  If effective_action=monitor_quiet_skip, that same guard idempotently appends
+  the no-spend stall observation and returns the follow-up decision. Do not
+  append a second manual monitor poll. If it remains monitor-only, return quiet
   DONT_NOTIFY: no delivery edits and no spend. Keep the automation active:
-  unchanged monitor-only polls are not self-stop signals. If the next guard
-  reports autonomous_replan_required or another hard
-  replan contract, follow that contract. Do not append more than one monitor
-  poll event for a single heartbeat turn.
+  unchanged monitor-only receipts are not self-stop signals. If the guard
+  reports autonomous_replan_required or another hard replan contract, follow
+  that contract.
 - If waiting_on=external_evidence or state=waiting, and this automation is
   explicitly a monitor, run at most one bounded read-only observation poll using
   project-approved status/log/metric/marker surfaces named in active state,
@@ -407,8 +411,8 @@ If the result says should_run=true:
    mapped_noop_if_unchanged turn. If heartbeat_recommendation says
    recommended_mode=run_first_read_only_map,
    run exactly its command as a real read-only map, not another dry-run, then
-   validate/save the read_only_project_map result, append exactly one heartbeat
-   spend, sync or refresh state if needed, and NOTIFY. If it says
+   validate/save the read_only_project_map result, refresh accountable progress,
+   append exactly one heartbeat spend, sync state if needed, and NOTIFY. If it says
    recommended_mode=mapped_noop_if_unchanged with stop_if_unchanged=true, and
    you find no new user instruction, owner evidence, agent todo, stale source,
    or safe handoff, return quiet `DONT_NOTIFY`: do not run, edit, or spend.
@@ -464,12 +468,17 @@ If the result says should_run=true:
    a successor todo, or include a compact no-follow-up rationale.
    For the full field contract, see `docs/project-agent-todo-contract.md` in
    the LoopX checkout.
-   Graph-on: material refresh must sync configured sinks and verify
-   row/result-id readback before final delivery; unsatisfied means retry or a
-   concrete blocker/successor. Explore Harness stays independent.
-8. After validation and writeback complete, append exactly one spend event
-   before any state-only refresh that might close the active delivery lane.
-   For a minute-based heartbeat, spend one slot:
+8. After validation and other writeback complete, record this turn's accountable
+   delivery before spending:
+
+   loopx refresh-state --goal-id <GOAL_ID> \
+     --classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION> \
+     --delivery-batch-scale multi_surface \
+     --delivery-outcome outcome_progress
+
+   This refresh is the causal delivery record consumed by `quota spend-slot`.
+   A plain state-only refresh is quota-neutral and cannot replace it. Then, for
+   a minute-based heartbeat, spend one slot:
 
    loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute
 
@@ -482,18 +491,13 @@ If the result says should_run=true:
    bounded safe-bypass step, append this same spend event once after
    validation/writeback.
 
-9. If the dashboard or controller needs to see a state-only update after spend,
-   run:
+9. If the dashboard or controller needs a state-only update after
+   spend, run:
 
    loopx refresh-state --goal-id <GOAL_ID>
 
-   If that refresh is recording a validated progress artifact rather than a
-   pure state-only note, include explicit delivery hints:
-
-   loopx refresh-state --goal-id <GOAL_ID> \
-     --classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION> \
-     --delivery-batch-scale multi_surface \
-     --delivery-outcome outcome_progress
+   Do not emit another accountable progress refresh after spend; that would
+   create a new unspent delivery record.
 
 10. Return a compact final report. Use heartbeat NOTIFY only for meaningful
     user visibility, such as a committed artifact, a user gate, a real blocker,
@@ -545,7 +549,8 @@ Task:
 Advance <GOAL_ID> using <ACTIVE_GOAL_STATE_PATH>. Before any delivery work,
 export `$HOME/.local/bin` onto PATH and run `loopx doctor`; if the CLI is
 still unavailable, quietly report that preflight failure and do no work. Then
-run `loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id <GOAL_ID> --runtime-profile codex_app_heartbeat`. If it
+copy this trigger's `<current_time_iso>` into `LOOPX_TURN` and run
+`loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id <GOAL_ID> --runtime-profile codex_app_heartbeat --turn-instance-id "${LOOPX_TURN:?}"`. If it
 returns `should_run=false`, ask about operator gates with NOTIFY using
 `gate_prompt` unless the same unresolved gate was already surfaced recently. If
 the payload says `notify_user_on_open_todo=true`, ask up to three open
@@ -589,28 +594,30 @@ exists: implementation, validation, docs, and state writeback may belong in the
 same batch. Do not stop at the first tiny substep when the validation/writeback
 boundary is already clear. Validate it, write back changed files / validation /
 critic / next action; for non-trivial feature slices, create a successor todo
-or write a compact no-follow-up rationale; append exactly one
+or write a compact no-follow-up rationale; append one accountable
+`refresh-state --delivery-outcome outcome_progress`, then exactly one
 `loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute`
-event after the completed turn and before any state-only refresh that might
-close the active delivery lane. Then refresh state if needed. Use `--slots 1` for minute-based
-heartbeats; for coarser intervals, spend the scheduler minutes consumed by that
-turn.
+event for the completed turn. Only an optional state-only refresh belongs after
+spend. Use `--slots 1` for minute-based heartbeats; for coarser intervals,
+spend the scheduler minutes consumed by that turn.
 ```
 
 ## Agent Checklist
 
 For every automatic heartbeat turn, the agent-facing checklist is:
 
-1. Guard first: `quota should-run`.
+1. Guard first: `quota should-run --turn-instance-id <HEARTBEAT_TURN_ID>` using
+   this trigger's `<current_time_iso>` and reusing it for same-heartbeat retries.
    If `loopx` is not initially on PATH, export `$HOME/.local/bin:$PATH`
    and run the local installer fallback before declaring preflight failure.
 2. If `should_run=false` with `state=operator_gate`, ask the user/controller the
    current gate unless the same unresolved gate was already surfaced recently.
-   If `effective_action=monitor_quiet_skip`, append at most one no-spend
-   `quota monitor-poll --execute` event, rerun the guard, then return quiet
-   `DONT_NOTIFY` if it remains monitor-only. Keep monitor todos visible but do
-   no delivery edits and no spend until material evidence changes or the next
-   guard exposes `autonomous_replan_required` /
+   Every heartbeat guard commits one idempotent receipt. If
+   `effective_action=monitor_quiet_skip`, it also commits the no-spend stall
+   observation and returns the follow-up decision; do not append another manual
+   poll. Return quiet `DONT_NOTIFY` if it remains monitor-only. Keep monitor
+   todos visible but do no delivery edits and no spend until material evidence
+   changes or the guard exposes `autonomous_replan_required` /
    `execution_obligation.must_attempt_work=true`.
 3. If `notify_user_on_open_todo=true`, ask up to three open user todos as a
    blocker-push notification and do not spend quota for that blocker-push turn.
@@ -659,10 +666,10 @@ For every automatic heartbeat turn, the agent-facing checklist is:
 15. Work bounded when `should_run=true`; a coherent implementation/test/doc/state
     batch is preferred over a tiny substep when scope and validation are clear.
 16. Validate before reporting.
-17. Spend exactly once after validation/writeback and before a state-only refresh.
-18. Refresh state when needed after spend; for validated progress artifacts,
-    include explicit delivery scale/outcome hints instead of relying on
-    classification-name inference.
+17. After validation/writeback, refresh accountable progress with explicit
+    delivery scale/outcome hints, then spend exactly once against that record.
+18. Refresh state-only metadata after spend only when needed; never emit another
+    accountable progress refresh after accounting.
 19. Report compactly.
 
 This prompt is intentionally a lifecycle template. Scheduling policy lives in

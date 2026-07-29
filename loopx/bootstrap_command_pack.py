@@ -17,6 +17,7 @@ from .project_prompt import (
     DEFAULT_HANDOFF_ADAPTER_STATUS,
     render_available_capability_args,
     render_quota_guard_command,
+    render_refresh_state_command,
     render_scheduler_execution_args,
     shell_arg,
 )
@@ -36,6 +37,7 @@ GUIDED_COMMAND_PACK_PROJECTION_SCHEMA_VERSION = (
 HOST_SURFACE_SELECTION_SCHEMA_VERSION = "loopx_host_surface_selection_gate_v0"
 START_GOAL_HOST_SURFACES = (
     "codex-app",
+    "codex-app-ssh",
     "codex-ide-plugin",
     "codex-cli-tui",
     "claude-code",
@@ -245,6 +247,7 @@ def build_start_goal_host_surface_selection_packet(
     normalized_goal_text = " ".join(goal_text.split())
     host_descriptions = {
         "codex-app": "Codex desktop app with heartbeat automation support",
+        "codex-app-ssh": "Codex desktop app over SSH with visible /goal support",
         "codex-ide-plugin": "Codex IDE plugin; activate its visible goal mode",
         "codex-cli-tui": "terminal Codex TUI with visible /goal support",
         "claude-code": "Claude Code with native /loop",
@@ -271,7 +274,8 @@ def build_start_goal_host_surface_selection_packet(
             }
         )
     reason = (
-        "host surface is required because Codex App, the Codex IDE plugin, and Codex CLI "
+        "host surface is required because Codex App automation, Codex App over SSH, "
+        "the Codex IDE plugin, and Codex CLI "
         "have different continuation contracts"
     )
     gate = {
@@ -863,7 +867,12 @@ def build_loopx_bootstrap_command_pack(
             "bootstrap_after_user_confirmation": bootstrap_after_confirmation_command,
             "goal_start_connect_if_needed": goal_start_bootstrap_command,
             "goal_start_plan_prompt": goal_start_plan_prompt,
-            "goal_start_refresh_state": f"{shell_arg(cli_bin)} refresh-state --goal-id {shell_arg(resolved_goal_id)}",
+            "goal_start_refresh_state": render_refresh_state_command(
+                resolved_goal_id,
+                cli_bin=cli_bin,
+                agent_id=str(selected_agent_id) if selected_agent_id else None,
+                progress_scope="agent_lane" if selected_agent_id else None,
+            ),
             "goal_start_host_loop_activation": host_loop_activation.get("activation_input_command"),
             "goal_start_agent_onboard_recheck": (
                 f"{shell_arg(cli_bin)} agent-onboard "

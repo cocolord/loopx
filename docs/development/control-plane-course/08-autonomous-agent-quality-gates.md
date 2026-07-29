@@ -1,8 +1,12 @@
 # 第 8 讲：Agent 自主写代码时的分层质量门禁
 
-> 核心问题：当 agent 可以自主修改代码、开 PR 甚至在授权范围内自合并时，怎样让质量门禁既能阻止错误进入主干，又不把每个小改动都拖进最昂贵的验证流程？
+> **本讲结论：** 先用独立 oracle 定义正确语义，再按风险选择 deterministic test、canary、
+> 模型行为验证与 release gate；当前实现输出不能反过来定义正确答案。
 
 建议时长：120 分钟。质量模型 30 分钟、分层门禁 35 分钟、组合案例 35 分钟、实验与 review 20 分钟。
+
+一小时专题[长程任务如何收敛](topic-long-horizon-convergence.md)先解释独立 oracle 为什么是
+防止长程系统自证正确的必要边界；本讲继续展开不同风险 surface 的具体 qualification。
 
 ## 学习目标
 
@@ -14,6 +18,42 @@
 4. 解释为什么常规模型行为测试是 actual-default one-arm，而双臂只服务于明确的差分或提升声明。
 5. 为一次自主交付写出 source、oracle、decision、receipt 和 owner boundary。
 6. 判断测试替身、benchmark 分数和基础设施回执是否保留了真实产品的因果语义。
+
+本讲不要求第一次就读完八个组合案例。建议先完成“独立语义 Oracle”“分层质量地图”与
+“门禁结果状态机”，再按改动 surface 选择案例：control-plane rule 读案例一、二、三、七；
+agent-facing packet 读案例四；文档与社区资源读案例五；release/benchmark 读案例六、八。
+这种选择本身就是 risk-based qualification 的练习。
+
+## 本讲沿三个 Showcase 验证什么
+
+质量门禁不是脱离产品路径的测试清单。三个 Showcase 各自暴露了不同风险：
+
+| Showcase surface | 独立 oracle | 最小确定性证明 | 更高层证明 |
+| --- | --- | --- | --- |
+| PR observation → successor | PR lifecycle transition table | decision unit + focused lifecycle smoke | GitHub readback / exact commit receipt |
+| Fix implementation → delivery | issue acceptance、repository boundary | focused test + diff/workspace scan | PR checks、review outcome |
+| Auto ML candidate → launch | experiment contract、resource/authority boundary | schema + preflight + no-effect preview | exact provider effect/readback receipt |
+| External task → model evidence | revision/window/baseline comparability、failure attribution | result reducer replay + negative cases | matched evaluator/artifact readback |
+| Auto ML evidence → next portfolio | Graph lineage、Harness read-only boundary | result-log + planner gate smoke | repeated portfolio/no-duplicate review |
+| Dev experiment → holdout | metric contract 与 dev/holdout 隔离 | evidence schema + decision replay | protected evaluator run |
+| Holdout → promotion | acceptance、guardrail、boundary policy | promotion/retirement rule test | matched outcome baseline 或 reviewer gate |
+| Agent-facing packet → model action | 独立状态语义与 forbidden outcomes | contract + output budget | actual-default model behavior portfolio |
+
+因此门禁设计应从“哪条因果链可能断掉”出发。Issue-Fix 重点防止错误 successor、错误
+workspace 和旧 commit 回执；Single-Agent Auto ML 重点防止不可比实验、基础设施失败误归因、
+重复候选和越权 launch；Auto Research 重点防止 evaluator 泄漏、dev-only promotion 和无法
+归因的分数。三者共享 Kernel 的 quota、gate、receipt 和 release qualification。
+
+Auto ML 至少需要两组彼此独立的 oracle：
+
+1. **执行 oracle**：候选 identity、code revision、数据窗口、资源与 provider receipt 是否
+   精确匹配，证明这一次外部 effect 确实发生在预期对象上；
+2. **科学 oracle**：matched baseline、primary metric、user/global guardrail 和 failure
+   attribution 是否允许产生 promote/no-promote 结论。
+
+Explore Graph 只能消费第二组 oracle 已接受的 finding；Explore Harness 的 planner smoke
+还要证明它不会 claim、launch、mutate 或 spend。即使 portfolio 排序看起来合理，也不能
+跳过前两组 oracle。
 
 ## 门禁不是“把所有测试都跑一遍”
 
@@ -700,5 +740,6 @@ outcome baseline 可以消费 readiness receipt，但不能反过来用一个分
 6. 为什么旧 commit 的全绿测试不能给新 tag 背书？
 7. 哪些改动允许 agent 自合并，哪些必须留下 manual hold？
 
-下一讲进入扩展层：Explore Graph/Harness、multi-agent kernel、Auto Research、supervisor
-和 connectors 如何复用同一套状态内核与质量门禁，而不是创建第二套控制面。
+下一讲进入扩展层：Explore Graph/Harness、Single-Agent Auto ML、multi-agent kernel、
+Auto Research、supervisor 和 connectors 如何复用同一套状态内核与质量门禁，而不是创建
+第二套控制面。

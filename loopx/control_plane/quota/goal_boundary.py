@@ -72,6 +72,98 @@ def quota_execution_profile_boundary_summary(value: Any) -> dict[str, Any] | Non
     return compact or None
 
 
+def _lark_kanban_post_writeback_projection(
+    goal: Mapping[str, Any],
+    control_plane: Mapping[str, Any],
+    *,
+    registry_path: Path | None,
+) -> dict[str, Any]:
+    lark_kanban = (
+        control_plane.get("lark_kanban")
+        if isinstance(control_plane.get("lark_kanban"), dict)
+        else {}
+    )
+    if lark_kanban.get("heartbeat_sync_enabled") is not True:
+        return {}
+
+    command = ["loopx"]
+    if registry_path is not None:
+        command.extend(["--registry", str(registry_path.expanduser())])
+    command.extend(
+        [
+            "lark-kanban",
+            "sync-loopx-todos",
+            "--goal-id",
+            str(goal.get("id") or goal.get("goal_id") or ""),
+        ]
+    )
+    project = str(goal.get("repo") or "").strip()
+    if project:
+        command.extend(["--project", project])
+    command.append("--execute")
+    return {
+        "post_writeback_actions": [
+            {
+                "action_id": "lark_kanban_sync",
+                "trigger": "material_state_change",
+                "command": shlex.join(command),
+                "failure_policy": "nonblocking_no_p0_preemption",
+            }
+        ]
+    }
+
+
+def _registry_boundary_projection(goal: Mapping[str, Any]) -> dict[str, Any]:
+    boundary: dict[str, Any] = {}
+    adapter_kind, adapter_status = (
+        goal.get("adapter_kind"),
+        goal.get("adapter_status"),
+    )
+    if adapter_kind or adapter_status:
+        boundary["adapter"] = {
+            "kind": adapter_kind,
+            "status": adapter_status,
+        }
+    coordination_value = goal.get("coordination")
+    coordination: dict[str, Any] = (
+        coordination_value if isinstance(coordination_value, dict) else {}
+    )
+    write_scope_value = coordination.get("write_scope")
+    write_scope = write_scope_value if isinstance(write_scope_value, list) else []
+    normalized_write_scope: list[str] = []
+    for value in write_scope:
+        scope = str(value).strip()
+        if scope and scope not in normalized_write_scope:
+            normalized_write_scope.append(scope)
+    boundary_authority = checkpointed_boundary_authority_summary(coordination)
+    if boundary_authority:
+        for scope in normalize_required_write_scopes(
+            boundary_authority.get("active_write_scope")
+        ):
+            if scope not in normalized_write_scope:
+                normalized_write_scope.append(scope)
+        boundary["checkpointed_boundary_authority"] = boundary_authority
+    if normalized_write_scope:
+        boundary["write_scope"] = normalized_write_scope
+    available_capabilities = declared_available_capabilities(goal)
+    if available_capabilities:
+        boundary["available_capabilities"] = available_capabilities
+    requires_approval_value = coordination.get("requires_parent_approval")
+    requires_approval = (
+        requires_approval_value
+        if isinstance(requires_approval_value, list)
+        else []
+    )
+    if requires_approval:
+        boundary["requires_parent_approval"] = [
+            str(value) for value in requires_approval if str(value).strip()
+        ]
+    guards = goal.get("guards") if isinstance(goal.get("guards"), list) else []
+    if guards:
+        boundary["guards"] = [str(value) for value in guards if str(value).strip()]
+    return boundary
+
+
 def goal_boundary(
     goal: dict[str, Any],
     item: dict[str, Any] | None = None,
@@ -81,44 +173,7 @@ def goal_boundary(
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
     reward_memory_experiment_status: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    boundary: dict[str, Any] = {}
-    adapter_kind = goal.get("adapter_kind")
-    adapter_status = goal.get("adapter_status")
-    if adapter_kind or adapter_status:
-        boundary["adapter"] = {
-            "kind": adapter_kind,
-            "status": adapter_status,
-        }
-    coordination = goal.get("coordination") if isinstance(goal.get("coordination"), dict) else {}
-    write_scope = coordination.get("write_scope") if isinstance(coordination.get("write_scope"), list) else []
-    requires_approval = (
-        coordination.get("requires_parent_approval")
-        if isinstance(coordination.get("requires_parent_approval"), list)
-        else []
-    )
-    normalized_write_scope: list[str] = []
-    for value in write_scope:
-        scope = str(value).strip()
-        if scope and scope not in normalized_write_scope:
-            normalized_write_scope.append(scope)
-    boundary_authority = checkpointed_boundary_authority_summary(coordination)
-    if boundary_authority:
-        for scope in normalize_required_write_scopes(boundary_authority.get("active_write_scope")):
-            if scope not in normalized_write_scope:
-                normalized_write_scope.append(scope)
-        boundary["checkpointed_boundary_authority"] = boundary_authority
-    if normalized_write_scope:
-        boundary["write_scope"] = normalized_write_scope
-    available_capabilities = declared_available_capabilities(goal)
-    if available_capabilities:
-        boundary["available_capabilities"] = available_capabilities
-    if requires_approval:
-        boundary["requires_parent_approval"] = [
-            str(value) for value in requires_approval if str(value).strip()
-        ]
-    guards = goal.get("guards") if isinstance(goal.get("guards"), list) else []
-    if guards:
-        boundary["guards"] = [str(value) for value in guards if str(value).strip()]
+    boundary = _registry_boundary_projection(goal)
     control_plane = (
         goal.get("control_plane")
         if isinstance(goal.get("control_plane"), dict)
@@ -190,6 +245,13 @@ def goal_boundary(
                 "local_private_content_returned": False,
             }
         boundary.setdefault("capabilities", {})["lark_event_inbox"] = inbox_capability
+    boundary.update(
+        _lark_kanban_post_writeback_projection(
+            goal,
+            control_plane,
+            registry_path=registry_path,
+        )
+    )
     reward_memory = reward_memory_goal_policy(goal)
     if reward_memory["enabled"] and (
         agent_id is None or agent_id in reward_memory["enabled_agents"]

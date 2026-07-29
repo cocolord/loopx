@@ -1,8 +1,14 @@
 # 第 9 讲：扩展层、Explore 与 Multi-Agent 产品
 
-> 核心问题：如何在不 fork control plane 的前提下，为 LoopX 增加探索、多 agent、supervisor、研究产品和外部连接能力？
+> **本讲结论：** Extension 交付可选 provider、domain facts、capability 或 presentation；
+> 它复用同一份 goal、todo、quota、scheduler、evidence 与 handoff contract，不创建第二个
+> kernel。
 
-建议时长：110 分钟。扩展地图 35 分钟、Explore 30 分钟、Multi-agent/Auto Research 30 分钟、实验 15 分钟。
+建议时长：130 分钟。扩展地图 30 分钟、Explore 30 分钟、Single-Agent Auto ML 25 分钟、
+Multi-agent/Auto Research 30 分钟、实验 15 分钟。
+
+一小时专题[长程任务如何收敛](topic-long-horizon-convergence.md)从“如何退出局部循环”解释
+Graph、Harness 与 Kernel 的关系；本讲继续展开它们的扩展边界和产品组合方式。
 
 ## 学习目标
 
@@ -13,6 +19,30 @@
 3. 解释 Harness 为什么只是 analysis-only planner，而不是执行授权。
 4. 解释 user、preset、kernel 三层 multi-agent minimality。
 5. 判断 supervisor、multi-subagent、reward memory、connector 各自扩展哪个边界。
+6. 区分 Provider 的运行责任与 Extension 的交付生命周期。
+7. 用 Single-Agent Auto ML 解释 Explore Graph、Harness、Domain Pack 与 Kernel 怎样组合。
+
+本讲采用分层阅读：所有开发者先读 Extension Contract、分层原则和 Feature Catalog；
+做探索产品再读 Graph/Harness 与 Single-Agent Auto ML；做 multi-agent 产品再读 Generic
+Kernel 与 Auto Research；只有接入对应 surface 时，才需要继续读 Supervisor、Reward
+Memory 或 Lark Event Inbox。
+
+## 从 Auto Research 反推 Extension Contract
+
+第 0 讲把 Auto Research 当作产品 Showcase；本讲把它拆成一个可复用 extension：
+
+| Surface | Auto Research 提供 | 继续由通用层拥有 |
+| --- | --- | --- |
+| User entry | open question、少量 preset 选项 | goal identity、preview/execute boundary |
+| Provider | evaluator、artifact source 与可选 sink 的 observation/readback | transition 与 goal lifecycle |
+| Capability Pack | role defaults、evidence adapter、decision candidates | todo/gate/quota/handoff/terminal semantics |
+| Domain State | hypothesis、experiment、dev/holdout evidence | claim、permission、scheduler、spend |
+| Host integration | visible worker panes、isolated executor turn | session lifecycle、workspace guard、effect receipt |
+| Projection | evidence graph、research frontier、showcase | canonical state 与 transition authority |
+
+如果一个新 extension 能按这五行回答，通常不需要复制 runner。若它必须自己维护 agent
+身份、runnable queue、retry、gate、completion 和 cadence，它已经不是薄 capability，而是
+第二个 control plane。
 
 ## 扩展层的总原则
 
@@ -30,7 +60,7 @@ LoopX 扩展不应创建第二套：
 一个扩展应该提供：
 
 ```text
-domain evidence / role defaults / host capability / presentation sink
+provider implementation / domain evidence / role defaults / presentation sink
 ```
 
 然后复用：
@@ -39,17 +69,24 @@ domain evidence / role defaults / host capability / presentation sink
 registry -> status -> quota -> interaction contract -> todo/evidence -> refresh/spend
 ```
 
-## Kernel、Capability Pack 与 Domain State
+## 运行责任与扩展交付
 
-扩展层由三类责任组成，它们共享同一个 control plane：
+Extension 是安装、启停、升级和分发边界，不是运行时的第五个 owner。运行时仍按四种责任
+分工：
 
-| 层 | Owns | Must not own |
+| 角色 | Owns | Must not own |
 | --- | --- | --- |
-| Kernel | vision、goal、todo、gate、quota、scheduler、evidence、handoff | Issue-Fix/Explore/ML 的专用判断 |
-| Capability Pack | 领域 route、validator、compact adapter、preset | 绕过 Kernel 的 permission 或 lifecycle |
-| Domain State | feasibility、PR lifecycle、experiment result、checkpoint 等紧凑事实 | claim、quota、gate、host effect authority |
+| Agent | 通过 host/runtime 完成方案、分析、工具与一次有界执行 | durable lifecycle 或未授权 effect |
+| Provider | 外部调用、observation、effect result 与 readback | transition policy 或 todo state |
+| Capability Pack | 领域 route、归一化、validator、typed transition 与 preset | 绕过 Kernel 的 permission 或 lifecycle |
+| Kernel | vision、goal、todo、gate、monitor、quota、writeback、scheduler、evidence、handoff | Issue-Fix/Explore/ML 的专用判断 |
 
-这套分层让领域能力增加专属事实，同时复用 Kernel 的权限和生命周期模型。
+Domain State 保存 feasibility、PR lifecycle、experiment result、checkpoint 等紧凑连续性，
+但它是 Capability 与 Kernel 使用的工件，不是另一个 actor。Extension 可以交付 Provider，
+也可以只携带自己的 command 或 presentation；只有调用者需要稳定、provider-neutral 的结果
+合同时，才新增公共 Capability。
+
+这套分工让领域能力增加专属事实，同时复用 Kernel 的权限和生命周期模型。
 当前 Issue-Fix pack 直接复用通用 Domain State seam：
 
 ```python
@@ -329,6 +366,152 @@ Router state 由 runner 在 epoch boundary 持久化。Harness 仍然只生成�
 
 两者独立是重要安全边界：presentation 需要图，不应顺带允许更多 agent；分析 branch，不应自动写图或外部 sink。
 
+## Single-Agent Auto ML：Graph、Harness 与 Domain Pack 怎样合起来
+
+Single-Agent Auto ML 不是缩小版 Auto Research。它只有一个长期 agent lane，却要同时处理：
+
+- 候选实现与代码 revision；
+- 训练/评估 provider 的异步 task；
+- short/long 等资源容量；
+- matched baseline、数据窗口、primary metric 与 guardrail；
+- 模型失败、基础设施失败和不可比结果的归因；
+- promote、no-promote、retry、repair 与下一批探索。
+
+这类系统的稳定性来自四个彼此独立的合同：
+
+| 合同 | 负责什么 | 在当前公开实现中的位置 |
+| --- | --- | --- |
+| ML Experiment Domain Pack | metric/window/result/hypothesis/replan 的 typed advisory contract | `loopx/domain_packs/ml_experiment.py` |
+| Explore Graph | 持久化 hypothesis、experiment、finding 与 evidence edge | `loopx/capabilities/explore/result_log.py` |
+| Explore Harness | 基于 todo、Graph refs、scope、expected evidence 和 resource capacity 规划 portfolio | `loopx/capabilities/explore/worker_branch_plan.py` |
+| Kernel | todo、claim、defer/resume、monitor、quota、gate、writeback、spend、scheduler | `loopx/control_plane/` 与 quota/status 入口 |
+
+当前公开 ML Experiment pack 默认是 `suggest_only`，preview 明确返回
+`launch_actions_enabled=false` 和 `production_actions_enabled=false`。真实 launch/poll/readback
+由获得显式 goal boundary 与 effect authority 的 provider/extension 实现；课程案例不把任何
+特定训练平台的 adapter 误写成 Kernel 能力。
+
+### 一条端到端控制链
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as Single Agent
+  participant H as Explore Harness
+  participant K as Kernel
+  participant P as Experiment Provider
+  participant V as Validator
+  participant G as Explore Graph
+
+  A->>H: todos + graph refs + resource snapshot
+  H-->>A: analysis-only portfolio + hazards
+  A->>K: claim one candidate todo
+  K-->>A: bounded delivery contract
+  A->>P: authorized launch request + exact revision/window
+  P-->>A: effect receipt + observable task handle
+  A->>K: validated launch writeback
+  K->>K: launch todo -> continuous monitor
+  K-->>A: due monitor contract
+  A->>P: one bounded poll
+  P-->>A: terminal readback + compact artifacts
+  A->>V: matched result request
+  V-->>K: promote / no-promote / retry / repair proposal
+  K->>G: append accepted finding + lineage
+  G-->>A: updated evidence topology + refs
+```
+
+图中 `K->>G` 表示 material refresh 后追加已接受的 public-safe evidence，不表示 Kernel
+把所有私有结果复制到 Graph。原始日志、凭据、内部 URL 和本机路径继续留在 provider
+边界；Graph 只保存稳定 alias、结果分类和 typed relation。
+
+### Harness 如何在单 Agent 场景发挥价值
+
+单 Agent 不需要 Harness 启动 child。它最有价值的模式恰好是 `analysis_only`：
+
+```text
+candidate todos
+  + Graph 中的 supports/refutes/depends_on
+  + near-neighbor exclusions
+  + required capabilities/write scopes
+  + resource capacity and active usage
+  -> ranked portfolio + blocked reasons + expected evidence
+```
+
+例如两个短实验槽已经占满时，Harness 可以继续比较下一批候选，却不能 claim 或 launch。
+Kernel 把候选保留为 `deferred`，用 `resume_when=capacity_available:<lane>` 等待权威容量
+readback。一个 external task 进入运行态后，普通 `continuous_monitor` 负责按 cadence
+观察；monitor 本身不被误算为新的实验槽或新候选。
+
+Harness 输出的三个层次也要区分：
+
+| 输出 | 含义 | 后续 |
+| --- | --- | --- |
+| rank / expected evidence | 候选价值的 advisory estimate | Agent 可用于解释选择 |
+| hazard / blocked reason | scope、capability、capacity 或 evidence 缺口 | Kernel todo/gate/defer 承接 |
+| suggested command | 满足同一 goal boundary 时可显示的下一步命令 | 仍需普通 claim/lease/quota 执行 |
+
+### Graph 如何让负向实验产生长期价值
+
+只记录“当前最好分数”会让 Agent 重复尝试已失败的近邻方案。Explore Graph 应同时保留：
+
+```text
+hypothesis --leads_to--> experiment
+experiment --supports/refutes--> finding
+finding --depends_on--> matched contract
+negative finding --rules_out--> near-neighbor family
+diagnostic finding --depends_on--> provider/runtime condition
+```
+
+Comparable no-promote 是模型证据，可以收缩候选空间；infra failure 是诊断证据，只能形成
+repair/retry，不应 `refutes` 模型假设。Harness 下一轮消费这些边界后，才能减少重复试验，
+把资源留给真正增加信息量的候选。
+
+### Promotion、Reward Memory 与系统能力演进
+
+Graph finding 和 Harness ranking 都不是 promotion authority。Promotion 至少需要：
+
+```text
+exact candidate/revision/window
++ matched baseline
++ primary metric and guardrails
++ independent result attribution
++ applicable owner/release gate
++ activation readback and rollback path
+```
+
+Reward Memory 可以在相同 scope 内提示“某类方案过去常因哪个 guardrail 失败”或“评审者偏好
+哪种证据表达”，但必须让当前 Graph/source state 胜出。它不能把旧 reward 变成 task
+readback，也不能扩大 launch 或 promotion 权限。
+
+若实验暴露的是系统能力缺口，例如需要新 reader、feature operator 或 evaluator，下一步
+应创建独立 capability todo，通过代码验证、兼容性检查、版本化离线/在线 artifact、
+release gate 与 rollback 后再激活。实验 todo 不能顺手改写并发布运行系统。这是
+“算法路线 replan”和“系统能力演进”共享证据、分开 authority 的关键。
+
+### Public-safe 最小实验
+
+先运行默认关闭的 advisory preview：
+
+```bash
+loopx ml-experiment preview --format json \
+  --experiment-id exp_preview_v1 \
+  --primary-metric offline_metric \
+  --baseline-value 0.421 \
+  --candidate-value 0.437 \
+  --guardrail-status clean \
+  --train-window train_window_v1 \
+  --eval-window eval_window_v1 \
+  --hypothesis-id h_route_mix_v1 \
+  --mechanism-family "candidate route mix" \
+  --route route_mix \
+  --positive-evidence offline_eval_delta_positive \
+  --next-candidate holdout_eval
+```
+
+验证 packet 没有 launch/production authority。再对一个临时 goal preview Graph on 与 Harness
+analysis-only，确认 planner boundary 中 `writes_state`、`claims_todos`、`acquires_leases`、
+`starts_agents` 和 `changes_quota` 均为 false。这个实验验证组合边界，不需要真实训练任务。
+
 ## Generic Multi-Agent Kernel
 
 LoopX 的 multi-agent 产品采用三层 minimality：
@@ -450,7 +633,21 @@ loopx configure-goal \
 
 ## Reward Memory
 
-Reward memory 是 per-agent、default-off 的实验能力，目标是保存 compact experience/reward record，支持后续检索。
+Reward memory 是 per-agent、default-off 的实验能力，目标是让经过验证的人类评价和工程经验
+在后续 run 中被作用域化复用。它不是 LoopX canonical state 的替代品，也不是把聊天记录长期
+注入模型。
+
+| Memory class | 与 LoopX 当前状态的关系 | 允许产生的影响 |
+| --- | --- | --- |
+| `working_context` | 复用 registry、todo/quota、checkout 等 fresh context | 只服务当前执行或 session continuation |
+| `run_bound_reward` | 绑定 exact goal/run 的评价 overlay | 作为候选证据，不直接改变 action set |
+| `soft_preference` | 经 review 的 project/surface 偏好 | advisory ranking 或 rewrite |
+| `procedural_experience` | 带 revision、provenance 和适用范围的经验 | 经当前 artifact 验证后影响诊断或验证计划 |
+| `hard_policy` | 策略内容与独立验证的 authority scope 绑定 | 仅在已有 authority 范围内约束或否决 |
+
+这里最重要的分离是：memory 可以影响模型怎样选择合法动作，不能决定哪些动作原本合法。
+Gate/authority 先给出 action set，fresh state 给出当前事实，Reward Memory 再在匹配 scope 内
+提供偏好或经验。Application receipt 记录哪条记忆被怎样使用，但不能冒充 delivery receipt。
 
 安全边界：
 
@@ -522,7 +719,7 @@ loopx --format json explore worker-branch-plan \
 
 验证 disabled packet 是否说明 `required_contract`，且没有 claim/lease/launch side effect。
 
-## 核心代码领读：Explore Graph、Harness 与 Auto Research 怎样复用 kernel
+## 核心代码领读：Explore、Auto ML 与 Auto Research 怎样复用 kernel
 
 扩展层最重要的判断不是“功能多不多”，而是它有没有重新发明 todo、quota、lease、scheduler 或 evidence。下面沿真实配置与执行边界读。
 
@@ -663,7 +860,23 @@ def append_explore_result_event(path, event):
 
 `sync_explore_graph_after_material_refresh` 只在 material refresh 后把 result log 投影为 canonical graph/sink；它仍必须服从 external sink authority 和 readback postcondition。Graph 是观察/决策辅助层，不转移 quota、promotion 或 launch authority。
 
-### 5. Auto Research 是薄 preset，不是第二个 kernel
+### 5. ML Experiment Pack 只做领域判断
+
+`loopx/domain_packs/ml_experiment.py` 的 advisory builder 生成 typed result、dataset window、
+hypothesis ledger 与 replan preview。默认 packet 同时写明：
+
+```text
+pack.enabled = false
+pack.autonomy = suggest_only
+launch_actions_enabled = false
+production_actions_enabled = false
+```
+
+这使 Graph/Harness 可以消费 compact candidate evidence，又不会让识别出 ML 项目的普通 goal
+静默获得训练或生产 effect。项目 provider 要增加 delivery authority，仍须经过 registry
+goal boundary、quota、preflight、effect receipt 与 writeback。
+
+### 6. Auto Research 是薄 preset，不是第二个 kernel
 
 `loopx/capabilities/auto_research/preset.py` 公开地限定了 line-count claim：
 
@@ -703,7 +916,7 @@ return {
 
 Preset 拥有 research roles、handoff hints、metric hints 和 domain defaults；共享 multi-agent kernel 拥有 process launch、fixed wake prompt、pane-local quota tick、todo/evidence/status 与 artifact routing。
 
-### 6. 两个功能怎样开启
+### 7. 两个 Explore 功能怎样开启
 
 Explore Graph 与 Explore Harness 可独立开启。推荐先 preview：
 
@@ -725,7 +938,7 @@ explore_harness.enabled=true
 
 否则它仍会停在 `analysis_only`。开启 Graph 不会自动开启 Harness，开启 Harness 也不会自动授权 external sink 或 worker launch。
 
-### 7. 一条 extension 的最小审查路径
+### 8. 一条 extension 的最小审查路径
 
 ```text
 configure preview
@@ -746,26 +959,32 @@ configure preview
 - `resolve_explore_harness_gate:83`：disabled/analysis/commands 三态；
 - `build_explore_worker_branch_plan:871`：gate 如何限制 width 与 commands；
 - `append_explore_result_events:517`：幂等与冲突；
+- `build_ml_experiment_advisory_packet:655`：default-off advisory 与 effect authority 的边界；
 - `build_auto_research_preset_role:99`：preset domain 与 kernel mechanics 的边界。
 
-读完应能回答：Graph 和 Harness 为什么独立、analysis-only 有什么价值、planner 为什么不能 launch、Auto Research 的“四行配置”没有计算哪些 kernel 代码、supervisor 为什么不能借扩展层获得 durable leader authority。
+读完应能回答：Graph 和 Harness 为什么独立、analysis-only 如何帮助单 Agent 管理昂贵
+实验、ML pack 为什么不带 launch authority、Auto Research 的“四行配置”没有计算哪些
+kernel 代码、supervisor 为什么不能借扩展层获得 durable leader authority。
 
 ## 代码阅读路线
 
 1. `loopx/configure_goal.py` 和配置 catalog
 2. `docs/capabilities/explore/README.md`
 3. `loopx/capabilities/explore/`
-4. `docs/reference/protocols/multi-agent-three-layer-minimality-v0.md`
-5. `loopx/control_plane/agents/multi_agent/`
-6. `docs/guides/auto-research-command-path.md`
-7. `loopx/capabilities/auto_research/preset.py`
-8. `docs/reference/protocols/peer-supervisor-v0.md`
+4. `docs/product/domain-capability-packs.md`
+5. `loopx/domain_packs/ml_experiment.py`
+6. `docs/reference/protocols/multi-agent-three-layer-minimality-v0.md`
+7. `loopx/control_plane/agents/multi_agent/`
+8. `docs/guides/auto-research-command-path.md`
+9. `loopx/capabilities/auto_research/preset.py`
+10. `docs/reference/protocols/peer-supervisor-v0.md`
 
 ## 代表性 Smoke
 
 - `examples/project/configure-goal-smoke.py`
 - `examples/explore-configure-goal-smoke.py`
 - `examples/explore-worker-plan-gate-smoke.py`
+- `examples/ml-experiment-domain-pack-smoke.py`
 - `examples/auto-research-layered-e2e-acceptance-smoke.py`
 - `examples/control_plane/peer-supervisor-smoke.py`
 - `examples/showcase-catalog-smoke.py`

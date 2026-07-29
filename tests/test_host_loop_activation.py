@@ -47,7 +47,9 @@ def test_codex_ide_plugin_is_an_exact_host_type_with_visible_goal_activation() -
 @pytest.mark.parametrize(
     ("agent_type", "runtime_profile"),
     (
+        ("ark-managed-agent", "ark_managed_agent_goal"),
         ("codex-app", "codex_app_heartbeat"),
+        ("codex-app-ssh", "codex_app_ssh_goal"),
         ("codex-cli", "codex_cli"),
         ("codex-ide-plugin", "codex_cli"),
         ("claude-code", "claude_code"),
@@ -61,6 +63,25 @@ def test_first_class_hosts_bind_one_runtime_profile(
     assert scheduler_command_binding_for_agent_type(agent_type) == {
         "runtime_profile": runtime_profile
     }
+
+
+@pytest.mark.parametrize(
+    "runtime_profile",
+    ("ark_managed_agent_goal", "codex_app_ssh_goal"),
+)
+def test_goal_hosts_attribute_spend_to_current_progress_refresh(
+    runtime_profile: str,
+) -> None:
+    payload = build_heartbeat_prompt(
+        goal_id="goal-spend-attribution-fixture",
+        thin=True,
+        runtime_profile=runtime_profile,
+    )
+    task_body = payload["task_body"]
+    refresh_command = f"`{payload['progress_refresh_state_command']}`"
+    spend_command = f"`{payload['quota_spend_command']}`"
+
+    assert task_body.index(refresh_command) < task_body.index(spend_command)
 
 
 def test_codex_app_activation_uses_narrow_runtime_profile() -> None:
@@ -116,4 +137,9 @@ def test_ambiguous_codex_requires_app_ide_or_cli_selection() -> None:
     with pytest.raises(AgentTypeError) as caught:
         normalize_agent_type("codex")
 
-    assert caught.value.suggestions == ["codex-app", "codex-ide-plugin", "codex-cli"]
+    assert caught.value.suggestions == [
+        "codex-app",
+        "codex-app-ssh",
+        "codex-ide-plugin",
+        "codex-cli",
+    ]

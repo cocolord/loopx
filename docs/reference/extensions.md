@@ -21,6 +21,54 @@ LoopX Core
       `-- extension C -- remains disabled
 ```
 
+## Runtime Responsibilities
+
+Capability and extension are code and delivery boundaries. At runtime, keep
+four responsibilities distinct:
+
+| Responsibility | Contract |
+| --- | --- |
+| Agent | Plans and performs one bounded action through a host/runtime and an available capability. |
+| Provider | Calls an external system and returns a bounded observation, effect result, or readback. |
+| Capability | Normalizes provider output, applies domain policy and validation, and proposes a finite transition. |
+| LoopX Kernel | Accepts or rejects that proposal and owns durable todo, gate, monitor, writeback, quota, recovery, and scheduling state. |
+
+The normal flow is:
+
+```text
+Agent -> Capability -> Provider -> external system
+Provider readback -> Capability transition proposal -> LoopX Kernel
+```
+
+`Provider` is an implementation role. When it implements a LoopX capability,
+it is registered under that capability; a standalone extension provider may
+instead expose only its own bounded command. A provider may be built into LoopX
+or delivered by an extension. `Extension` is not a fifth runtime role: it owns
+provider packaging, installation, enablement, upgrade, and compatibility
+lifecycle. It does not own domain transition policy or goal state. Domain state
+and receipts are data crossing these boundaries, not independent actors.
+
+## Repository Layout
+
+The repository uses one path for each ownership boundary:
+
+```text
+loopx/capabilities/<capability>/   caller-facing contracts and core providers
+loopx/extensions/                  extension lifecycle and bundled providers
+packages/<package-id>/             independently installable distributions
+```
+
+`loopx/extensions/` is a Python package shipped in the LoopX wheel.
+`packages/` is a monorepo package root; its children have their own packaging
+metadata and do not become part of the LoopX wheel. There is intentionally no
+repository-root `extensions/` directory. That duplicate name obscured whether a
+path represented importable LoopX code or a separately installable artifact.
+
+The layout does not merge capabilities and extensions. They remain separate
+axes and compose through the capability/provider registry: a capability names
+the stable outcome contract, while an extension owns provider delivery and
+lifecycle.
+
 ## Registration Model
 
 Every registered capability declares three provider-facing fields:
@@ -66,12 +114,23 @@ loopx extension init loopx-example --format json
 loopx extension init loopx-example --execute --format json
 ```
 
-The default destination is `extensions/<extension-id>`. Use `--destination`
+The default destination is `packages/<extension-id>`. Use `--destination`
 when the provider is developed in another package or repository. The scaffold
 creates an independently installable Python package, declarative manifest,
-JSON stdin/stdout provider, side-effect-free doctor, example request, and a
-short README. It does not register a capability because a standalone extension
-does not need one.
+JSON stdin/stdout provider, versioned request and response JSON Schemas,
+side-effect-free doctor, example request, and a short README. The generated
+provider rejects missing, mismatched, or structurally invalid request contracts
+before doing work. The init receipt explicitly identifies the starter as
+`standalone` and names `loopx extension run` as its managed entrypoint.
+
+`extension init` intentionally does not register a capability. It currently
+generates only the complete standalone path. A `[[provides]]` extension needs a
+real caller contract and command, while an `[[implements]]` extension needs an
+existing capability-specific resolver, policy check, action/scope mapping, and
+execution-envelope adapter. A generic scaffold cannot infer those authority
+semantics safely. Add a capability integration profile first, then scaffold or
+author the provider against that profile; do not add manifest tables that are
+discoverable but not callable.
 
 The command refuses every existing destination, including an empty directory;
 there is no force or merge mode. It also does not build, install, register, or
@@ -84,13 +143,13 @@ the package into a different environment correctly fails with
 `entrypoint_missing`.
 
 ```bash
-python3 -m pip install extensions/loopx-example
+python3 -m pip install packages/loopx-example
 loopx extension install \
-  --manifest extensions/loopx-example/extension.toml \
+  --manifest packages/loopx-example/extension.toml \
   --execute \
   --format json
 loopx extension run loopx-example \
-  --input-json extensions/loopx-example/examples/request.json \
+  --input-json packages/loopx-example/examples/request.json \
   --execute \
   --format json
 ```
@@ -242,7 +301,7 @@ Use this placement map after answering the questions:
 | Existing built-in capability behavior | `loopx/capabilities/<capability-id>/` |
 | Built-in catalog and registration contract | `loopx/capabilities/catalog.py` or `registry.py` |
 | Generic extension runtime | `loopx/extensions/` |
-| Co-located optional extension/provider | `extensions/<extension-id>/` |
+| Co-located optional extension distribution | `packages/<package-id>/` |
 | Separately distributed extension/provider | owner package or repository |
 | Internal implementation helper | nearest owning module |
 
@@ -351,7 +410,7 @@ facts do not belong in the generic extension manifest or lifecycle state.
 
 ### Finance value-discovery sample
 
-`extensions/loopx-finance-value-discovery/` is a co-located, independently
+`packages/loopx-finance-value-discovery/` is a co-located, independently
 packaged standalone workflow. Its manifest registers only the
 `finance_value_discovery_extension_v0` runtime; it does not create a capability
 catalog entry or a `value-connectors` route. After an explicit install and
@@ -359,10 +418,10 @@ successful doctor probe, invoke it through the managed extension command:
 
 ```bash
 loopx extension install \
-  --manifest extensions/loopx-finance-value-discovery/extension.toml \
+  --manifest packages/loopx-finance-value-discovery/extension.toml \
   --execute
 loopx extension run loopx-finance-value-discovery \
-  --input-json extensions/loopx-finance-value-discovery/examples/paypal-debeta-discovery.json \
+  --input-json packages/loopx-finance-value-discovery/examples/paypal-debeta-discovery.json \
   --execute \
   --format json
 ```

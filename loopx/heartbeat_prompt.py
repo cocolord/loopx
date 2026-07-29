@@ -4,14 +4,27 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from .ark_managed_agent_host import build_ark_managed_agent_host_contract
 from .agent_registry import normalize_registered_agents
 from .project_prompt import (
+    render_accountable_progress_refresh_command,
     render_available_capability_args,
     render_cli_preflight,
     render_quota_guard_command,
     render_quota_spend_command,
     render_refresh_state_command,
     render_scheduler_execution_args,
+)
+from .control_plane.scheduler.execution_context import (
+    ExecutionMode,
+    HostSurface,
+    SchedulerOwner,
+    SchedulerRuntimeProfile,
+    resolve_scheduler_execution_context,
+)
+from .control_plane.quota.spend_sources import (
+    DEFAULT_SLOT_SPEND_SOURCE,
+    VISIBLE_GOAL_SLOT_SPEND_SOURCE,
 )
 from .control_plane.todos.contract import (
     normalize_required_capabilities,
@@ -47,22 +60,69 @@ SCHEDULER_HINT_THIN_RULE = (
 RUNTIME_CAPABILITY_PROJECTION_THIN_RULE = (
     "Observed capabilities -> `--available-capability`; never user gates."
 )
-EXPLORE_GRAPH_DELIVERY_RULE = (
-    "Graph-on: material refresh must sync configured sinks and verify "
-    "row/result-id readback before final delivery; unsatisfied -> retry or "
-    "blocker/successor. Explore Harness stays independent."
-)
-EXPLORE_GRAPH_DELIVERY_THIN_RULE = (
-    "Graph-on: sync sinks; verify row/result-id readback before delivery; "
-    "else retry/blocker/successor. "
-    "Explore Harness independent."
-)
 INTERFACE_BUDGET_CHARS = {
     "full": 12_000,
     "compact": 6_200,
     "brief": 3_500,
     "thin": 1_570,
+    "visible_goal": 4_000,
 }
+CODEX_VISIBLE_GOAL_MAX_CHARS = INTERFACE_BUDGET_CHARS["visible_goal"]
+ARK_MANAGED_AGENT_GOAL_MAX_CHARS = CODEX_VISIBLE_GOAL_MAX_CHARS
+
+
+def uses_visible_goal_host_loop(
+    *,
+    runtime_profile: str | None,
+    scheduler_execution_context: dict[str, Any] | None,
+) -> bool:
+    if runtime_profile:
+        try:
+            profile = SchedulerRuntimeProfile(runtime_profile)
+        except ValueError:
+            return False
+        return profile in {
+            SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL,
+            SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE,
+            SchedulerRuntimeProfile.CODEX_CLI_VISIBLE,
+        }
+    if scheduler_execution_context is None:
+        return False
+    resolution = resolve_scheduler_execution_context(scheduler_execution_context)
+    if not resolution.ok or resolution.context is None:
+        return False
+    context = resolution.context
+    if context.execution_mode is not ExecutionMode.INTERACTIVE:
+        return False
+    if context.host_surface is HostSurface.ARK_MANAGED_AGENT:
+        return context.scheduler_owner is SchedulerOwner.GOAL_RUNTIME
+    return (
+        context.host_surface in {HostSurface.CODEX_APP_SSH, HostSurface.CODEX_CLI}
+        and context.scheduler_owner is SchedulerOwner.AGENT_CLI_LOOP
+    )
+
+
+def uses_ark_managed_agent_goal_host(
+    *,
+    runtime_profile: str | None,
+    scheduler_execution_context: dict[str, Any] | None,
+) -> bool:
+    if runtime_profile:
+        try:
+            return (
+                SchedulerRuntimeProfile(runtime_profile)
+                is SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL
+            )
+        except ValueError:
+            return False
+    if scheduler_execution_context is None:
+        return False
+    resolution = resolve_scheduler_execution_context(scheduler_execution_context)
+    return bool(
+        resolution.ok
+        and resolution.context is not None
+        and resolution.context.host_surface is HostSurface.ARK_MANAGED_AGENT
+    )
 
 
 def heartbeat_prompt_mode(
@@ -260,8 +320,13 @@ def build_interface_budget(
     compact: bool = False,
     brief: bool = False,
     thin: bool = False,
+    visible_goal: bool = False,
 ) -> dict[str, Any]:
-    mode = heartbeat_prompt_mode(full=full, compact=compact, brief=brief, thin=thin)
+    mode = (
+        "visible_goal"
+        if visible_goal
+        else heartbeat_prompt_mode(full=full, compact=compact, brief=brief, thin=thin)
+    )
     budget_text = prompt_budget_text(task_body, goal_id=goal_id, active_state=active_state)
     budget_chars = len(budget_text)
     max_chars = INTERFACE_BUDGET_CHARS[mode]
@@ -298,6 +363,14 @@ def build_heartbeat_prompt(
 ) -> dict[str, Any]:
     if not (full or compact or brief or thin):
         thin = True
+    visible_goal = uses_visible_goal_host_loop(
+        runtime_profile=runtime_profile,
+        scheduler_execution_context=scheduler_execution_context,
+    )
+    ark_managed_agent_goal = uses_ark_managed_agent_goal_host(
+        runtime_profile=runtime_profile,
+        scheduler_execution_context=scheduler_execution_context,
+    )
     effective_resolved_active_state = resolved_active_state or active_state
     active_state_text = str(active_state.expanduser()) if active_state else "the registry-declared active state"
     if active_state:
@@ -365,10 +438,15 @@ def build_heartbeat_prompt(
         available_capabilities=normalized_available_capabilities,
         runtime_profile=runtime_profile,
         scheduler_execution_context=scheduler_execution_context,
+        heartbeat_turn_receipt=not visible_goal,
     )
     quota_spend_command = render_quota_spend_command(
         goal_id,
-        source="heartbeat",
+        source=(
+            VISIBLE_GOAL_SLOT_SPEND_SOURCE
+            if visible_goal
+            else DEFAULT_SLOT_SPEND_SOURCE
+        ),
         cli_bin=cli_bin,
         agent_id=normalized_agent_id,
         available_capabilities=normalized_available_capabilities,
@@ -378,15 +456,19 @@ def build_heartbeat_prompt(
         cli_bin=cli_bin,
         agent_id=normalized_agent_id,
     )
-    progress_refresh_state_command = render_refresh_state_command(
+    progress_refresh_state_command = render_accountable_progress_refresh_command(
         goal_id,
         cli_bin=cli_bin,
         agent_id=normalized_agent_id,
-        classification="<PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
-        delivery_batch_scale="multi_surface",
-        delivery_outcome="outcome_progress",
     )
     cli_preflight = render_cli_preflight(cli_bin=cli_bin)
+    pr_review_pre_quota_command = (
+        f"{cli_bin} heartbeat-prequota -g {shlex.quote(goal_id)} "
+        f"-a {shlex.quote(normalized_agent_id)}"
+        if normalized_agent_id
+        and "external_evidence_poll" in normalized_available_capabilities
+        else ""
+    )
     scheduler_args = render_scheduler_execution_args(
         runtime_profile=runtime_profile,
         scheduler_execution_context=scheduler_execution_context,
@@ -395,7 +477,11 @@ def build_heartbeat_prompt(
     compact_prompt_command = f"{cli_bin} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
     brief_prompt_command = f"{cli_bin} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
     thin_prompt_command = f"{cli_bin} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
-    if thin:
+    if ark_managed_agent_goal:
+        task_body_renderer = render_ark_managed_agent_goal_task_body
+    elif visible_goal:
+        task_body_renderer = render_visible_goal_task_body
+    elif thin:
         task_body_renderer = render_thin_heartbeat_task_body
     elif brief:
         task_body_renderer = render_brief_heartbeat_task_body
@@ -407,6 +493,7 @@ def build_heartbeat_prompt(
         goal_id=goal_id,
         active_state=active_state_text,
         cli_preflight=cli_preflight,
+        pr_review_pre_quota_command=pr_review_pre_quota_command,
         quota_guard_command=quota_guard_command,
         quota_spend_command=quota_spend_command,
         refresh_state_command=refresh_state_command,
@@ -420,6 +507,19 @@ def build_heartbeat_prompt(
         brief_prompt_command=brief_prompt_command,
         thin_prompt_command=thin_prompt_command,
     )
+    if visible_goal and len(task_body) > CODEX_VISIBLE_GOAL_MAX_CHARS:
+        raise ValueError(
+            "generated visible /goal task body exceeds the Codex 4000-character "
+            "limit; shorten agent scopes or project-specific prompt rules"
+        )
+    if (
+        ark_managed_agent_goal
+        and len(task_body) > ARK_MANAGED_AGENT_GOAL_MAX_CHARS
+    ):
+        raise ValueError(
+            "generated Ark Managed Agent goal prompt exceeds the 4000-character "
+            "host budget; shorten agent scopes or project-specific prompt rules"
+        )
     payload = {
         "ok": True,
         "goal_id": goal_id,
@@ -440,10 +540,16 @@ def build_heartbeat_prompt(
         "registered_agents": normalized_registered_agents,
         "runtime_profile": runtime_profile,
         "scheduler_execution_context": scheduler_execution_context,
+        **(
+            {"host_contract": build_ark_managed_agent_host_contract()}
+            if ark_managed_agent_goal
+            else {}
+        ),
         "expanded_prompt_command": expanded_prompt_command,
         "compact_prompt_command": compact_prompt_command,
         "brief_prompt_command": brief_prompt_command,
         "thin_prompt_command": thin_prompt_command,
+        "pr_review_pre_quota_command": pr_review_pre_quota_command or None,
         "quota_guard_command": quota_guard_command,
         "quota_spend_command": quota_spend_command,
         "refresh_state_command": refresh_state_command,
@@ -459,6 +565,7 @@ def build_heartbeat_prompt(
             compact=compact,
             brief=brief,
             thin=thin,
+            visible_goal=visible_goal,
         ),
         "task_body": task_body,
     }
@@ -551,6 +658,7 @@ def render_heartbeat_task_body(
     goal_id: str,
     active_state: str,
     cli_preflight: str,
+    pr_review_pre_quota_command: str,
     quota_guard_command: str,
     quota_spend_command: str,
     refresh_state_command: str,
@@ -565,6 +673,9 @@ def render_heartbeat_task_body(
     thin_prompt_command: str,
 ) -> str:
     scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
+    pr_review_pre_quota_block = (
+        f"{pr_review_pre_quota_command}\n" if pr_review_pre_quota_command else ""
+    )
     return f"""Advance `{goal_id}` using `{active_state}`.
 
 Generic LoopX lifecycle. Keep project-specific branching out of the
@@ -573,12 +684,12 @@ output, `quota should-run.goal_boundary`, or boundary rules; if a lifecycle
 rule is needed, update `{cli_bin} heartbeat-prompt` so all projects inherit it.
 {scope_block}
 
-Before spending delivery compute, first make the LoopX CLI reachable and
-run the quota guard:
+Before spending delivery compute, make the CLI reachable; set
+`LOOPX_TURN=<current_time_iso>` per trigger, reuse it on retries, and run guard:
 
 ```bash
 {cli_preflight}
-{quota_guard_command}
+{pr_review_pre_quota_block}{quota_guard_command}
 ```
 
 If that preflight still fails: no work/spend; quiet `DONT_NOTIFY`.
@@ -610,13 +721,13 @@ If the result says `should_run=false`:
 - If the payload also says `safe_bypass_allowed=true` and the same gate has
   already been surfaced, the gate blocks only the gated delivery path. You may
   do exactly one bounded safe-bypass step from the Priority Stack that does not
-  depend on that gate; validate, write back, optionally refresh, spend once, and
-  report compactly. If `user_todo_summary.open_count > 0`, include those todos
-  and do not say "no new user action". If none exists, report the gate.
-- If `effective_action=monitor_quiet_skip`, run one no-spend
-  `quota monitor-poll --goal-id {goal_id} --source heartbeat --execute`, rerun
-  guard; quiet unless autonomous replan. No delivery edits/spend; unchanged
-  monitor-only polls are not self-stop signals.
+  depend on that gate; validate, write back, refresh accountable progress, spend
+  once, and report compactly. If `user_todo_summary.open_count > 0`, include
+  those todos and do not say "no new user action". If none exists, report the
+  gate.
+- If `effective_action=monitor_quiet_skip`, receipt/stall is written; quiet
+  unless replan. On receipt write failure, retry same id. No edits/spend;
+  receipts do not self-stop.
 - If `waiting_on=external_evidence` or `state=waiting`, and this automation is
   explicitly a monitor, run at most one bounded read-only observation poll using
   project-approved status/log/metric/marker surfaces named in active state,
@@ -668,8 +779,9 @@ If the result says `should_run=true`:
    permission. Then use
    `heartbeat_recommendation`: `recommended_mode=run_first_read_only_map` means
    run its `command` as a real read-only map, then
-   validate/save the `read_only_project_map` result, append exactly one
-   heartbeat spend, sync or refresh state if needed, and `NOTIFY`. If it says
+   validate/save the `read_only_project_map` result, refresh accountable
+   progress, append exactly one heartbeat spend, sync state if needed, and
+   `NOTIFY`. If it says
    `recommended_mode=mapped_noop_if_unchanged` with `stop_if_unchanged=true`,
    and you find no new user instruction, owner evidence, agent todo, stale
    source, or safe handoff, return quiet `DONT_NOTIFY`: do not run, edit, or
@@ -718,9 +830,14 @@ If the result says `should_run=true`:
    a successor todo, or include a compact no-follow-up rationale.
    For the full field contract, see `docs/project-agent-todo-contract.md` in
    the LoopX checkout.
-   {EXPLORE_GRAPH_DELIVERY_RULE}
-8. After validation and writeback complete, append exactly one spend event
-   before any state-only refresh that might close the active delivery lane:
+8. After validation/writeback, record accountable delivery:
+
+   ```bash
+   {progress_refresh_state_command}
+   ```
+
+   Spend consumes this causal record; plain state-only refresh cannot replace
+   it. Then spend once:
 
    ```bash
    {quota_spend_command}
@@ -732,19 +849,13 @@ If the result says `should_run=true`:
    a bounded safe-bypass step, append this same spend event once after
    validation/writeback.
 
-9. If the dashboard or controller needs state after spend, refresh:
+9. After spend, optionally refresh state-only:
 
    ```bash
    {refresh_state_command}
    ```
 
-   For a validated progress artifact, add a public-safe classification and
-   explicit delivery hints so readiness does not infer from classification
-   names:
-
-   ```bash
-   {progress_refresh_state_command}
-   ```
+   Never emit accountable progress after spend; it creates an unspent record.
 
 10. Return compactly. `NOTIFY` only for an artifact, gate, blocker, or self-stop;
     otherwise use `DONT_NOTIFY`.
@@ -758,6 +869,7 @@ def render_brief_heartbeat_task_body(
     goal_id: str,
     active_state: str,
     cli_preflight: str,
+    pr_review_pre_quota_command: str,
     quota_guard_command: str,
     quota_spend_command: str,
     refresh_state_command: str,
@@ -772,28 +884,31 @@ def render_brief_heartbeat_task_body(
     thin_prompt_command: str,
 ) -> str:
     scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
+    pr_review_pre_quota_block = (
+        f"{pr_review_pre_quota_command}\n" if pr_review_pre_quota_command else ""
+    )
     return f"""Advance `{goal_id}` using `{active_state}`.
 
 Brief installed LoopX heartbeat. Thin dispatcher; detail:
 `{compact_prompt_command}`.
 {scope_block}
 
-Preflight and quota guard:
+Guard/retry; `LOOPX_TURN=<current_time_iso>`:
 
 ```bash
 {cli_preflight}
-{quota_guard_command}
+{pr_review_pre_quota_block}{quota_guard_command}
 ```
 
-Preflight fail: quiet.
+Fail: quiet.
 
 User NOTIFY: Chinese actions incl. non_blocking at false/0; never only "owner
 gate"; required missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
 Only DONT_NOTIFY+false/0: quiet.
 
-If `should_run=false`: no work/spend except `safe_bypass_allowed=true`;
-external/wait monitor -> one read-only status/log/metric/marker poll; new
-evidence -> writeback/spend. Otherwise obey user channel.
+If `should_run=false`: follow user channel. `monitor_quiet_skip`: receipt/stall
+done; quiet unless replan; write failure: retry same id. External/wait monitor:
+one read-only poll; new evidence -> writeback/spend. Safe bypass if allowed.
 {SCHEDULER_HINT_THIN_RULE}
 `lark_event_inbox`: reply_due: drain_command -> effect/reply/readback/ACK.
 
@@ -806,14 +921,13 @@ Blocker-push first; obey
 `handoff_delivery_contract`; do 1 bounded segment/batch when
 `execution_obligation.must_attempt_work=true`; if recovery, run
 ranker/cross-domain evidence recovery or blocker writeback;
-validate/writeback/todos; successor todo or no-follow-up rationale for
-non-trivial feature slices; spend once; refresh with explicit delivery
-scale/outcome for progress artifacts. Stop on private, credentials, destructive
-git, prod, or review rules.
-{EXPLORE_GRAPH_DELIVERY_RULE}
-
-Spend exactly once only after completed delivery or safe-bypass work:
+validate/writeback/todos; done->successor/rationale.
+Progress refresh:
+`{progress_refresh_state_command}`
+Spend once:
 `{quota_spend_command}`
+Optional state-only post-spend:
+`{refresh_state_command}`
 
 No spend for quiet skips, preflight failures, blocker-push asks, dry-runs, or
 duplicate accounting. Compact return; `NOTIFY` only for artifact/gate/blocker/self-stop.
@@ -827,6 +941,7 @@ def render_compact_heartbeat_task_body(
     goal_id: str,
     active_state: str,
     cli_preflight: str,
+    pr_review_pre_quota_command: str,
     quota_guard_command: str,
     quota_spend_command: str,
     refresh_state_command: str,
@@ -841,6 +956,9 @@ def render_compact_heartbeat_task_body(
     thin_prompt_command: str,
 ) -> str:
     scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
+    pr_review_pre_quota_block = (
+        f"{pr_review_pre_quota_command}\n" if pr_review_pre_quota_command else ""
+    )
     return f"""Advance `{goal_id}` using `{active_state}`.
 
 This compact LoopX heartbeat body stays generic; local policy:
@@ -848,11 +966,11 @@ registry/state/adapter/`goal_boundary`.
 Expanded lifecycle contract: `{expanded_prompt_command}`.
 {scope_block}
 
-Preflight/guard:
+Preflight/guard; `LOOPX_TURN=<current_time_iso>`; reuse:
 
 ```bash
 {cli_preflight}
-{quota_guard_command}
+{pr_review_pre_quota_block}{quota_guard_command}
 ```
 
 Preflight fail: quiet; no work/spend.
@@ -861,10 +979,8 @@ Preflight fail: quiet; no work/spend.
 
 `lark_event_inbox`: reply_due: drain_command -> effect/reply/readback/ACK.
 
-If `should_run=false`: `monitor_quiet_skip` -> one no-spend
-`quota monitor-poll --execute`, rerun guard; quiet unless
-`autonomous_replan_required` / `must_attempt_work=true`; no edits/spend;
-unchanged monitor-only polls are not self-stop signals.
+If `should_run=false`: `monitor_quiet_skip` -> receipt/stall done; quiet unless
+replan; write failure -> retry same id; no edits/spend; receipts do not self-stop.
 `state=operator_gate` / `notify_user_on_open_todo=true` /
 `user_channel.notify=NOTIFY`: blocker-push including
 non_blocking; `open_todo_notification_policy=repeat_until_resolved`: repeat;
@@ -892,7 +1008,8 @@ If `should_run=true`:
    `notify_user_on_open_todo=true` blocker-push notification.
    Then follow `heartbeat_recommendation`:
    `run_first_read_only_map` means run exact real-map command, then
-   validate/save/spend/refresh/`NOTIFY`; `mapped_noop_if_unchanged` plus
+   validate/save/accountable-refresh/spend/`NOTIFY`;
+   `mapped_noop_if_unchanged` plus
    `stop_if_unchanged=true` means quiet no-op if no new instruction/evidence/
    todo/stale source/safe handoff.
    `task_orchestration_contract`: activate/resume eligible peer lanes; the
@@ -913,14 +1030,14 @@ If `should_run=true`:
    use `{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_gate|user_action`
    for owner todos and `--role agent` for agent todos, not prose. Nontrivial done ->
    successor todo or no-follow-up rationale.
-   {EXPLORE_GRAPH_DELIVERY_RULE}
-9. After delivery/safe-bypass, spend once before refresh:
+9. Accountable refresh, then spend:
 
 ```bash
+{progress_refresh_state_command}
 {quota_spend_command}
 ```
 
-10. Refresh after spend if needed; progress: `{progress_refresh_state_command}`.
+10. Optional state-only post-spend: `{refresh_state_command}`; never accountable.
 
 No spend for quiet skips, preflight failures, blocker-push asks, dry-runs,
 self-cancel turns, or duplicate accounting.
@@ -932,11 +1049,153 @@ real blocker, or self-stop; otherwise use `DONT_NOTIFY`.
 {permission_rule}"""
 
 
+def render_visible_goal_task_body(
+    *,
+    goal_id: str,
+    active_state: str,
+    cli_preflight: str,
+    pr_review_pre_quota_command: str,
+    quota_guard_command: str,
+    quota_spend_command: str,
+    refresh_state_command: str,
+    progress_refresh_state_command: str,
+    material_queue_rule: str,
+    permission_rule: str,
+    cli_bin: str,
+    agent_scope_instruction: str,
+    expanded_prompt_command: str,
+    compact_prompt_command: str,
+    brief_prompt_command: str,
+    thin_prompt_command: str,
+) -> str:
+    del (
+        cli_preflight,
+        expanded_prompt_command,
+        compact_prompt_command,
+        brief_prompt_command,
+        thin_prompt_command,
+    )
+    return _render_goal_task_body(
+        goal_id=goal_id,
+        active_state=active_state,
+        host_preamble=(
+            "in this visible\nCodex `/goal` task. This is an interactive goal "
+            "loop, not a heartbeat automation:\ndo not create/update an "
+            "automation, apply RRULE cadence, or invent `LOOPX_TURN`."
+        ),
+        completion_subject="visible\nGoal",
+        pr_review_pre_quota_command=pr_review_pre_quota_command,
+        quota_guard_command=quota_guard_command,
+        quota_spend_command=quota_spend_command,
+        progress_refresh_state_command=progress_refresh_state_command,
+        material_queue_rule=material_queue_rule,
+        permission_rule=permission_rule,
+        agent_scope_instruction=agent_scope_instruction,
+    )
+
+
+def _render_goal_task_body(
+    *,
+    goal_id: str,
+    active_state: str,
+    host_preamble: str,
+    completion_subject: str,
+    pr_review_pre_quota_command: str,
+    quota_guard_command: str,
+    quota_spend_command: str,
+    progress_refresh_state_command: str,
+    material_queue_rule: str,
+    permission_rule: str,
+    agent_scope_instruction: str,
+) -> str:
+    scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
+    prequota_block = (
+        f"Run `{pr_review_pre_quota_command}` first.\n"
+        if pr_review_pre_quota_command
+        else ""
+    )
+    return f"""Advance LoopX goal `{goal_id}` from `{active_state}` {host_preamble}
+{scope_block}
+
+At every continuation, inspect LoopX state/status and the repository. {prequota_block}Run
+`{quota_guard_command}` and follow its `interaction_contract`.
+
+If `should_run=false`, do no delivery work and do not spend quota. Surface only a
+concrete user action/gate in Chinese when the contract requires `NOTIFY`; otherwise
+wait quietly. Scheduler hints are diagnostic here and must not mutate host
+automation.
+
+If `should_run=true`, choose the highest-priority in-scope unblocked agent todo.
+Honor claims/leases, blocker-push and recovery obligations. Complete one bounded,
+coherent delivery segment; validate it; write public-safe evidence, critic, and
+next action back to LoopX. A non-trivial completion needs a successor todo or an
+explicit no-follow-up rationale. After validated writeback, refresh the
+accountable progress record before spending:
+`{progress_refresh_state_command}`. Then spend exactly once against that refresh:
+`{quota_spend_command}`.
+
+Do not spend for gates, waits, dry runs, failed preflight, no-op inspection, or
+duplicate accounting. Stop for private/company material, credentials, destructive
+git, unauthorized production, or repository review rules. Complete this {completion_subject} only when LoopX reports terminal success with no follow-up; otherwise keep the
+current gate or next safe action explicit.
+
+{material_queue_rule}
+{permission_rule}"""
+
+
+def render_ark_managed_agent_goal_task_body(
+    *,
+    goal_id: str,
+    active_state: str,
+    cli_preflight: str,
+    pr_review_pre_quota_command: str,
+    quota_guard_command: str,
+    quota_spend_command: str,
+    refresh_state_command: str,
+    progress_refresh_state_command: str,
+    material_queue_rule: str,
+    permission_rule: str,
+    cli_bin: str,
+    agent_scope_instruction: str,
+    expanded_prompt_command: str,
+    compact_prompt_command: str,
+    brief_prompt_command: str,
+    thin_prompt_command: str,
+) -> str:
+    del (
+        cli_preflight,
+        refresh_state_command,
+        cli_bin,
+        expanded_prompt_command,
+        compact_prompt_command,
+        brief_prompt_command,
+        thin_prompt_command,
+    )
+    return _render_goal_task_body(
+        goal_id=goal_id,
+        active_state=active_state,
+        host_preamble=(
+            "in one Goal\nactivation. The Goal runtime owns continuation and "
+            "inner iterations. This is a\ngoal loop, not automation; do not "
+            "invoke LoopX Turn."
+        ),
+        completion_subject="Goal",
+        pr_review_pre_quota_command=pr_review_pre_quota_command,
+        quota_guard_command=quota_guard_command,
+        quota_spend_command=quota_spend_command,
+        progress_refresh_state_command=progress_refresh_state_command,
+        material_queue_rule=material_queue_rule,
+        permission_rule=permission_rule,
+        agent_scope_instruction=agent_scope_instruction,
+    )
+
+
 def render_thin_heartbeat_task_body(
     *,
     goal_id: str,
     active_state: str,
     cli_preflight: str,
+    pr_review_pre_quota_command: str,
     quota_guard_command: str,
     quota_spend_command: str,
     refresh_state_command: str,
@@ -971,28 +1230,33 @@ def render_thin_heartbeat_task_body(
         )
         else "`quota should-run`"
     )
+    pr_review_pre_quota_instruction = (
+        f"Pre: `{pr_review_pre_quota_command}`\n"
+        if pr_review_pre_quota_command
+        else ""
+    )
     return f"""Advance `{goal_id}` from {active_state}.
 
-Skills: `loopx-project`; surprise/tiny/conflict -> `loopx-self-repair`.
+No runtime `loopx-project`; repair: `loopx-self-repair`.
 LoopX CLI = truth.
 {scope_sentence}
 
-Inspect registry/state/status/history/repo; run
-{quota_guard_instruction}; follow `interaction_contract`.
-User NOTIFY: concrete Chinese actions even non_blocking false/0; never only
-"owner gate"; required missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
-Quiet only if DONT_NOTIFY+false/0.
+Inspect state/status/repo; run
+{pr_review_pre_quota_instruction}{quota_guard_instruction}; follow `interaction_contract`.
+`LOOPX_TURN=<current_time_iso>`; reuse.
+NOTIFY Chinese actions incl. non_blocking false/0; not only "owner gate";
+missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
+DONT_NOTIFY+false/0 only: quiet.
 {RUNTIME_CAPABILITY_PROJECTION_THIN_RULE}
 {SCHEDULER_HINT_THIN_RULE}
-Batch/no-op; spend post-writeback.
-Plans/done->todo/rationale; 2 stalls->self-repair.
+writeback: accountable refresh->spend; optional state-only after.
+Done->todo/rationale; guard receipt; 2 stalls->replan.
 `lark_event_inbox`: reply_due; drain_command/reply-readback/ACK.
-{EXPLORE_GRAPH_DELIVERY_THIN_RULE}
 
-P0 blocked: safe P1/P2; monitor-only quiet/no-spend.
+P0 blocked: safe P1/P2; monitor quiet/no-spend.
 
-No project branches; {material_sentence} Stop for private material,
-credentials, destructive git, or unauthorized production actions{permission_tail}"""
+No project branches; {material_sentence} Stop: private material, credentials,
+destructive git, unauthorized prod{permission_tail}"""
 
 
 def render_heartbeat_generator_inputs_markdown(payload: dict[str, Any]) -> str:
@@ -1019,6 +1283,8 @@ def render_heartbeat_generator_inputs_markdown(payload: dict[str, Any]) -> str:
             f"- compact_prompt_command: `{payload.get('compact_prompt_command')}`",
             f"- brief_prompt_command: `{payload.get('brief_prompt_command')}`",
             f"- thin_prompt_command: `{payload.get('thin_prompt_command')}`",
+            "- pr_review_pre_quota_command: "
+            f"`{payload.get('pr_review_pre_quota_command')}`",
             f"- quota_guard_command: `{payload.get('quota_guard_command')}`",
             f"- quota_spend_command: `{payload.get('quota_spend_command')}`",
             f"- cli_preflight: `{payload.get('cli_preflight')}`",

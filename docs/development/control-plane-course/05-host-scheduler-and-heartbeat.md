@@ -1,6 +1,7 @@
 # 第 5 讲：Host、Heartbeat 与 Stateful Backoff
 
-> 核心问题：LoopX 不执行模型 turn，那么长期循环到底由谁拉起？如何避免空转、刷盘、过快轮询和错误停机？
+> **本讲结论：** Host 拥有唤醒和外部 effect，LoopX 拥有 cadence proposal 与验证规则；
+> 只有绑定 proposal identity 的 host readback 才能形成 durable scheduler ACK。
 
 建议时长：90 分钟。讲解 55 分钟、时序推演 20 分钟、实验 15 分钟。
 
@@ -15,6 +16,40 @@
 5. 解释为什么 monitor-poll 的 before/after decision 必须共享同一 execution context。
 6. 设计一个不会重复 spend、不会无限刷盘的 host adapter。
 
+## 本讲技术契约
+
+| 边界 | LoopX 中的答案 |
+| --- | --- |
+| Decision owner | LoopX 从 quota decision 投影 cadence、backoff 与 apply/ACK obligation |
+| Execution context | `host_surface + scheduler_owner + execution_mode` 共同限定 effect authority |
+| Effect owner | Host 创建 session、触发 turn、修改 RRULE 或调用外部 runtime |
+| Commit receipt | ACK 必须绑定 state key、reset token、identity signature 与实际 host readback |
+| Recovery | Quiet 保持 automation；未结算 proposal 继续 apply/ACK，不伪装成 delivery |
+
+## 三个 Showcase 的 Cadence 不同，ACK 合同相同
+
+Scheduler 不懂 GitHub 或研究指标，但它能根据 Kernel 已分类的 action 调整唤醒节奏：
+
+| 场景 | Kernel 已知事实 | Cadence 倾向 | 何时重置 backoff |
+| --- | --- | --- | --- |
+| PR 有 failing checks successor | runnable advancement | 较快继续 | successor 被领取或 material transition |
+| PR checks pending 且连续无变化 | monitor wait | 逐步放慢 | checks/review fingerprint 改变 |
+| Auto ML 候选正在实现或 preflight | runnable advancement | 较快继续 | validated launch proposal 写回 |
+| 外部训练/评估任务仍运行 | task monitor wait | 按任务阶段逐步放慢 | task state、artifact 或 metric fingerprint 改变 |
+| 资源槽已满，候选 deferred | capacity wait | 较慢观察资源 source | capacity readback 使 `resume_when` 成立 |
+| 研究 lane 有 holdout todo | runnable frontier | 较快继续 | evidence packet 写回 |
+| 研究暂无可执行 frontier，等待外部证据 | fresh-evidence wait | 较慢轮询 | 新 evidence event 或 user decision |
+
+无论哪种场景，LoopX 只产生 cadence proposal；host 应用 RRULE 或下一次触发时间后，必须
+回写绑定 `goal + agent + action class + proposal revision` 的 readback。只看到宿主当前值
+“碰巧相同”不能结算一条新 proposal，因为那无法证明 host 应用了本次决定。
+
+Explore Graph 的 material finding 会改变下一轮 evidence frontier，Explore Harness 的新
+portfolio 可能改变 advisory ranking；二者本身都不应创建额外 heartbeat。只有它们经
+Kernel 形成 runnable todo、due monitor、replan obligation 或明确 wait condition 后，
+scheduler hint 才改变 cadence。这样一张展示图刷新失败不会让昂贵实验提前启动，planner
+每次重新排序也不会造成高频空转。
+
 ## Host 是触发器，不是第二控制面
 
 LoopX 支持多种 host：
@@ -22,14 +57,15 @@ LoopX 支持多种 host：
 | Host surface | 如何开始 | 谁持续触发 |
 | --- | --- | --- |
 | Codex App | `$loopx <task>` | App heartbeat automation |
-| Codex CLI | 生成 thin task body，设置可见 goal/session | 用户或 CLI 可见循环 |
+| Codex CLI | 设置稳定的 thin re-entry body 与可见 goal/session | 用户或 CLI 可见循环 |
 | Claude Code | `/loopx <task>`，可选 native loop adapter | Claude native loop 或用户 |
 | 其他 shell/agent | `start-goal --guided` | 外部 runner 或人工触发 |
 
 Host 负责：
 
 - 创建或恢复 executor turn；
-- 传入 LoopX 生成的 task body；
+- 传入 LoopX 生成的稳定 re-entry body；
+- 唤醒后调用 CLI，取得当前 Turn 的动态 packet；
 - 声明 host capability；
 - 应用 scheduler cadence；
 - 返回真实 effect receipt。
@@ -294,23 +330,40 @@ open todo count == 0
 
 `terminal_no_followup` 是 LoopX 自己派生的 runtime closure，不是用户自定义 status，也不应由 host 根据自然语言猜测。
 
-## Codex App 与 Codex CLI 的不同
+## 原生 Codex Goal 与 LoopX Host Surface
 
-### Codex App
+### 原生 Goal 的持久边界
 
-- 有 heartbeat automation；
-- host 可以更新 RRULE；
-- task body 绑定目标 thread；
-- scheduler hint 可要求 App update + ACK。
+Codex 原生 Goal 不是“在 prompt 前写 `/goal`”的文本约定。自动化 surface 通过
+`thread/goal/set` 把 objective、status 与可选 token budget 绑定到 thread，通过
+`thread/goal/get` 读回，再用 `turn/start` 继续执行。只有普通 prompt 的 slash 前缀、
+外部 polling loop 或 `codex exec` 成功，都不能单独证明 native Goal 已激活。
 
-### Codex CLI
+这层 object 解决了一个重要问题：目标和 host lifecycle 不必只存在于当前模型上下文。
+LoopX 再补充项目拥有的结构化状态和过程：todo/claim/gate、领域 observation、effect receipt、
+跨 host cadence、replan 与 terminal audit。两者不是竞争状态机，也不能把 LoopX packet 伪装成
+native Goal baseline。
+
+### Codex App 的 LoopX 路径
+
+- App heartbeat automation 持有稳定的薄 task body；
+- 每次唤醒时，executor 按 task body 调用 LoopX CLI，从最新 state 取得本轮 packet；
+- host 可以按 `scheduler_hint` 更新 RRULE；
+- scheduler hint 可要求 App update、readback 与 ACK；
+- App thread/session 不成为 LoopX canonical state owner。
+
+### Codex CLI 的 LoopX 路径
 
 - 当前可见 session 通常由用户启动；
-- LoopX 提供 bootstrap message / thin task body；
+- LoopX 提供 bootstrap message / thin re-entry body，并可让用户设为可见 `/goal <task_body>`；
+- 可见 Goal 保留 objective 与 re-entry contract；每一 Turn 的 packet 仍由 CLI 重新生成；
+- 这里借用 Goal 作为持续 host surface，但长期 todo、gate、evidence 与 cadence 仍从 LoopX 读取；
 - CLI 不应假设用户安装的 `/loopx` 自定义命令一定可用；
 - final-check/self-stop 通过当前可用 host surface 完成。
 
-两者共享同一个 quota/status/todo state kernel，不应复制两套 lifecycle。
+两条 LoopX 路径共享同一个 quota/status/todo state kernel，不应复制两套 lifecycle。Native
+Goal objective 可以长期稳定，CLI packet 则必须随状态变化重新生成；把旧 packet 固定在 host
+里，会让 host 继续执行过期 frontier。
 
 ## Host Capability 与 Effect Receipt
 
@@ -378,8 +431,8 @@ poll? / write? / spend? / next cadence? / automation active?
 这一讲最容易把三件事混在一起：heartbeat prompt、scheduler hint、host automation。先画清权责：
 
 ```text
-heartbeat_prompt  生成“下一轮怎么问 LoopX”的通用任务体
-quota              生成当前轮的执行义务
+heartbeat_prompt  生成稳定的“下一轮怎样重新进入 LoopX”任务体
+quota              从最新 state 生成当前轮的动态 packet 与执行义务
 scheduler_hint     把义务投影成 cadence/backoff 建议
 host               真正修改 RRULE、触发 session
 scheduler_ack      证明 host 应用了哪个 RRULE

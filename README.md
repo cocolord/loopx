@@ -26,6 +26,13 @@ stable while Codex, Claude Code, Cursor, or another runtime executes each
 bounded turn. It does not replace your agent runtime; it makes long-running
 agent work reviewable, restartable, and easier to hand off.
 
+A useful mental model is an
+**[agent-native Kanban for long-running work](docs/development/control-plane-course/00-concept-primer.md)**.
+Its cards carry identity, authority, evidence, and continuation; moves are
+validated operators such as claim, gate, monitor, and writeback rather than UI
+gestures; capabilities add domain lanes without creating a second control plane.
+The board is a projection; LoopX state remains the source of truth.
+
 Registered agents are peers. Claims and leases, task boundaries, capabilities,
 and typed continuation decide who acts next; no durable leader identity is
 required.
@@ -169,15 +176,19 @@ Start agent-first: paste one setup message for the surface you already use,
 then start real work through the LoopX command entry for that host.
 Agents and host integrations can make this deterministic with
 `loopx agent-onboard --list-agent-types`, then pass an exact runtime such as
-`codex-app`, `codex-cli`, or `claude-code`. Ambiguous values such as `codex`
-are intentionally rejected because Codex App automation and Codex CLI `/goal`
-use different host-loop activation paths.
+`codex-app`, `codex-app-ssh`, `codex-cli`, or `claude-code`. Ambiguous values
+such as `codex` are intentionally rejected because Codex App automation,
+Codex App over SSH, and Codex CLI `/goal` use different host-loop activation
+paths.
 
 Choose your surface:
 
 - **Codex App**: best for a long-running agent that can wake up, re-check gates,
   and keep moving. Paste the setup message below, then invoke `$loopx
   <complex task>` or choose `loopx` from `/skills`.
+- **Codex App over SSH**: use `codex-app-ssh` when the app cannot expose
+  automation tools for a remote workspace. LoopX generates a bounded visible
+  `/goal <task_body>` instead of a heartbeat automation.
 - **Codex CLI**: best when the visible TUI should stay in the foreground while
   LoopX keeps the state. Run `codex`, paste the setup message, then invoke `$loopx
   <complex task>` or choose `loopx` from `/skills`; after todos are written,
@@ -227,6 +238,16 @@ Automatically refresh it from the LoopX generated task body; do not ask me to
 manually run `heartbeat-prompt`. Then stop and report the project connection
 status, current user gate, top agent todo, and next safe action.
 ```
+
+When Codex App is attached to the project over SSH and automation tools are
+unavailable, onboard the exact host with:
+
+```bash
+loopx agent-onboard --agent-type codex-app-ssh --project .
+```
+
+The returned activation packet uses the current visible `/goal`, not a hidden
+heartbeat or RRULE scheduler.
 
 Then start a real E2E exploration in normal language:
 
@@ -280,26 +301,11 @@ cd /path/to/your-project
 codex
 ```
 
-Then paste one setup message:
+Then paste one setup message. The paste block is intentionally one source line
+so Codex CLI receives one TUI message; do not add manual line breaks:
 
 ```text
-Connect this repo to LoopX from this visible Codex CLI TUI. Do not clone the
-LoopX repository for ordinary use. If `loopx` is not on PATH, install or repair
-it with the official no-clone installer:
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
-
-Then run `loopx doctor`. Work only from this project root: if LoopX state
-already exists, reuse it and do not create or overwrite a goal or the active objective; if the project
-is not connected, prefer `loopx connect`, and use `loopx bootstrap` only when
-project state clearly needs initialization. Ensure `.loopx/`, `.codex/goals/`,
-and `.local/` are ignored. Keep me in this TUI, do not use hidden headless
-execution. Then stop and report the project connection status, current user
-gate, top agent todo, and next safe action. After that I will start work with
-`$loopx <complex task>` or the `loopx` skill from `/skills`. When that task
-writes LoopX todos, generate the thin task body and set this visible TUI to
-`/goal <task_body>`; if you cannot mutate `/goal`, show me the exact text to
-paste instead of saying the loop is active.
+Connect this repo to LoopX from this visible Codex CLI TUI. Do not clone the LoopX repository for ordinary use. If `loopx` is not on PATH, install or repair it with the official no-clone installer: curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash; export PATH="$HOME/.local/bin:$PATH". Then run `loopx doctor`. Work only from this project root: if LoopX state already exists, reuse it and do not create or overwrite a goal or the active objective; if the project is not connected, prefer `loopx connect`, and use `loopx bootstrap` only when project state clearly needs initialization. Ensure `.loopx/`, `.codex/goals/`, and `.local/` are ignored. Keep me in this TUI, do not use hidden headless execution. Then stop and report the project connection status, current user gate, top agent todo, and next safe action. After that I will start work with `$loopx <complex task>` or the `loopx` skill from `/skills`. When that task writes LoopX todos, generate the thin task body and set this visible TUI to `/goal <task_body>`; if you cannot mutate `/goal`, show me the exact text to paste instead of saying the loop is active.
 ```
 
 That one message is the install, connect, and status check. The first useful
@@ -372,6 +378,10 @@ This is the shape used by advanced showcases such as
 your agents can orchestrate external tools, devices, domain-specific runners,
 or peer agents, while LoopX keeps goals, gates, todos, evidence, quota, and
 handoff state reviewable.
+
+Read [Embed LoopX In Your Agent Runner](docs/guides/custom-agent-runner-integration.md)
+for the minimal CLI + lightweight skill + self-driven runner model, including
+the tick lifecycle, decentralized Agent handoff, and validation checklist.
 
 Clone-based install is only for contributors who want the live canary wrapper:
 
@@ -678,6 +688,23 @@ agent, operator, and domain-specific surfaces.
 Every surface should answer the same core questions: what is current, who owns
 the next action, which decision is gated, what evidence changed, and whether
 the next agent turn is allowed to spend compute.
+
+### For Developers: Runtime Responsibilities
+
+LoopX keeps four responsibilities separate:
+
+| Role | Responsibility |
+| --- | --- |
+| **Agent** | Plans, analyzes, uses tools, and performs one bounded action through a host/runtime. |
+| **Provider** | Calls external systems and returns observations, effect results, and readback. |
+| **Capability** | Defines the caller outcome, normalizes provider output, validates it, and proposes a typed transition. |
+| **Kernel** | Owns durable todos, gates, monitors, accepted writeback, quota, recovery, and scheduling. |
+
+The execution path is `Agent -> Capability -> Provider`; the control path
+returns `Provider readback -> Capability transition -> Kernel`. An extension is
+how an optional provider is packaged and managed, not another control-plane
+owner. See [Architecture](docs/architecture.md) and
+[Extensions and Capabilities](docs/reference/extensions.md).
 
 ## Community & Feedback
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from .skillsbench_failure_signals import (
@@ -12,6 +12,7 @@ from .skillsbench_failure_signals import (
 
 SCHEMA_VERSION = "skillsbench_setup_only_public_preflight_v0"
 COMPOSE_TYPED_CAUSE_SCHEMA_VERSION = "skillsbench_compose_typed_cause_v0"
+APT_TRANSPORT_RECEIPT_SCHEMA_VERSION = "skillsbench_apt_transport_failure_receipt_v0"
 _PATCH_SUFFIX = "_patch_applied"
 _PUBLIC_TASK_STAGING_BOOL_FIELDS = (
     "staged",
@@ -52,9 +53,12 @@ _PUBLIC_TASK_STAGING_BOOL_FIELDS = (
 )
 _PUBLIC_TASK_STAGING_STRING_FIELDS = (
     "schema_version",
+    "dockerfile_apt_source_mode",
+    "dockerfile_apt_transport_mode",
     "dockerfile_ubuntu_apt_mirror_host",
     "dockerfile_debian_apt_mirror_host",
     "dockerfile_pip_index_host",
+    "dockerfile_pip_build_mode",
     "dockerfile_uv_bootstrap_version",
     "dockerfile_uv_bootstrap_mirror_host",
     "dockerfile_apache_archive_mirror_host",
@@ -62,6 +66,8 @@ _PUBLIC_TASK_STAGING_STRING_FIELDS = (
     "verifier_uv_bootstrap_version",
     "verifier_uv_bootstrap_mirror_host",
 )
+_COMPOSE_EXCEPTION_FINGERPRINT_TEXT_LIMIT = 64 * 1024
+_COMPOSE_EXCEPTION_FINGERPRINT_HEAD_LIMIT = 8 * 1024
 
 
 class SkillsBenchComposeCommandFailure(RuntimeError):
@@ -85,6 +91,38 @@ def skillsbench_compose_typed_fingerprint(
     return dict(exc.fingerprint)
 
 
+def _compose_exception_fingerprint_text(exc: Exception) -> str:
+    """Collect producer-owned output only long enough to derive a fingerprint."""
+
+    parts: list[str] = []
+    remaining = _COMPOSE_EXCEPTION_FINGERPRINT_TEXT_LIMIT
+    for value in (
+        str(exc),
+        getattr(exc, "stderr", None),
+        getattr(exc, "stdout", None),
+        getattr(exc, "output", None),
+    ):
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", errors="replace")
+        if not isinstance(value, str) or not value or remaining <= 0:
+            continue
+        if len(value) <= remaining:
+            part = value
+        else:
+            head_size = min(
+                _COMPOSE_EXCEPTION_FINGERPRINT_HEAD_LIMIT,
+                max(0, remaining - 1),
+            )
+            tail_size = max(0, remaining - head_size - 1)
+            if tail_size:
+                part = f"{value[:head_size]}\n{value[-tail_size:]}"
+            else:
+                part = value[:remaining]
+        parts.append(part)
+        remaining -= len(part) + 1
+    return "\n".join(parts)
+
+
 def install_skillsbench_compose_typed_cause_boundary(
     environment: Any,
 ) -> Callable[[], None] | None:
@@ -100,7 +138,9 @@ def install_skillsbench_compose_typed_cause_boundary(
         except SkillsBenchComposeCommandFailure:
             raise
         except Exception as exc:
-            fingerprint = skillsbench_runner_error_fingerprint(str(exc))
+            fingerprint = skillsbench_runner_error_fingerprint(
+                _compose_exception_fingerprint_text(exc)
+            )
             raise SkillsBenchComposeCommandFailure(fingerprint) from None
 
     try:
@@ -139,6 +179,107 @@ def _public_task_staging(task_staging: Mapping[str, Any] | None) -> dict[str, An
         if isinstance(value, bool):
             public[field] = value
     return public
+
+
+def _apt_transport_failure_receipt(
+    result: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    dependency_classes = {
+        str(item)
+        for field in ("dependency_classes", "terminal_dependency_classes")
+        for item in result.get(field, [])
+        if isinstance(item, str)
+    }
+    reason_codes = [
+        str(item)
+        for item in result.get("failure_reason_codes", [])
+        if isinstance(item, str)
+    ]
+    subtype = str(result.get("apt_failure_subtype") or "none")
+    apt_failure_present = (
+        subtype != "none"
+        or "system_package" in dependency_classes
+        or any(reason.startswith("apt_") for reason in reason_codes)
+    )
+    if not apt_failure_present:
+        return None
+
+    classification_complete = subtype not in {
+        "none",
+        "unclassified",
+        "fetch_failed_unclassified",
+    }
+    retryability = str(result.get("retryability") or "unknown")
+    if retryability == "retryable" and classification_complete:
+        disposition = "bounded_retry_allowed"
+    elif retryability == "non_retryable":
+        disposition = "repair_before_retry"
+    else:
+        disposition = "do_not_blind_retry"
+
+    projected_staging = result.get("task_staging")
+    staging = projected_staging if isinstance(projected_staging, Mapping) else {}
+    transport_configuration = {
+        "source_mode": str(staging.get("dockerfile_apt_source_mode") or "unknown"),
+        "transport_mode": str(
+            staging.get("dockerfile_apt_transport_mode") or "unknown"
+        ),
+        "apt_retry_patch_applied": (staging.get("apt_retry_patch_applied") is True),
+        "proxy_env_patch_required": (
+            staging.get("benchmark_egress_proxy_dockerfile_env_patch_required") is True
+        ),
+        "proxy_env_patch_applied": (
+            staging.get("benchmark_egress_proxy_dockerfile_env_patch_applied") is True
+        ),
+        "ubuntu_mirror_patch_required": (
+            staging.get("dockerfile_ubuntu_apt_mirror_patch_required") is True
+        ),
+        "ubuntu_mirror_patch_applied": (
+            staging.get("dockerfile_ubuntu_apt_mirror_patch_applied") is True
+        ),
+        "debian_mirror_patch_required": (
+            staging.get("dockerfile_debian_apt_mirror_patch_required") is True
+        ),
+        "debian_mirror_patch_applied": (
+            staging.get("dockerfile_debian_apt_mirror_patch_applied") is True
+        ),
+    }
+    return {
+        "schema_version": APT_TRANSPORT_RECEIPT_SCHEMA_VERSION,
+        "classification_status": (
+            "classified_transport_failure"
+            if classification_complete
+            else "unclassified_transport_failure"
+        ),
+        "classification_complete": classification_complete,
+        "failure_subtype": subtype,
+        "retryability": retryability,
+        "failure_cause_source": str(result.get("failure_cause_source") or "none"),
+        "failure_reason_codes": reason_codes,
+        "terminal_failure_reason_codes": [
+            str(item)
+            for item in result.get("terminal_failure_reason_codes", [])
+            if isinstance(item, str)
+        ],
+        "dependency_endpoints": [
+            str(item)
+            for item in result.get("dependency_endpoints", [])
+            if isinstance(item, str)
+        ],
+        "terminal_dependency_endpoints": [
+            str(item)
+            for item in result.get("terminal_dependency_endpoints", [])
+            if isinstance(item, str)
+        ],
+        "transport_configuration": transport_configuration,
+        "disposition": disposition,
+        "raw_failure_text_recorded": False,
+        "raw_logs_recorded": False,
+        "raw_task_text_recorded": False,
+        "raw_verifier_output_recorded": False,
+        "host_paths_recorded": False,
+        "secret_values_recorded": False,
+    }
 
 
 def _exit_category(exc: Exception, matched_patterns: set[str]) -> str:
@@ -181,6 +322,11 @@ def _base_result(
         "job_root_materialized": False,
         "environment_object_materialized": False,
         "environment_started": False,
+        "environment_ready_hook_requested": False,
+        "environment_ready_hook_invoked": False,
+        "environment_ready_hook_status": "not_requested",
+        "agent_install_canary_requested": False,
+        "agent_install_canary_status": "not_requested",
         "agent_install_invoked": False,
         "agent_execution_invoked": False,
         "verifier_invoked": False,
@@ -237,8 +383,10 @@ async def run_setup_only_public_preflight(
     stage_timeout_sec: float,
     cleanup_timeout_sec: float = 30.0,
     progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
+    environment_ready_hook: Callable[[Any], Awaitable[None]] | None = None,
+    agent_install_canary: bool = False,
 ) -> dict[str, Any]:
-    """Materialize a BenchFlow environment without installing or running an agent."""
+    """Materialize a BenchFlow environment and optionally canary agent install."""
 
     result = _base_result(
         task_staging=task_staging,
@@ -249,6 +397,12 @@ async def run_setup_only_public_preflight(
     rollout: Any | None = None
     restore_compose_boundary: Callable[[], None] | None = None
     failed = False
+    if environment_ready_hook is not None:
+        result["environment_ready_hook_requested"] = True
+        result["environment_ready_hook_status"] = "pending"
+    if agent_install_canary:
+        result["agent_install_canary_requested"] = True
+        result["agent_install_canary_status"] = "pending"
     _emit_progress(progress_callback, result)
     try:
         rollout = await asyncio.wait_for(
@@ -276,11 +430,39 @@ async def run_setup_only_public_preflight(
         _emit_progress(progress_callback, result)
         await asyncio.wait_for(rollout.start(), timeout=stage_timeout_sec)
         result["environment_started"] = True
+        if environment_ready_hook is not None:
+            result["stage"] = "environment_ready_hook"
+            result["environment_ready_hook_invoked"] = True
+            result["environment_ready_hook_status"] = "running"
+            _emit_progress(progress_callback, result)
+            await asyncio.wait_for(
+                environment_ready_hook(getattr(rollout, "env", None)),
+                timeout=stage_timeout_sec,
+            )
+            result["environment_ready_hook_status"] = "passed"
+        if agent_install_canary:
+            result["stage"] = "agent_install_canary"
+            result["agent_install_invoked"] = True
+            result["agent_install_canary_status"] = "running"
+            _emit_progress(progress_callback, result)
+            await asyncio.wait_for(
+                rollout.install_agent(),
+                timeout=stage_timeout_sec,
+            )
+            result["agent_install_canary_status"] = "passed"
         result["status"] = "passed"
-        result["stage"] = "environment_ready_before_agent"
+        result["stage"] = (
+            "agent_install_ready_before_execution"
+            if agent_install_canary
+            else "environment_ready_before_agent"
+        )
         result["exit_category"] = "passed"
     except Exception as exc:
         failed = True
+        if result["environment_ready_hook_status"] == "running":
+            result["environment_ready_hook_status"] = "failed"
+        if result["agent_install_canary_status"] == "running":
+            result["agent_install_canary_status"] = "failed"
         if rollout is not None:
             result["job_root_materialized"] = (
                 getattr(rollout, "_rollout_dir", None) is not None
@@ -346,6 +528,9 @@ async def run_setup_only_public_preflight(
             fingerprint.get("fingerprint_confidence")
             or "coarse_public_safe_pattern_match"
         )
+        apt_transport_receipt = _apt_transport_failure_receipt(result)
+        if apt_transport_receipt is not None:
+            result["apt_transport_failure_receipt"] = apt_transport_receipt
     finally:
         if restore_compose_boundary is not None:
             restore_compose_boundary()

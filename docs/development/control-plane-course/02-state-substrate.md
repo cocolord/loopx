@@ -1,6 +1,7 @@
 # 第 2 讲：状态底座与可重放事实
 
-> 核心问题：当 session、模型和 host 都可能变化时，LoopX 靠什么知道“现在进行到哪里”？
+> **本讲结论：** Canonical event/state contract 拥有长期事实；active state、status 和
+> dashboard 是可重建 read model；session context 不能替代 project memory。
 
 建议时长：90 分钟。讲解 55 分钟、状态追踪 20 分钟、实验 15 分钟。
 
@@ -14,6 +15,84 @@
 4. 沿一次 todo transition 找到它的事实源和 read model。
 5. 判断一个新字段应该属于配置、事件、工作台还是展示层。
 6. 区分 session context、project memory、Domain State 和私有 runtime artifact。
+
+## 本讲技术契约
+
+| 边界 | LoopX 中的答案 |
+| --- | --- |
+| State owner | Registry 拥有长期配置；canonical todo/event/state contract 拥有已提交事实 |
+| Turn snapshot | Status、todo projection 和 fresh environment observation 组成本轮只读输入 |
+| Write boundary | 只有经过 authority 与 transition validation 的 CLI/API 可以提交状态 |
+| Replay boundary | 从 durable state 重建 read model，再重新探测当前环境；不重放旧推理文本 |
+| Forbidden | Session、dashboard、sink 和 host 不能直接成为 goal truth |
+
+## 从三个 Showcase 找事实归属
+
+先不背状态文件。遇到一条信息时，先问“谁能证明它是真的”：
+
+| 信息 | Issue-Fix owner | Single-Agent Auto ML owner | Auto Research owner | LoopX 怎样保存 |
+| --- | --- | --- | --- | --- |
+| 外部对象当前状态 | Repository / GitHub | training/evaluation provider | evaluator / artifact store / public source | fresh observation，不复制成第二权威源 |
+| 可跨 turn 复用的领域事实 | feasibility、PR lifecycle | experiment contract/result、hypothesis ledger | hypothesis、evidence event、metric result | stable key + compact fingerprint + lineage |
+| 当前必须做的工作 | Kernel todo/gate/monitor | Kernel candidate todo/task monitor/promotion gate | Kernel role todo/promotion gate | canonical lifecycle transition |
+| 本轮临时推理和工具输出 | coding session / workspace | model session / experiment workspace | worker session / experiment workspace | 不作为长期事实；只提取 validated ref |
+| 给人和 host 看的当前视图 | status / PR report | experiment board / Explore Graph | frontier / evidence graph | 从 canonical state 重建 projection |
+
+同一句“PR checks 仍 pending”可能同时出现在 session、Domain State 和 status 中，但它们的
+权威不同：GitHub 证明当前事实，Domain State 证明某轮已观察到什么，status 只是把已提交
+状态展示出来。判断 owner 后，再决定它应进入 registry、event、Domain State 还是只留在
+runtime artifact。
+
+Auto ML 里最容易混淆的是三种“图或表”：
+
+| 表面 | 拥有什么 | 不能证明什么 |
+| --- | --- | --- |
+| External task/metric source | task 当前状态、原始 artifact 与 provider readback | LoopX 已接受结果、候选值得 promotion |
+| ML Experiment Domain State | matched contract、紧凑结果、归因、promotion/no-promote proposal | 通用 todo 已关闭、资源或发布已获授权 |
+| Explore Graph result log/view | hypothesis、experiment、finding 与 supports/refutes lineage | graph edge 已执行、Harness 建议已 claim |
+
+恢复时先重新观察外部 task，再按稳定 identity 更新 Domain State；material finding 才追加到
+Explore result log。Explore Harness 读取这些 projection 做 planning，但它不写回 external
+truth，也不成为第四个状态源。
+
+## 看板列是多轴状态的 Projection
+
+面向操作者的界面可以把 todo 渲染成 Kanban，但 canonical state 不能退化成一个
+`column` 字段。同一张卡片至少同时具有四组状态：
+
+| 维度 | 典型字段或对象 | 回答的问题 |
+| --- | --- | --- |
+| Lifecycle | `open`、`blocked`、`deferred`、`done` | 工作是否仍在生命周期中？ |
+| Task class | advancement、user gate/action、monitor、blocker | 这是什么类型的工作或等待？ |
+| Routing and authority | claim、lease、dependency、scope、capability | 谁能执行，前置条件和权限是否满足？ |
+| Proof and time | evidence、receipt、freshness、cadence、`resume_when` | 什么证明变化成立，何时应再次观察？ |
+
+看板可以把这些事实投影成便于操作的逻辑列：
+
+```text
+Runnable | Claimed | Waiting on user | Monitoring | Blocked | Review | Done
+```
+
+这些列不是新的事实源。“Waiting on user”来自 scoped user gate，“Monitoring”来自
+带 cadence 和 target key 的 monitor，“Review”可以来自领域状态与当前 acceptance，
+而不是把每个展示名称写进 Kernel lifecycle enum。
+
+看板上的移动也对应结构化算子，而不是任意拖拽：
+
+| 操作 | 必须保持的约束 |
+| --- | --- |
+| Claim / release | 注册身份、executor exclusion、lease 和 workspace 仍然有效 |
+| Gate / decide | decision scope、阻塞对象和授权结果明确绑定 |
+| Monitor / resume | target、cadence、fresh observation 和恢复条件可重放 |
+| Complete / supersede | evidence、successor 或 no-follow-up rationale 完整 |
+| Writeback / replay / repair | 已提交 transition 可验证，projection 可重建，失败后可恢复 |
+
+Capability Pack 可以在同一组通用算子上增加领域泳道。例如 Issue Fix 展示
+`feasibility -> patch -> CI -> review -> merge`，Single-Agent Auto ML 展示
+`candidate -> preflight -> launch -> monitor -> evaluate -> promote/no-promote`，Auto
+Research 展示 `hypothesis -> execute -> evaluate -> promote/retire`。这些阶段来自 Domain
+State 和 capability proposal；只要它们涉及 claim、gate、quota、permission 或 terminal
+closure，最终 transition 仍由 Kernel 接受或拒绝。
 
 ## Goal 不是聊天线程
 
@@ -56,6 +135,20 @@ Project memory 的充分性标准是：更换 session 后，新的 peer 仍能�
 重建同一 objective、authority boundary、open frontier、gate、next probe 和 stop
 condition。它不要求逐字复现旧推理。第 3 讲会把这个要求进一步写成 handoff 的
 不动点检查。
+
+可以把这看成长期任务的“最小可恢复状态”，而不是“最大可记忆内容”。外置状态应优先保存：
+
+- 能改变合法 action set 的事实，例如 gate、claim、capability 与 workspace boundary；
+- 能改变下一步判断的事实，例如 fresh observation、acceptance gap 与 monitor due time；
+- 能避免重复 effect 的 identity、receipt 与 reconciliation key；
+- 能让路线被解释和修订的 evidence ref、vision checkpoint 与 successor lineage。
+
+原始 transcript、完整工具输出、未验证猜测和可以从 source 重建的展示内容通常不应进入
+canonical state。它们会扩大上下文和隐私成本，却不一定提高恢复正确性。
+
+状态底座与 CLI packet 也要分开：前者为 replay 保留完整的结构化事实，后者只把当前 lane
+需要的 decision、proof boundary 和 writeback 命令投影进有限模型上下文。Packet 丢失可以
+重建；canonical event 丢失则可能无法判断 effect 是否已提交。
 
 ## 五类状态面
 
@@ -276,10 +369,10 @@ loopx todo claim \
 ```text
 CLI validation
   -> resolve registry goal and registered agent
-  -> lock active state / state transaction boundary
-  -> validate todo transition
-  -> append or update durable transition state
-  -> refresh compatibility workbench/projection
+  -> enter the canonical state transaction boundary
+  -> authorize and validate the todo transition
+  -> write the durable transition through its supported API
+  -> rebuild the compatible read projection
   -> status later folds current claim
   -> quota sees claimed runnable frontier
 ```

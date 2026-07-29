@@ -24,20 +24,60 @@ Optional env:
                                        python3 -m loopx.benchmark_adapters.skillsbench_runner_profile capture
   SKILLSBENCH_LOCAL_CODEX_PROXY_HOST   Local proxy host, default 127.0.0.1
   SKILLSBENCH_LOCAL_CODEX_PROXY_PORT   Local proxy port, default 18180
+  SKILLSBENCH_REMOTE_CODEX_PROXY_PORT  Remote proxy port override; default is
+                                       deterministic and scoped to the run id
+  SKILLSBENCH_LOCAL_CODEX_PROXY_COMMAND
+                                       Optional private foreground command that
+                                       the supervisor owns and restarts when
+                                       the local proxy endpoint is unavailable
   SKILLSBENCH_DOCKER_PROXY_HOST        Remote Docker bridge host for benchmark
                                        setup/verifier egress; default auto
   SKILLSBENCH_BENCHMARK_EGRESS_PROXY_MODE
                                        Benchmark setup/verifier egress mode:
                                        require (default), auto, or off
+  SKILLSBENCH_BENCHMARK_EGRESS_NO_PROXY
+                                       Comma-separated benchmark setup/verifier
+                                       hosts that bypass the egress proxy
   SKILLSBENCH_DOCKER_API_VERSION       Remote Docker daemon API version passed
                                        to Docker CLI/Compose; default auto
+  SKILLSBENCH_DOCKER_APT_SOURCE_MODE   Staged Dockerfile apt sources: mirror
+                                       or primary. When unset, proxy egress
+                                       selects primary and an explicit
+                                       no-proxy run selects mirror.
+  SKILLSBENCH_DOCKER_APT_TRANSPORT_MODE
+                                       Staged apt transport: default or
+                                       proxy-compatible. When unset, proxy
+                                       egress selects proxy-compatible and an
+                                       explicit no-proxy run selects default.
+  SKILLSBENCH_DOCKER_PIP_INDEX_MODE    Staged Dockerfile pip index: mirror or
+                                       primary. When unset, proxy egress
+                                       selects primary and an explicit
+                                       no-proxy run selects mirror.
+  SKILLSBENCH_DOCKER_PIP_BUILD_MODE    Staged Dockerfile pip build mode:
+                                       isolated (default) or no-isolation
   SKILLSBENCH_ROUTE                    Route, default codex-cli-goal-baseline
   SKILLSBENCH_MODEL                    Model, default gpt-5.5
   SKILLSBENCH_REASONING_EFFORT         Reasoning effort, default xhigh
   SKILLSBENCH_REMOTE_CODEX_BIN          Codex CLI executable on remote runner;
                                        default codex from remote PATH
+  SKILLSBENCH_LOCAL_CODEX_SPLIT_CONTROL Set to 1 to run Codex locally through
+                                       the opt-in reverse-channel provider
+  SKILLSBENCH_LOCAL_CODEX_BIN           Local Codex executable for split
+                                       control; default codex from local PATH
   SKILLSBENCH_LOCAL_CODEX_SANDBOX      Host Codex sandbox mode; default
                                        workspace-write
+  SKILLSBENCH_EXACT_HOST_CODEX_SANDBOX_PREFLIGHT_TIMEOUT_SEC
+                                       Exact-host sandbox probe timeout;
+                                       default 30
+  SKILLSBENCH_LOCAL_CODEX_EXEC_TIMEOUT_SEC
+                                       Optional positive per-prompt timeout for
+                                       host-local Codex; unset preserves the
+                                       runner default
+  SKILLSBENCH_HOST_LOCAL_ACP_CODEX_EXEC_PREFLIGHT_ATTEMPTS
+                                       Positive startup preflight attempts for
+                                       split-control Codex; default 3
+  SKILLSBENCH_OUTER_TIMEOUT_SEC         Optional positive runner-wide timeout;
+                                       unset preserves the runner default
   SKILLSBENCH_CLI_GOAL_THREAD_PREWARM  Set to 1 to prewarm the persisted Codex
                                        TUI thread before submitting /goal
   SKILLSBENCH_ALLOW_STAGED_BOOTSTRAP_REPAIR_RUN
@@ -48,6 +88,10 @@ Optional env:
                                        Set to 1 to stop after real job-root and
                                        environment materialization, before any
                                        agent or verifier lifecycle
+  SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY
+                                       With setup-only preflight, set to 1 to
+                                       exercise agent install and stop before
+                                       agent execution or verification
   SKILLSBENCH_PRODUCT_MODE_SOFT_VERIFY_POLICY
                                        Optional product-mode intermediate
                                        verifier policy: every-round or
@@ -71,13 +115,13 @@ Optional env:
                                        Validator code for intermediate progress,
                                        default 10; 0 remains terminal completion
   SKILLSBENCH_LOOPX_TURN_TERMINAL_POLICY
-                                       validator (default) or fixed-n
+                                       validator (default), fixed-n, or stability
   SKILLSBENCH_BUILD_STALL_TIMEOUT_SEC  Setup stall timeout, default 3600;
                                        0 disables cap
   SKILLSBENCH_RUN_TIMEOUT_SEC          Supervisor timeout, default 28800
   SKILLSBENCH_PUBLIC_ARTIFACT_SYNC_INTERVAL_SEC
                                        Incremental public artifact sync interval;
-                                       defaults to 30 for setup-only and 0 otherwise
+                                       defaults to 30; set to 0 to disable
   SKILLSBENCH_TUNNEL_PROBE_TIMEOUT_SEC Reverse-tunnel CONNECT probe timeout,
                                        default 20
   SKILLSBENCH_TUNNEL_READY_TIMEOUT_SEC Reverse-tunnel readiness budget,
@@ -140,7 +184,7 @@ fi
 task_id="${task_ids[0]}"
 task_count="${#task_ids[@]}"
 tag="${2:-${SKILLSBENCH_RUN_TAG:-manual}}"
-remote_proxy_port="${3:-${SKILLSBENCH_REMOTE_CODEX_PROXY_PORT:-18180}}"
+remote_proxy_port="${3:-${SKILLSBENCH_REMOTE_CODEX_PROXY_PORT:-}}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runner_profile="${SKILLSBENCH_RUNNER_PROFILE:-}"
@@ -200,17 +244,68 @@ if [[ -n "${SKILLSBENCH_SSH_OPTIONS:-}" ]]; then
 fi
 
 remote_codex_bin="${SKILLSBENCH_REMOTE_CODEX_BIN:-codex}"
+local_codex_split_control="${SKILLSBENCH_LOCAL_CODEX_SPLIT_CONTROL:-0}"
+local_codex_bin="${SKILLSBENCH_LOCAL_CODEX_BIN:-codex}"
 local_codex_sandbox="${SKILLSBENCH_LOCAL_CODEX_SANDBOX:-workspace-write}"
+exact_host_codex_sandbox_preflight_timeout="${SKILLSBENCH_EXACT_HOST_CODEX_SANDBOX_PREFLIGHT_TIMEOUT_SEC:-30}"
+local_codex_exec_timeout="${SKILLSBENCH_LOCAL_CODEX_EXEC_TIMEOUT_SEC:-}"
+host_local_acp_codex_exec_preflight_attempts="${SKILLSBENCH_HOST_LOCAL_ACP_CODEX_EXEC_PREFLIGHT_ATTEMPTS:-3}"
+outer_timeout="${SKILLSBENCH_OUTER_TIMEOUT_SEC:-}"
 codex_cli_goal_thread_prewarm="${SKILLSBENCH_CLI_GOAL_THREAD_PREWARM:-0}"
 if [[ "$codex_cli_goal_thread_prewarm" != "0" && "$codex_cli_goal_thread_prewarm" != "1" ]]; then
   echo "SKILLSBENCH_CLI_GOAL_THREAD_PREWARM must be 0 or 1" >&2
+  exit 2
+fi
+if [[ -n "$local_codex_exec_timeout" ]] &&
+  [[ ! "$local_codex_exec_timeout" =~ ^[1-9][0-9]*$ ]]; then
+  echo "SKILLSBENCH_LOCAL_CODEX_EXEC_TIMEOUT_SEC must be a positive integer" >&2
+  exit 2
+fi
+if [[ ! "$host_local_acp_codex_exec_preflight_attempts" =~ ^[1-9][0-9]*$ ]]; then
+  echo "SKILLSBENCH_HOST_LOCAL_ACP_CODEX_EXEC_PREFLIGHT_ATTEMPTS must be a positive integer" >&2
+  exit 2
+fi
+if [[ ! "$exact_host_codex_sandbox_preflight_timeout" =~ ^[1-9][0-9]*$ ]]; then
+  echo "SKILLSBENCH_EXACT_HOST_CODEX_SANDBOX_PREFLIGHT_TIMEOUT_SEC must be a positive integer" >&2
+  exit 2
+fi
+if [[ -n "$outer_timeout" ]] &&
+  [[ ! "$outer_timeout" =~ ^[1-9][0-9]*$ ]]; then
+  echo "SKILLSBENCH_OUTER_TIMEOUT_SEC must be a positive integer" >&2
   exit 2
 fi
 skip_global_ledger_sync="${SKILLSBENCH_SKIP_GLOBAL_LEDGER_SYNC:-0}"
 skip_current_aggregate_update="${SKILLSBENCH_SKIP_CURRENT_AGGREGATE_UPDATE:-0}"
 allow_staged_bootstrap_repair_run="${SKILLSBENCH_ALLOW_STAGED_BOOTSTRAP_REPAIR_RUN:-0}"
 setup_only_public_preflight="${SKILLSBENCH_SETUP_ONLY_PUBLIC_PREFLIGHT:-0}"
+setup_only_agent_install_canary="${SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY:-0}"
 benchmark_egress_proxy_mode="${SKILLSBENCH_BENCHMARK_EGRESS_PROXY_MODE:-require}"
+benchmark_egress_no_proxy="${SKILLSBENCH_BENCHMARK_EGRESS_NO_PROXY:-}"
+docker_apt_source_mode="${SKILLSBENCH_DOCKER_APT_SOURCE_MODE:-}"
+docker_apt_transport_mode="${SKILLSBENCH_DOCKER_APT_TRANSPORT_MODE:-}"
+docker_pip_index_mode="${SKILLSBENCH_DOCKER_PIP_INDEX_MODE:-}"
+if [[ -z "$docker_apt_source_mode" ]]; then
+  if [[ "$benchmark_egress_proxy_mode" == "off" ]]; then
+    docker_apt_source_mode="mirror"
+  else
+    docker_apt_source_mode="primary"
+  fi
+fi
+if [[ -z "$docker_apt_transport_mode" ]]; then
+  if [[ "$benchmark_egress_proxy_mode" == "off" ]]; then
+    docker_apt_transport_mode="default"
+  else
+    docker_apt_transport_mode="proxy-compatible"
+  fi
+fi
+if [[ -z "$docker_pip_index_mode" ]]; then
+  if [[ "$benchmark_egress_proxy_mode" == "off" ]]; then
+    docker_pip_index_mode="mirror"
+  else
+    docker_pip_index_mode="primary"
+  fi
+fi
+docker_pip_build_mode="${SKILLSBENCH_DOCKER_PIP_BUILD_MODE:-isolated}"
 product_mode_soft_verify_policy="${SKILLSBENCH_PRODUCT_MODE_SOFT_VERIFY_POLICY:-}"
 remote_command_file_bridge_probe_command="${SKILLSBENCH_REMOTE_COMMAND_FILE_BRIDGE_PROBE_COMMAND:-}"
 remote_command_file_bridge_solver_command="${SKILLSBENCH_REMOTE_COMMAND_FILE_BRIDGE_SOLVER_COMMAND:-}"
@@ -235,10 +330,44 @@ validate_bool_toggle \
   SKILLSBENCH_ALLOW_STAGED_BOOTSTRAP_REPAIR_RUN "$allow_staged_bootstrap_repair_run"
 validate_bool_toggle \
   SKILLSBENCH_SETUP_ONLY_PUBLIC_PREFLIGHT "$setup_only_public_preflight"
+validate_bool_toggle \
+  SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY "$setup_only_agent_install_canary"
+if [[ "$setup_only_agent_install_canary" == "1" ]] &&
+  [[ "$setup_only_public_preflight" != "1" ]]; then
+  echo "SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY requires SKILLSBENCH_SETUP_ONLY_PUBLIC_PREFLIGHT=1" >&2
+  exit 2
+fi
+validate_bool_toggle \
+  SKILLSBENCH_LOCAL_CODEX_SPLIT_CONTROL "$local_codex_split_control"
+if [[ "$local_codex_split_control" == "1" ]] &&
+  [[ "$local_codex_sandbox" != "workspace-write" ]]; then
+  echo "SKILLSBENCH_LOCAL_CODEX_SPLIT_CONTROL requires SKILLSBENCH_LOCAL_CODEX_SANDBOX=workspace-write" >&2
+  exit 2
+fi
 if [[ "$benchmark_egress_proxy_mode" != "require" ]] &&
   [[ "$benchmark_egress_proxy_mode" != "auto" ]] &&
   [[ "$benchmark_egress_proxy_mode" != "off" ]]; then
   echo "SKILLSBENCH_BENCHMARK_EGRESS_PROXY_MODE must be require, auto, or off" >&2
+  exit 2
+fi
+if [[ "$docker_pip_index_mode" != "mirror" ]] &&
+  [[ "$docker_pip_index_mode" != "primary" ]]; then
+  echo "SKILLSBENCH_DOCKER_PIP_INDEX_MODE must be mirror or primary" >&2
+  exit 2
+fi
+if [[ "$docker_apt_source_mode" != "mirror" ]] &&
+  [[ "$docker_apt_source_mode" != "primary" ]]; then
+  echo "SKILLSBENCH_DOCKER_APT_SOURCE_MODE must be mirror or primary" >&2
+  exit 2
+fi
+if [[ "$docker_apt_transport_mode" != "default" ]] &&
+  [[ "$docker_apt_transport_mode" != "proxy-compatible" ]]; then
+  echo "SKILLSBENCH_DOCKER_APT_TRANSPORT_MODE must be default or proxy-compatible" >&2
+  exit 2
+fi
+if [[ "$docker_pip_build_mode" != "isolated" ]] &&
+  [[ "$docker_pip_build_mode" != "no-isolation" ]]; then
+  echo "SKILLSBENCH_DOCKER_PIP_BUILD_MODE must be isolated or no-isolation" >&2
   exit 2
 fi
 validate_bool_toggle \
@@ -259,7 +388,24 @@ remote_codex_bin_mode="path_lookup"
 if [[ -n "${SKILLSBENCH_REMOTE_CODEX_BIN:-}" ]]; then
   remote_codex_bin_mode="explicit"
 fi
-if [[ "$dry_run" == "false" && "$setup_only_public_preflight" != "1" ]]; then
+runner_connectivity_preflight="required"
+if [[ "$dry_run" == "false" ]]; then
+  if ! runner_connectivity_receipt="$(
+    PYTHONPATH="${repo_root}${PYTHONPATH:+:${PYTHONPATH}}" \
+      python3 -m loopx.benchmark_adapters.skillsbench_runner_profile \
+      probe-ssh --current-environment --timeout-seconds 10
+  )"; then
+    printf '%s\n' "$runner_connectivity_receipt" >&2
+    exit 3
+  fi
+  unset runner_connectivity_receipt
+  runner_connectivity_preflight="passed"
+fi
+exact_host_codex_sandbox_preflight="not_required"
+if [[ "$local_codex_split_control" == "1" ]]; then
+  remote_codex_bin_mode="split_control_client"
+  exact_host_codex_sandbox_preflight="split_control_not_applicable"
+elif [[ "$dry_run" == "false" && "$setup_only_public_preflight" != "1" ]]; then
   if [[ "$remote_codex_bin" == */* ]]; then
     printf -v remote_codex_probe \
       'test -x %q && %q --version >/dev/null 2>&1' \
@@ -274,6 +420,76 @@ if [[ "$dry_run" == "false" && "$setup_only_public_preflight" != "1" ]]; then
     echo "remote Codex CLI unavailable; set SKILLSBENCH_REMOTE_CODEX_BIN" >&2
     exit 2
   fi
+  remote_codex_sandbox_probe_py='import shutil, subprocess, sys, tempfile
+codex_bin, sandbox_mode, timeout_raw = sys.argv[1:]
+with tempfile.TemporaryDirectory(prefix="gh-skillsbench-codex-sandbox-") as tmp:
+    try:
+        proc = subprocess.run(
+            [
+                codex_bin,
+                "sandbox",
+                "-c",
+                f"sandbox_mode=\"{sandbox_mode}\"",
+                "--",
+                shutil.which("true") or "true",
+            ],
+            cwd=tmp,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=int(timeout_raw),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise SystemExit(124) from None
+    except OSError:
+        raise SystemExit(125) from None
+raise SystemExit(0 if proc.returncode == 0 else 123)'
+  printf -v remote_codex_sandbox_probe \
+    '%q -c %q %q %q %q' \
+    python3 "$remote_codex_sandbox_probe_py" \
+    "$remote_codex_bin" "$local_codex_sandbox" \
+    "$exact_host_codex_sandbox_preflight_timeout"
+  if ssh "${ssh_command_options[@]}" "$SKILLSBENCH_SSH_DESTINATION" \
+    "$remote_codex_sandbox_probe" >/dev/null 2>&1; then
+    exact_host_codex_sandbox_preflight="passed"
+  else
+    remote_codex_sandbox_probe_status=$?
+    case "$remote_codex_sandbox_probe_status" in
+      123) remote_codex_sandbox_failure_category="sandbox_command_failed" ;;
+      124) remote_codex_sandbox_failure_category="timeout" ;;
+      125) remote_codex_sandbox_failure_category="execution_unavailable" ;;
+      *) remote_codex_sandbox_failure_category="transport_or_unknown" ;;
+    esac
+    python3 - \
+      "$local_codex_sandbox" \
+      "$remote_codex_bin_mode" \
+      "$remote_codex_sandbox_failure_category" \
+      "$exact_host_codex_sandbox_preflight_timeout" <<'PY' >&2
+import json
+import sys
+
+print(
+    json.dumps(
+        {
+            "ok": False,
+            "schema_version": "skillsbench_exact_host_codex_sandbox_preflight_v0",
+            "error": "skillsbench_exact_host_codex_sandbox_preflight_failed",
+            "sandbox_mode": sys.argv[1],
+            "remote_codex_bin_mode": sys.argv[2],
+            "failure_category": sys.argv[3],
+            "timeout_seconds": int(sys.argv[4]),
+            "raw_output_recorded": False,
+            "remote_path_recorded": False,
+            "ssh_destination_recorded": False,
+        },
+        sort_keys=True,
+    )
+)
+PY
+    exit 3
+  fi
+elif [[ "$setup_only_public_preflight" != "1" ]]; then
+  exact_host_codex_sandbox_preflight="required"
 fi
 
 stamp="${SKILLSBENCH_RUN_STAMP:-$(date +%Y%m%dT%H%M%SCST)}"
@@ -282,6 +498,27 @@ safe_task="${safe_task// /-}"
 safe_task="${safe_task//_/-}"
 if ((task_count > 1)); then
   safe_task="batch-${task_count}"
+fi
+run_group="skillsbench-codex-cli-goal-xhigh-${safe_task}-${tag}-${stamp}"
+job_name="${safe_task}__codex_cli_goal_xhigh_${tag}_${stamp}"
+if [[ -z "$remote_proxy_port" ]]; then
+  remote_proxy_port="$(
+    python3 - "$run_group" <<'PY'
+import hashlib
+import sys
+
+digest = hashlib.sha256(sys.argv[1].encode("utf-8")).digest()
+print(20000 + (int.from_bytes(digest[:4], "big") % 40000))
+PY
+  )"
+  remote_proxy_port_mode="run_scoped"
+else
+  remote_proxy_port_mode="explicit"
+fi
+if [[ ! "$remote_proxy_port" =~ ^[1-9][0-9]{0,4}$ ]] ||
+  ((10#$remote_proxy_port > 65535)); then
+  echo "remote proxy port must be an integer from 1 through 65535" >&2
+  exit 2
 fi
 
 goal_id="${SKILLSBENCH_GOAL_ID:-loopx-meta}"
@@ -315,10 +552,8 @@ build_stall_timeout="${SKILLSBENCH_BUILD_STALL_TIMEOUT_SEC:-3600}"
 run_timeout="${SKILLSBENCH_RUN_TIMEOUT_SEC:-28800}"
 if [[ -n "${SKILLSBENCH_PUBLIC_ARTIFACT_SYNC_INTERVAL_SEC:-}" ]]; then
   public_artifact_sync_interval="$SKILLSBENCH_PUBLIC_ARTIFACT_SYNC_INTERVAL_SEC"
-elif [[ "$setup_only_public_preflight" == "1" ]]; then
-  public_artifact_sync_interval=30
 else
-  public_artifact_sync_interval=0
+  public_artifact_sync_interval=30
 fi
 tunnel_probe_timeout="${SKILLSBENCH_TUNNEL_PROBE_TIMEOUT_SEC:-20}"
 tunnel_ready_timeout="${SKILLSBENCH_TUNNEL_READY_TIMEOUT_SEC:-60}"
@@ -332,6 +567,28 @@ fi
 batch_case_start_gap="${SKILLSBENCH_BATCH_CASE_START_GAP_SEC:-3}"
 local_proxy_host="${SKILLSBENCH_LOCAL_CODEX_PROXY_HOST:-127.0.0.1}"
 local_proxy_port="${SKILLSBENCH_LOCAL_CODEX_PROXY_PORT:-18180}"
+local_proxy_command="${SKILLSBENCH_LOCAL_CODEX_PROXY_COMMAND:-}"
+if [[ "$dry_run" == "false" ]] &&
+  ! python3 - "$local_proxy_host" "$local_proxy_port" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+try:
+    port = int(sys.argv[2])
+    if not 1 <= port <= 65535:
+        raise ValueError
+    with socket.create_connection((host, port), timeout=1.0):
+        pass
+except (OSError, ValueError):
+    raise SystemExit(1)
+PY
+then
+  if [[ -z "$local_proxy_command" ]]; then
+    echo "skillsbench_local_proxy_endpoint_unreachable" >&2
+    exit 2
+  fi
+fi
 docker_api_version="${SKILLSBENCH_DOCKER_API_VERSION:-auto}"
 if [[ -z "$docker_api_version" || "$docker_api_version" == "auto" ]]; then
   docker_api_probe_py='import json, sys; print(json.load(sys.stdin)["ApiVersion"])'
@@ -417,6 +674,24 @@ while True:
     threading.Thread(target=pipe, args=(client, upstream), daemon=True).start()
 '
 extra_runner_args=()
+if [[ "$local_codex_split_control" == "1" ]]; then
+  extra_runner_args+=(
+    --local-codex-provider reverse-channel
+    --host-local-acp-codex-exec-preflight
+    --host-local-acp-codex-exec-preflight-attempts
+    "$host_local_acp_codex_exec_preflight_attempts"
+  )
+fi
+if [[ -n "$local_codex_exec_timeout" ]]; then
+  extra_runner_args+=(
+    --local-codex-exec-timeout-sec "$local_codex_exec_timeout"
+  )
+fi
+if [[ -n "$outer_timeout" ]]; then
+  extra_runner_args+=(
+    --outer-timeout-sec "$outer_timeout"
+  )
+fi
 if [[ "$codex_cli_goal_thread_prewarm" == "1" ]]; then
   extra_runner_args+=(--codex-cli-goal-thread-prewarm)
 fi
@@ -425,6 +700,14 @@ if [[ "$allow_staged_bootstrap_repair_run" == "1" ]]; then
 fi
 if [[ "$setup_only_public_preflight" == "1" ]]; then
   extra_runner_args+=(--setup-only-public-preflight)
+fi
+if [[ "$setup_only_agent_install_canary" == "1" ]]; then
+  extra_runner_args+=(--setup-only-agent-install-canary)
+fi
+if [[ -n "$benchmark_egress_no_proxy" ]]; then
+  extra_runner_args+=(
+    --benchmark-egress-no-proxy "$benchmark_egress_no_proxy"
+  )
 fi
 if [[ -n "$product_mode_soft_verify_policy" ]]; then
   extra_runner_args+=(
@@ -481,7 +764,8 @@ if ((task_count > 1)); then
 else
   extra_runner_args+=(--task-id "$task_id")
 fi
-if [[ "${SKILLSBENCH_APPEND_HISTORY:-0}" == "1" ]]; then
+if [[ "${SKILLSBENCH_APPEND_HISTORY:-0}" == "1" ]] &&
+  [[ "$setup_only_public_preflight" != "1" ]]; then
   extra_runner_args+=(--append-history)
 fi
 if [[ "$skip_global_ledger_sync" == "1" ]]; then
@@ -491,8 +775,23 @@ if [[ "$skip_current_aggregate_update" == "1" ]]; then
   extra_runner_args+=(--skip-current-aggregate-update)
 fi
 
-run_group="skillsbench-codex-cli-goal-xhigh-${safe_task}-${tag}-${stamp}"
-job_name="${safe_task}__codex_cli_goal_xhigh_${tag}_${stamp}"
+codex_channel_id="$(
+  python3 - "$job_name" <<'PY'
+import hashlib
+import sys
+
+print(hashlib.sha256(sys.argv[1].encode("utf-8")).hexdigest()[:16])
+PY
+)"
+codex_remote_socket="/tmp/loopx-codex-${codex_channel_id}.sock"
+codex_remote_client="/tmp/loopx-codex-${codex_channel_id}"
+codex_prompt_bridge_command=$(
+  printf '%q ' ssh "${ssh_command_options[@]}" \
+    "$SKILLSBENCH_SSH_DESTINATION" env
+  printf '%s ' '{loopx_allowed_env}'
+  printf '%q ' bash -lc
+  printf '%s' '{private_bridge_command_sh}'
+)
 if [[ -n "${SKILLSBENCH_LEDGER_CATCHUP_GROUP:-}" ]]; then
   ledger_catchup_group="$SKILLSBENCH_LEDGER_CATCHUP_GROUP"
 elif [[ -n "${SKILLSBENCH_CANONICAL_CASE_IDS_FILE:-}" ]]; then
@@ -530,8 +829,18 @@ remote_command=$(
     --codex-api-egress-mode reverse-tunnel \
     --codex-api-reverse-tunnel-proxy "$loopback_proxy_url" \
     --benchmark-egress-proxy-mode "$benchmark_egress_proxy_mode" \
+    --docker-apt-source-mode "$docker_apt_source_mode" \
+    --docker-apt-transport-mode "$docker_apt_transport_mode" \
+    --docker-pip-index-mode "$docker_pip_index_mode" \
+    --docker-pip-build-mode "$docker_pip_build_mode" \
     --host-local-acp-launch \
-    --local-codex-bin "$remote_codex_bin" \
+    --local-codex-bin
+  if [[ "$local_codex_split_control" == "1" ]]; then
+    printf '%s ' '{codex_bridge_client}'
+  else
+    printf '%q ' "$remote_codex_bin"
+  fi
+  printf '%q ' \
     --local-codex-sandbox "$local_codex_sandbox" \
     --remote-command-file-bridge-probe \
     --run-group-id "$run_group" \
@@ -548,6 +857,9 @@ supervisor_cmd=(
   "${ssh_options[@]}"
   --cleanup-stale-local-forward
   --remote-forward "127.0.0.1:${remote_proxy_port}:${local_proxy_host}:${local_proxy_port}"
+  --codex-reverse-proxy-port "$remote_proxy_port"
+  --benchmark-egress-proxy-port "$remote_proxy_port"
+  --container-forwarder-port "$remote_proxy_port"
   --probe-timeout-sec "$tunnel_probe_timeout"
   --tunnel-ready-timeout-sec "$tunnel_ready_timeout"
   --tunnel-health-interval-sec "$tunnel_health_interval"
@@ -570,6 +882,23 @@ supervisor_cmd=(
   --private-log-path "${private_dir}/remote-command.log"
   --public-output-path "${public_dir}/supervisor.public.json"
 )
+
+if [[ -n "$local_proxy_command" ]]; then
+  supervisor_cmd+=(
+    --local-forward-managed-command "$local_proxy_command"
+  )
+fi
+
+if [[ "$local_codex_split_control" == "1" ]]; then
+  supervisor_cmd+=(
+    --codex-bridge
+    --codex-bin "$local_codex_bin"
+    --codex-remote-socket "$codex_remote_socket"
+    --codex-remote-client-path "$codex_remote_client"
+    --codex-prompt-bridge-command "$codex_prompt_bridge_command"
+    --codex-participant-sandbox "$local_codex_sandbox"
+  )
+fi
 
 if [[ "$setup_only_public_preflight" != "1" ]]; then
   supervisor_cmd+=(
@@ -601,20 +930,45 @@ if [[ "$dry_run" == "true" ]]; then
   printf 'public_output=%s/supervisor.public.json\n' "$public_dir"
   printf 'private_dir=%s\n' "$private_dir"
   printf 'remote_proxy_port=%s\n' "$remote_proxy_port"
+  printf 'remote_proxy_port_mode=%s\n' "$remote_proxy_port_mode"
+  printf 'proxy_port_coherence_guard=enforced\n'
   printf 'docker_proxy_host_recorded=false\n'
   printf 'docker_proxy_endpoint_mode=%s\n' "$docker_proxy_endpoint_mode"
   printf 'docker_api_version=%s\n' "$docker_api_version"
   printf 'remote_codex_bin_mode=%s\n' "$remote_codex_bin_mode"
+  printf 'local_codex_split_control=%s\n' "$local_codex_split_control"
+  printf 'local_codex_provider=%s\n' \
+    "$([[ "$local_codex_split_control" == "1" ]] && echo reverse_channel || echo exact_host)"
   printf 'runner_profile_loaded=%s\n' "$runner_profile_loaded"
   printf 'runner_profile_path_recorded=false\n'
   printf 'runner_profile_values_recorded=false\n'
+  printf 'runner_connectivity_preflight=%s\n' \
+    "$runner_connectivity_preflight"
   printf 'local_codex_sandbox=%s\n' "$local_codex_sandbox"
+  printf 'local_codex_exec_timeout_sec=%s\n' \
+    "${local_codex_exec_timeout:-runner-default}"
+  printf 'host_local_acp_codex_exec_preflight_attempts=%s\n' \
+    "$host_local_acp_codex_exec_preflight_attempts"
+  printf 'outer_timeout_sec=%s\n' "${outer_timeout:-runner-default}"
+  printf 'exact_host_codex_sandbox_preflight=%s\n' \
+    "$exact_host_codex_sandbox_preflight"
+  printf 'exact_host_codex_sandbox_preflight_timeout_sec=%s\n' \
+    "$exact_host_codex_sandbox_preflight_timeout"
   printf 'codex_cli_goal_thread_prewarm=%s\n' "$codex_cli_goal_thread_prewarm"
   printf 'allow_staged_bootstrap_repair_run=%s\n' "$allow_staged_bootstrap_repair_run"
   printf 'setup_only_public_preflight=%s\n' "$setup_only_public_preflight"
+  printf 'setup_only_agent_install_canary=%s\n' \
+    "$setup_only_agent_install_canary"
   printf 'public_artifact_sync_interval_sec=%s\n' \
     "$public_artifact_sync_interval"
   printf 'benchmark_egress_proxy_mode=%s\n' "$benchmark_egress_proxy_mode"
+  printf 'benchmark_egress_no_proxy_configured=%s\n' \
+    "$([[ -n "$benchmark_egress_no_proxy" ]] && echo 1 || echo 0)"
+  printf 'benchmark_egress_no_proxy_raw_value_recorded=false\n'
+  printf 'docker_apt_source_mode=%s\n' "$docker_apt_source_mode"
+  printf 'docker_apt_transport_mode=%s\n' "$docker_apt_transport_mode"
+  printf 'docker_pip_index_mode=%s\n' "$docker_pip_index_mode"
+  printf 'docker_pip_build_mode=%s\n' "$docker_pip_build_mode"
   printf 'product_mode_soft_verify_policy=%s\n' \
     "${product_mode_soft_verify_policy:-runner-default}"
   printf 'remote_command_file_bridge_probe_command_configured=%s\n' \
@@ -625,6 +979,8 @@ if [[ "$dry_run" == "true" ]]; then
     "$([[ -n "$remote_command_file_bridge_agent_command" ]] && echo 1 || echo 0)"
   printf 'remote_command_file_bridge_agent_command_instrumented=%s\n' \
     "$remote_command_file_bridge_agent_command_instrumented"
+  printf 'local_codex_proxy_command_configured=%s\n' \
+    "$([[ -n "$local_proxy_command" ]] && echo 1 || echo 0)"
   printf 'loopx_turn_validation_command_configured=%s\n' \
     "$([[ -n "$loopx_turn_validation_command" ]] && echo 1 || echo 0)"
   printf 'loopx_turn_max_turns=%s\n' "$loopx_turn_max_turns"
@@ -637,12 +993,29 @@ if [[ "$dry_run" == "true" ]]; then
     printf 'standard_aggregate=%s\n' "$standard_aggregate"
   fi
   if [[ "$runner_profile_loaded" == "true" ]] ||
+    [[ "$local_codex_split_control" == "1" ]] ||
     [[ -n "$remote_command_file_bridge_probe_command" ]] ||
     [[ -n "$remote_command_file_bridge_solver_command" ]] ||
     [[ -n "$remote_command_file_bridge_agent_command" ]] ||
-    [[ -n "$loopx_turn_validation_command" ]]; then
+    [[ -n "$local_proxy_command" ]] ||
+    [[ -n "$loopx_turn_validation_command" ]] ||
+    [[ -n "$benchmark_egress_no_proxy" ]]; then
     printf 'private_runner_command_values_redacted=true\n'
     printf 'private_runner_arg_names='
+    [[ "$local_codex_split_control" == "1" ]] &&
+      printf '%s ' --codex-bridge --codex-bin --codex-remote-socket
+    [[ "$local_codex_split_control" == "1" ]] &&
+      printf '%s ' --codex-remote-client-path --codex-prompt-bridge-command
+    [[ "$local_codex_split_control" == "1" ]] &&
+      printf '%s ' --codex-participant-sandbox
+    [[ "$local_codex_split_control" == "1" ]] &&
+      printf '%s ' --local-codex-provider --host-local-acp-codex-exec-preflight
+    [[ "$local_codex_split_control" == "1" ]] &&
+      printf '%s ' --host-local-acp-codex-exec-preflight-attempts
+    [[ -n "$local_codex_exec_timeout" ]] &&
+      printf '%s ' --local-codex-exec-timeout-sec
+    [[ -n "$outer_timeout" ]] &&
+      printf '%s ' --outer-timeout-sec
     [[ -n "$remote_command_file_bridge_probe_command" ]] &&
       printf '%s ' --remote-command-file-bridge-probe-command
     [[ -n "$remote_command_file_bridge_solver_command" ]] &&
@@ -651,8 +1024,12 @@ if [[ "$dry_run" == "true" ]]; then
       printf '%s ' --remote-command-file-bridge-agent-command
     [[ "$remote_command_file_bridge_agent_command_instrumented" == "1" ]] &&
       printf '%s ' --remote-command-file-bridge-agent-command-instrumented
+    [[ -n "$local_proxy_command" ]] &&
+      printf '%s ' --local-forward-managed-command
     [[ -n "$loopx_turn_validation_command" ]] &&
       printf '%s ' --loopx-turn-validation-command
+    [[ -n "$benchmark_egress_no_proxy" ]] &&
+      printf '%s ' --benchmark-egress-no-proxy
     [[ "$route" == "loopx-turn-agent-cli" ]] &&
       printf '%s ' --loopx-turn-max-turns --loopx-turn-progress-exit-code
     [[ "$route" == "loopx-turn-agent-cli" ]] &&
@@ -701,13 +1078,20 @@ job_name=${job_name}
 public_output=${public_dir}/supervisor.public.json
 private_dir=${private_dir}
 remote_proxy_port=${remote_proxy_port}
+remote_proxy_port_mode=${remote_proxy_port_mode}
 docker_proxy_host=${docker_proxy_host}
 docker_proxy_endpoint_mode=${docker_proxy_endpoint_mode}
 docker_api_version=${docker_api_version}
 remote_codex_bin_mode=${remote_codex_bin_mode}
+local_codex_split_control=${local_codex_split_control}
+local_codex_provider=$([[ "$local_codex_split_control" == "1" ]] && echo reverse_channel || echo exact_host)
+runner_connectivity_preflight=${runner_connectivity_preflight}
 local_codex_sandbox=${local_codex_sandbox}
 codex_cli_goal_thread_prewarm=${codex_cli_goal_thread_prewarm}
 allow_staged_bootstrap_repair_run=${allow_staged_bootstrap_repair_run}
 setup_only_public_preflight=${setup_only_public_preflight}
+setup_only_agent_install_canary=${setup_only_agent_install_canary}
+exact_host_codex_sandbox_preflight=${exact_host_codex_sandbox_preflight}
+exact_host_codex_sandbox_preflight_timeout_sec=${exact_host_codex_sandbox_preflight_timeout}
 public_artifact_sync_interval_sec=${public_artifact_sync_interval}
 EOF

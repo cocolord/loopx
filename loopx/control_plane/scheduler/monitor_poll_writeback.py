@@ -8,6 +8,7 @@ from ..todos.contract import (
     TODO_TASK_CLASS_MONITOR,
     TODO_TASK_CLASS_USER_GATE,
     normalize_todo_id,
+    resolve_next_user_task_class,
 )
 from .monitor_todo import (
     monitor_next_due_at,
@@ -30,12 +31,32 @@ def resolve_monitor_todo_item(
     if not normalized_todo_id and not safe_target_key:
         raise ValueError("monitor todo writeback requires --todo-id or --target-key")
     payload = list_goal_todos(registry_path=registry_path, goal_id=goal_id, role="agent")
+    items = payload.get("todos") if isinstance(payload.get("todos"), list) else []
+    if normalized_todo_id:
+        matches = [
+            item
+            for item in items
+            if isinstance(item, dict)
+            and normalize_todo_id(item.get("todo_id")) == normalized_todo_id
+        ]
+        if not matches:
+            raise ValueError(f"monitor todo_id {normalized_todo_id!r} was not found")
+        if len(matches) > 1:
+            raise ValueError(f"monitor todo_id {normalized_todo_id!r} matched multiple todos")
+        item = matches[0]
+        item_target_key = str(item.get("target_key") or "").strip()
+        if safe_target_key and item_target_key and safe_target_key != item_target_key:
+            raise ValueError(
+                f"monitor todo_id {normalized_todo_id!r} resolves target_key "
+                f"{item_target_key!r}, not {safe_target_key!r}"
+            )
+        if monitor_todo_task_class(item) != TODO_TASK_CLASS_MONITOR:
+            raise ValueError("monitor-poll todo writeback target must be task_class=continuous_monitor")
+        return item
+
     matches: list[dict[str, Any]] = []
-    for item in payload.get("todos") if isinstance(payload.get("todos"), list) else []:
+    for item in items:
         if not isinstance(item, dict):
-            continue
-        if normalized_todo_id and normalize_todo_id(item.get("todo_id")) == normalized_todo_id:
-            matches.append(item)
             continue
         if safe_target_key and str(item.get("target_key") or "").strip() == safe_target_key:
             matches.append(item)
@@ -65,6 +86,7 @@ def write_monitor_poll_todo_state(
     reason_summary: str | None = None,
     next_agent_todo: str | None = None,
     next_user_todo: str | None = None,
+    next_user_task_class: str | None = None,
     next_claimed_by: str | None = None,
     agent_id: str | None = None,
 ) -> dict[str, Any] | None:
@@ -75,6 +97,10 @@ def write_monitor_poll_todo_state(
     safe_result_hash = str(result_hash or "").strip()
     if not safe_result_hash:
         raise ValueError("monitor todo writeback requires --result-hash")
+    effective_next_user_task_class = resolve_next_user_task_class(
+        next_user_todo,
+        next_user_task_class,
+    )
     item = resolve_monitor_todo_item(
         registry_path=registry_path,
         goal_id=goal_id,
@@ -146,10 +172,18 @@ def write_monitor_poll_todo_state(
                 goal_id=goal_id,
                 role="user",
                 text=next_user_todo,
-                task_class=TODO_TASK_CLASS_USER_GATE,
-                action_kind="gate",
+                task_class=effective_next_user_task_class,
+                action_kind=(
+                    "gate"
+                    if effective_next_user_task_class == TODO_TASK_CLASS_USER_GATE
+                    else None
+                ),
                 agent_id=agent_id,
-                unblocks_todo_id=resolved_todo_id,
+                unblocks_todo_id=(
+                    resolved_todo_id
+                    if effective_next_user_task_class == TODO_TASK_CLASS_USER_GATE
+                    else None
+                ),
                 dry_run=not execute,
             )
         )

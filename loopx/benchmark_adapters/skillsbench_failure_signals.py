@@ -58,7 +58,7 @@ _FAILURE_DEPENDENCY_CLASS_PATTERNS = (
     (
         "python_package",
         r"python\S*\s+-m\s+pip\s+install|pip3?\s+install|pypi\.|"
-        r"pythonhosted\.org",
+        r"pythonhosted\.org|pip\._vendor\.",
     ),
     ("python_uv", r"\buvx?\b|astral\.sh"),
     ("conda_package", r"\bconda\b|\bmamba\b|anaconda\.(?:com|org)"),
@@ -99,12 +99,33 @@ _FAILURE_REASON_PATTERNS = (
         r"cannot connect to proxy|could not connect to proxy",
     ),
     (
+        "proxy_authentication_required",
+        r"proxy authentication required|(?:http[^\n]*\s407\b)|"
+        r"(?:status code|status:)\s*407\b|\b407\s+status code\b",
+    ),
+    (
         "tls_or_certificate",
         r"certificate verif(?:y|ication) failed|ssl certificate problem|"
         r"tls handshake|could not handshake|"
         r"unable to get local issuer certificate",
     ),
+    (
+        "http_unauthorized",
+        r"(?:http[^\n]*\s401\b)|401 unauthorized|"
+        r"(?:status code|status:)\s*401\b|\b401\s+status code\b",
+    ),
+    (
+        "http_forbidden",
+        r"(?:http[^\n]*\s403\b)|403 forbidden|"
+        r"(?:status code|status:)\s*403\b|\b403\s+status code\b",
+    ),
     ("http_not_found", r"(?:http[^\n]*\s404\b|404 not found)"),
+    (
+        "http_client_error",
+        r"(?:http[^\n]*\s(?!(?:401|403|404|407)\b)4\d\d\b)|"
+        r"(?:status code|status:)\s*(?!(?:401|403|404|407)\b)4\d\d\b|"
+        r"\b(?!(?:401|403|404|407)\b)4\d\d\s+(?:client error|status code)\b",
+    ),
     ("http_server_error", r"(?:http[^\n]*\s5\d\d\b|5\d\d server error)"),
     ("apt_fetch_failed", r"failed to fetch"),
     ("apt_no_pubkey", r"\bno_pubkey\b"),
@@ -145,6 +166,11 @@ _FAILURE_REASON_PATTERNS = (
         r"subprocess-exited-with-error",
     ),
     ("pip_os_error", r"could not install packages due to an oserror"),
+    (
+        "pip_vendor_network",
+        r"pip\._vendor\.[^\n]*(?:network|connection|retry|timed?\s*out|"
+        r"incompleteread|protocolerror|proxyerror)",
+    ),
     ("permission_denied", r"permission denied|operation not permitted"),
     ("missing_file", r"no such file|does not exist"),
     ("no_space_left", r"no space left on device"),
@@ -170,17 +196,22 @@ _TRANSIENT_FAILURE_REASONS = {
     "http_server_error",
     "network_unreachable",
     "proxy_connect",
+    "pip_vendor_network",
     "retry_exhausted",
 }
 _DETERMINISTIC_FAILURE_REASONS = {
     "apt_package_unavailable",
+    "http_client_error",
+    "http_forbidden",
     "http_not_found",
+    "http_unauthorized",
     "missing_file",
     "no_space_left",
     "permission_denied",
     "pip_build_failure",
     "pip_no_matching_distribution",
     "pip_os_error",
+    "proxy_authentication_required",
     "tls_or_certificate",
 }
 
@@ -194,9 +225,13 @@ _APT_FAILURE_SUBTYPE_REASON_PRIORITY = (
     ("apt_release_expired", "release_metadata"),
     ("apt_package_unavailable", "package_unavailable"),
     ("dns_resolution", "dns_resolution"),
+    ("proxy_authentication_required", "proxy_authentication_required"),
     ("proxy_connect", "proxy_connect"),
     ("tls_or_certificate", "tls_or_certificate"),
+    ("http_unauthorized", "http_unauthorized"),
+    ("http_forbidden", "http_forbidden"),
     ("http_not_found", "http_not_found"),
+    ("http_client_error", "http_client_error"),
     ("http_server_error", "http_server_error"),
     ("network_unreachable", "network_unreachable"),
     ("connection_timeout", "connection_timeout"),
@@ -497,6 +532,22 @@ def skillsbench_pip_bootstrap_failure_subtype(error_text: str) -> str:
     if any(
         any(host in line for host in package_hosts)
         and any(marker in line for marker in network_failures)
+        for line in text.splitlines()
+    ):
+        return "package_index_network_failure"
+    pip_vendor_network_markers = (
+        "network",
+        "connection",
+        "retry",
+        "timed out",
+        "timeout",
+        "incompleteread",
+        "protocolerror",
+        "proxyerror",
+    )
+    if any(
+        "pip._vendor." in line
+        and any(marker in line for marker in pip_vendor_network_markers)
         for line in text.splitlines()
     ):
         return "package_index_network_failure"

@@ -4,6 +4,10 @@ from pathlib import Path
 from typing import Any
 
 from ...materials import extract_review_materials
+from ..goals.active_state_metadata import (
+    TODO_ARCHIVE_HEADER_MARKERS,
+    todo_role_for_heading,
+)
 from .contract import (
     TODO_TASK_PATTERN,
     normalize_todo_id,
@@ -11,8 +15,12 @@ from .contract import (
     todo_done_for_status,
     todo_status_from_marker,
 )
-from ..goals.active_state_metadata import TODO_ARCHIVE_HEADER_MARKERS, todo_role_for_heading
-from .todo_summary import MAX_STATUS_TODOS_PER_ROLE, compact_todo_group, normalize_todo_text
+from .decision_scope import build_standing_decision_authority
+from .todo_summary import (
+    MAX_STATUS_TODOS_PER_ROLE,
+    compact_todo_group,
+    normalize_todo_text,
+)
 
 
 def parse_active_state_todos(
@@ -93,6 +101,7 @@ def parse_active_state_todos(
         items["user"],
         source_section=source_sections["user"],
         role="user",
+        include_empty_source=source_sections["user"] is not None,
         preferred_todo_ids=preferred_todo_ids,
         resume_source_items=resume_source_items,
         rollout_events=rollout_events,
@@ -102,6 +111,7 @@ def parse_active_state_todos(
         items["agent"],
         source_section=source_sections["agent"],
         role="agent",
+        include_empty_source=source_sections["agent"] is not None,
         preferred_todo_ids=preferred_todo_ids,
         resume_source_items=resume_source_items,
         rollout_events=rollout_events,
@@ -111,4 +121,7 @@ def parse_active_state_todos(
         result["user_todos"] = user
     if agent:
         result["agent_todos"] = agent
+    standing_authority = build_standing_decision_authority(items["user"])
+    if standing_authority:
+        result["standing_decision_authority"] = standing_authority
     return result

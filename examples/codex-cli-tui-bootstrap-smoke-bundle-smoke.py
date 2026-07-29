@@ -22,7 +22,11 @@ def add_tree(tar: tarfile.TarFile, root: Path, name: str) -> None:
         for child in sorted(path.rglob("*")):
             if ".git" in child.parts or "__pycache__" in child.parts:
                 continue
-            tar.add(child, arcname=str(Path("loopx-main") / child.relative_to(root)))
+            tar.add(
+                child,
+                arcname=str(Path("loopx-main") / child.relative_to(root)),
+                recursive=False,
+            )
     else:
         tar.add(path, arcname=str(Path("loopx-main") / name))
 
@@ -135,6 +139,8 @@ def main() -> None:
         assert "quota should-run" in bundle["quota_guard_command"], bundle
         assert "--agent-id codex-side-bypass" in bundle["quota_guard_command"], bundle
         assert "refresh-state --goal-id public-fresh-codex-cli-goal" in bundle["refresh_command"], bundle
+        assert "--delivery-outcome outcome_progress" in bundle["progress_refresh_command"], bundle
+        assert "--agent-id codex-side-bypass" in bundle["progress_refresh_command"], bundle
         assert "quota spend-slot" in bundle["quota_spend_command"], bundle
         assert "--source heartbeat --execute --agent-id codex-side-bypass" in bundle["quota_spend_command"], bundle
         assert any("message-only command" in item for item in bundle["validation_checklist"]), bundle

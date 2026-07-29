@@ -1,16 +1,20 @@
 # 第 1 讲：从 Showcase 到第一次真实 Loop
 
-> 目标：先建立一个可运行的整体画面。此时不要求记住所有状态字段，只要能回答：谁负责执行、谁负责保存长期状态、一次 App automation 为什么会继续或停下。
+> **本讲结论：** 第一次真实 Loop 不是“heartbeat 调一次模型”，而是外置 source state 被
+> 编译成适合有限上下文的 CLI packet 和 bounded action，执行结果经验证写回，再由
+> scheduler receipt 决定下一次唤醒。
 
 ## 本讲在课程中的位置
 
-[第 0 讲](00-goal-control-plane-architecture.md)已经用 authority map 区分了 LoopX、host、runtime、memory、workspace 和
-projection。本讲不再讨论“应该画哪一种架构图”，而是沿总览图跑通第一次真实 Loop。
+[第 0 讲](00-goal-control-plane-architecture.md)已经从 Issue-Fix、Single-Agent Auto ML
+与 Auto Research 三条产品闭环推导出 Kernel、Capability Pack、Domain State、host/runtime
+和外部事实源的边界。
+本讲不再展开领域判断，而是沿共同生命周期跑通第一次真实 Loop。
 全课由第 0 讲架构导论和 9 讲专题组成，每讲只增加一个主要抽象：
 
 | 讲次 | 新增的主要抽象 | 学完后能回答的问题 |
 | --- | --- | --- |
-| 0 | Goal control plane authority | 谁拥有长期事实、谁执行、谁提供回执？ |
+| 0 | Showcase 与共同架构 | 不同领域能力怎样复用同一 Kernel？ |
 | 1 | 一次真实 Loop | 用户说一句话之后，到底发生了什么？ |
 | 2 | 状态底座 | 长期目标和事实保存在哪里？ |
 | 3 | 工作图 | 多个 peer 如何领取、交接和关闭工作？ |
@@ -30,26 +34,42 @@ projection。本讲不再讨论“应该画哪一种架构图”，而是沿总�
 1. 用一句话区分 LoopX、Codex App 和模型执行器。
 2. 说出 `$loopx <task>` 到第一次 bounded delivery 的真实 CLI 路径。
 3. 从 `interaction_contract` 中区分用户通道、agent 通道和 CLI 通道。
-4. 理解 Showcase 是公开证据目录，不是隐藏的工作流模板。
+4. 把一个 Showcase 产品闭环压成一次 bounded Turn。
 5. 在不修改状态的前提下预览一次 guided start。
 
-## 先看 LoopX 做成过什么
+## 先把三个 Showcase 压成一轮
 
-公开 Showcase 的价值不是展示“模型很聪明”，而是展示长期工作如何留下可审查证据。仓库中的 `docs/showcases/showcase-catalog.json` 是目录真相，当前代表性案例包括：
+第 0 讲看到的是完整产品闭环。本讲只截取其中一轮，观察 LoopX 如何把长期状态变成
+一次可提交的小变化：
 
-- 多个 PR 的夜间批处理，展示 bounded batch、验证和公开证据回写；
-- 从 issue 到修复 PR，展示任务发现、实现、验证和交付；
-- agent 通过 PR comment 协作，展示跨 agent 的显式交接；
-- LoopX 自己迭代 LoopX，展示 control plane 可以管理自身开发；
-- blocked P0 下继续独立 P1/P2，展示 gate 和安全旁路并不互相排斥。
+| Showcase 中的一轮 | 本轮输入 | Bounded action | 可接受回执 | 下一轮依据 |
+| --- | --- | --- | --- | --- |
+| Issue-Fix 实现修复 | 已确认 feasibility 的 fix todo、repository boundary | 在独立 worktree 复现、修改、运行聚焦验证 | diff、测试结果、commit/PR ref | PR lifecycle monitor |
+| Issue-Fix 跟进 PR | PR ref、checks/review observation、monitor due | 只读 poll 一次权威状态 | changed/no-change fingerprint | fix successor、继续 monitor 或 terminal |
+| Auto ML 启动候选 | metric/baseline contract、candidate todo、resource capacity、Graph refs | 实现并 preflight 一个候选，请求一次已授权 launch | code/task revision、window、provider readback | external-task monitor |
+| Auto ML 评价终态 | task monitor、matched result、guardrail contract | 检查可比性并完成一次结果归因 | model/infra classification、result ledger、Graph event | promote/no-promote、retry 或 replan |
+| Auto Research 执行假设 | 当前 agent frontier、hypothesis todo、metric contract | 运行一个隔离实验 | typed evidence packet、artifact ref | holdout、retry 或 retirement candidate |
+| Auto Research 做 holdout | dev evidence、protected evaluator、promotion policy | 在独立 oracle 上评价一次 | holdout result、boundary receipt | promotion review 或继续研究 |
 
-阅读 Showcase 时只问三件事：
+六种轮次都遵循同一个 transaction shape：
 
-1. 长期目标是什么？
-2. 每轮产出了什么可验证状态变化？
-3. 哪些边界没有被越过？
+```text
+read current source state
+  -> select one legal work item
+  -> execute one bounded action
+  -> validate result independently
+  -> write durable transition and evidence
+  -> derive the next wake-up condition
+```
 
-不要把 Showcase 理解成“复制这个 prompt 就能复现结果”。LoopX 复用的是状态与交互协议，不是某条轨迹的具体文本。
+Showcase 的价值不是给出可复制的 prompt，而是证明这个 transaction shape 能在多轮之后
+仍保留正确的 identity、authority、evidence 和 recovery。仓库中的
+`docs/showcases/showcase-catalog.json` 只是公开证据目录，不是隐藏的工作流模板。
+
+Auto ML 还说明同一轮可以消费两个可选 read model：Explore Graph 提供与当前候选相关的
+正负证据 lineage，Explore Harness 提供基于 todo、scope 和资源容量的 analysis-only
+portfolio。它们帮助 Agent 理解“为什么选这个候选”，但 `quota should-run` 仍决定“这一轮
+能不能做”，provider receipt 与 validator 才证明“一轮到底做成了什么”。
 
 ## 一句话心智模型
 
@@ -82,6 +102,30 @@ LoopX CLI -> State Kernel --+
   |
   +-> registry / events / active-state / run history
 ```
+
+## 从外置状态到有限上下文
+
+LoopX 不把整个 registry、event ledger、run history 和所有 todo 直接注入模型。正确路径是先
+从 canonical state 计算当前 read model，再把这一轮真正需要的内容编译成 packet：
+
+| Packet 层 | 典型内容 | 为什么必须保留 |
+| --- | --- | --- |
+| Identity | goal、agent lane、selected todo、snapshot/lineage | 防止把结果写到另一个目标或旧状态 |
+| Decision | mode、primary action、user/agent/CLI channel | 区分 deliver、wait、ask、repair 与 quiet |
+| Proof boundary | required evidence、gate、workspace/capability guard | 防止“做过”或“能做”冒充可提交 |
+| Closeout | refresh、receipt、spend、scheduler ACK 命令 | 让本轮结果进入下一轮可重放事实 |
+
+这与 host 原生 Goal 是互补关系。原生 Goal object 让 objective 和生命周期不依赖一次 prompt；
+LoopX packet 则让当前 Turn 不依赖模型记住完整项目过程。Codex App heartbeat automation
+持有稳定的 thin task body，Codex CLI 可以把同类 re-entry body 放进可见 `/goal`。它们只约定
+“怎样重新进入 LoopX”，不承载某一轮 packet。每次 host 唤醒后，executor 都要调用 LoopX CLI，
+由最新 state 编译出本轮不同的 packet。
+
+Packet 有三个明确的非目标：
+
+- 它不是 canonical state，不能被当作长期写入源；
+- 它不是 authority，显示某项工作不代表可以越过 gate 或 workspace guard；
+- 它不是历史摘要，长 rationale 应留在 evidence artifact，只通过紧凑 ref 进入本轮。
 
 ## 一次 Codex App 交互的真实路径
 

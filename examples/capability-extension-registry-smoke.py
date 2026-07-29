@@ -58,7 +58,11 @@ next_real_step = "Keep explicit enablement bounded."
 
     baseline = run_cli(runtime_root, "capability", "list")
     assert [item["id"] for item in baseline["capabilities"]] == [
+        "change-quality-qualification",
         "issue-fix",
+        "decision-context",
+        "project-skill-delivery",
+        "material-lifecycle",
         "semantic-preference",
         "reward-memory",
         "periodic-report",

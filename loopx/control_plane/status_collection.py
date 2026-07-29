@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from .goals.contract_health import project_contract_health_for_goal
 from .runtime.runtime_projection_route import (
     collect_runtime_projection_route_diagnostics,
 )
@@ -38,6 +39,7 @@ def collect_status(
     context: StatusCollectionContext,
     include_task_graph: bool = False,
     goal_id: str | None = None,
+    available_capabilities: Any = None,
 ) -> dict[str, Any]:
     display_limit = max(0, limit)
     control_plane_limit = max(display_limit, context.status_control_plane_context_limit)
@@ -66,7 +68,9 @@ def collect_status(
         runtime_root_override=str(runtime_root),
         scan_roots=scan_roots,
         limit=limit,
+        goal_id_filter=goal_filter,
     )
+    contract = project_contract_health_for_goal(contract, goal_id=goal_filter)
     queue = context.build_attention_queue(
         contract=contract,
         history=history,
@@ -99,6 +103,16 @@ def collect_status(
             else None
         )
     }
+    contract_projection = {
+        "ok": contract.get("ok"),
+        "summary": contract.get("summary"),
+        "errors": contract.get("errors") or [],
+        "warnings": contract.get("warnings") or [],
+        "checks": contract.get("checks") or [],
+    }
+    for key in ("error_diagnostics", "global_errors", "goal_errors"):
+        if contract.get(key):
+            contract_projection[key] = contract[key]
     payload = {
         "ok": bool(contract.get("ok")) and bool(global_registry.get("ok", True)),
         "registry": str(registry_path),
@@ -108,20 +122,17 @@ def collect_status(
         "status_contract": context.build_status_contract(),
         "goal_filter": goal_filter,
         **context.build_contract_health_projection(contract),
-        "contract": {
-            "ok": contract.get("ok"),
-            "summary": contract.get("summary"),
-            "errors": contract.get("errors") or [],
-            "warnings": contract.get("warnings") or [],
-            "checks": contract.get("checks") or [],
-        },
+        "contract": contract_projection,
         "global_registry": global_registry,
         "attention_queue": queue,
         **runtime_summaries,
         "promotion_gate": promotion_gate,
     }
     payload["runtime_projection_routes"] = runtime_projection_route_health
-    agent_management_projection = context.build_agent_management_projection(payload)
+    agent_management_projection = context.build_agent_management_projection(
+        payload,
+        available_capabilities=available_capabilities,
+    )
     if agent_management_projection.get("agents"):
         payload["agent_management_projection"] = agent_management_projection
     return payload

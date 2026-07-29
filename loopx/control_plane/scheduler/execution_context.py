@@ -10,7 +10,9 @@ SCHEDULER_EXECUTION_CONTEXT_SCHEMA_VERSION = "scheduler_execution_context_v0"
 
 
 class HostSurface(str, Enum):
+    ARK_MANAGED_AGENT = "ark_managed_agent"
     CODEX_APP = "codex_app"
+    CODEX_APP_SSH = "codex_app_ssh"
     CODEX_CLI = "codex_cli"
     GENERIC_CLI = "generic_cli"
     CLAUDE_CODE = "claude_code"
@@ -20,6 +22,7 @@ class HostSurface(str, Enum):
 class SchedulerOwner(str, Enum):
     HOST_AUTOMATION = "host_automation"
     AGENT_CLI_LOOP = "agent_cli_loop"
+    GOAL_RUNTIME = "goal_runtime"
     OUTER_CONTROLLER = "outer_controller"
     NONE = "none"
 
@@ -31,7 +34,9 @@ class ExecutionMode(str, Enum):
 
 
 class SchedulerRuntimeProfile(str, Enum):
+    ARK_MANAGED_AGENT_GOAL = "ark_managed_agent_goal"
     CODEX_APP_HEARTBEAT = "codex_app_heartbeat"
+    CODEX_APP_SSH_VISIBLE = "codex_app_ssh_goal"
     CODEX_CLI_VISIBLE = "codex_cli"
     CLAUDE_CODE_VISIBLE = "claude_code"
     GENERIC_CLI_AGENT_LOOP = "generic_cli"
@@ -39,10 +44,20 @@ class SchedulerRuntimeProfile(str, Enum):
 
 
 _SCHEDULER_RUNTIME_PROFILE_CONTEXTS = {
+    SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL: (
+        HostSurface.ARK_MANAGED_AGENT,
+        SchedulerOwner.GOAL_RUNTIME,
+        ExecutionMode.INTERACTIVE,
+    ),
     SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT: (
         HostSurface.CODEX_APP,
         SchedulerOwner.HOST_AUTOMATION,
         ExecutionMode.HOSTED_AUTOMATION,
+    ),
+    SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE: (
+        HostSurface.CODEX_APP_SSH,
+        SchedulerOwner.AGENT_CLI_LOOP,
+        ExecutionMode.INTERACTIVE,
     ),
     SchedulerRuntimeProfile.CODEX_CLI_VISIBLE: (
         HostSurface.CODEX_CLI,
@@ -132,6 +147,7 @@ class SchedulerExecutionContextResolution:
 def _validation_errors(context: SchedulerExecutionContext) -> list[str]:
     errors: list[str] = []
     cli_surfaces = {
+        HostSurface.CODEX_APP_SSH,
         HostSurface.CODEX_CLI,
         HostSurface.GENERIC_CLI,
         HostSurface.CLAUDE_CODE,
@@ -141,6 +157,16 @@ def _validation_errors(context: SchedulerExecutionContext) -> list[str]:
             errors.append("codex_app requires scheduler_owner=host_automation")
         if context.execution_mode is not ExecutionMode.HOSTED_AUTOMATION:
             errors.append("codex_app requires execution_mode=hosted_automation")
+    if context.host_surface is HostSurface.ARK_MANAGED_AGENT:
+        if context.scheduler_owner is not SchedulerOwner.GOAL_RUNTIME:
+            errors.append("ark_managed_agent requires scheduler_owner=goal_runtime")
+        if context.execution_mode is not ExecutionMode.INTERACTIVE:
+            errors.append("ark_managed_agent requires execution_mode=interactive")
+    if context.host_surface is HostSurface.CODEX_APP_SSH:
+        if context.scheduler_owner is not SchedulerOwner.AGENT_CLI_LOOP:
+            errors.append("codex_app_ssh requires scheduler_owner=agent_cli_loop")
+        if context.execution_mode is not ExecutionMode.INTERACTIVE:
+            errors.append("codex_app_ssh requires execution_mode=interactive")
     if context.host_surface is HostSurface.LOCAL_SCHEDULER:
         if context.scheduler_owner is not SchedulerOwner.HOST_AUTOMATION:
             errors.append("local_scheduler requires scheduler_owner=host_automation")
@@ -166,6 +192,11 @@ def _validation_errors(context: SchedulerExecutionContext) -> list[str]:
             errors.append("agent_cli_loop requires a CLI host surface")
         if context.execution_mode is ExecutionMode.HOSTED_AUTOMATION:
             errors.append("agent_cli_loop cannot use execution_mode=hosted_automation")
+    if context.scheduler_owner is SchedulerOwner.GOAL_RUNTIME:
+        if context.host_surface is not HostSurface.ARK_MANAGED_AGENT:
+            errors.append("goal_runtime requires host_surface=ark_managed_agent")
+        if context.execution_mode is not ExecutionMode.INTERACTIVE:
+            errors.append("goal_runtime requires execution_mode=interactive")
     if (
         context.execution_mode is ExecutionMode.HOSTED_AUTOMATION
         and context.scheduler_owner is not SchedulerOwner.HOST_AUTOMATION
@@ -335,6 +366,7 @@ def scheduler_execution_context_for_turn(
     scheduler_owner: str | None = None,
 ) -> SchedulerExecutionContextResolution:
     host_surface = {
+        "codex-app-ssh": HostSurface.CODEX_APP_SSH.value,
         "codex-cli": HostSurface.CODEX_CLI.value,
         "generic-cli": HostSurface.GENERIC_CLI.value,
         "claude-code": HostSurface.CLAUDE_CODE.value,

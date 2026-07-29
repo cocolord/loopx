@@ -7,6 +7,7 @@ from ..agents.agent_scope import (
     _agent_scope_filter_user_action_items,
     _agent_scope_filter_user_gate_items,
     _agent_scope_selectable_todo_item,
+    agent_scope_item_claimed_by,
 )
 from ..agents.capability_gate import missing_required_capabilities
 from .claim_visibility import (
@@ -15,6 +16,7 @@ from .claim_visibility import (
 )
 from .contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
+    TODO_TASK_CLASS_BLOCKER,
     TODO_TASK_CLASS_MONITOR,
 )
 from .deferred_resume import (
@@ -36,7 +38,6 @@ from .route_continuation import build_todo_route_continuation_lanes
 from .succession_warning import build_todo_succession_warning_lanes
 from .summary_item import compact_todo_summary_item, todo_summary_source_items
 from .user_gate import is_user_gate_todo_item
-
 
 MONITOR_DUE_ITEM_LIMIT = 1
 TODO_BACKLOG_ITEM_LIMIT = 8
@@ -92,6 +93,7 @@ QUOTA_PAYLOAD_ITEM_FIELDS = (
     "completed_at",
     "updated_at",
     "gate_state",
+    "reason",
 )
 QUOTA_PAYLOAD_LANE_LIMITS = {
     "monitor_due_items": MONITOR_DUE_ITEM_LIMIT,
@@ -111,6 +113,7 @@ QUOTA_PAYLOAD_LANE_LIMITS = {
     "current_agent_claimed_open_items": QUOTA_PAYLOAD_VISIBILITY_LANE_LIMIT,
     "current_agent_claimed_advancement_items": QUOTA_PAYLOAD_VISIBILITY_LANE_LIMIT,
     "current_agent_claimed_monitor_items": QUOTA_PAYLOAD_VISIBILITY_LANE_LIMIT,
+    "current_agent_blocker_items": QUOTA_PAYLOAD_DIAGNOSTIC_LANE_LIMIT,
     "claimed_by_others_items": QUOTA_PAYLOAD_DIAGNOSTIC_LANE_LIMIT,
     "other_agent_scoped_items": QUOTA_PAYLOAD_DIAGNOSTIC_LANE_LIMIT,
     "other_agent_bound_user_action_items": QUOTA_PAYLOAD_DIAGNOSTIC_LANE_LIMIT,
@@ -158,10 +161,22 @@ def _terminal_closure_proof_is_valid(
 ) -> bool:
     proof = value.get("terminal_closure_proof")
     items = value.get("items")
+    total_count = counts["total_count"]
+    displayed_items_cover_source = bool(
+        isinstance(total_count, int)
+        and (
+            (total_count == 0 and items == [])
+            or (
+                total_count > 0
+                and isinstance(items, list)
+                and 0 < len(items) <= total_count
+            )
+        )
+    )
     return bool(
         value.get("schema_version") == "todo_summary_v0"
         and isinstance(items, list)
-        and 0 < len(items) <= counts["total_count"]
+        and displayed_items_cover_source
         and all(
             isinstance(item, dict)
             and item.get("status") == "done"
@@ -180,7 +195,7 @@ def _terminal_closure_proof_is_valid(
         and proof.get("schema_version") == "todo_terminal_closure_proof_v0"
         and proof.get("role") == source_proof.get("role")
         and proof.get("source_section") == value.get("source_section")
-        and proof.get("item_count") == counts["total_count"]
+        and proof.get("item_count") == total_count
         and proof.get("all_todos_done") is True
         and _strict_non_negative_int(proof.get("monitor_open_count")) == 0
         and _strict_non_negative_int(proof.get("successor_gap_count")) == 0
@@ -200,7 +215,6 @@ def _validated_todo_source_contract(
     }
     valid_counts = (
         all(count is not None for count in counts.values())
-        and bool(counts["total_count"])
         and counts["total_count"]
         == counts["open_count"] + counts["done_count"] + counts["deferred_count"]
     )
@@ -413,6 +427,19 @@ def summarize_user_todos_for_quota(
         for item in lanes.open_items
         if is_user_gate_todo_item(item)
     ]
+    blocker_items = [
+        item
+        for item in lanes.all_open_items
+        if todo_item_task_class(item) == TODO_TASK_CLASS_BLOCKER
+        and str(item.get("status") or "").strip().lower() == "blocked"
+        and str(item.get("reason") or "").strip()
+    ]
+    agent_id = str((agent_identity or {}).get("agent_id") or "").strip()
+    current_agent_blocker_items = [
+        item
+        for item in blocker_items
+        if agent_id and agent_scope_item_claimed_by(item) == agent_id
+    ]
     summary = {
         "schema_version": value.get("schema_version"),
         "source_section": value.get("source_section"),
@@ -440,6 +467,13 @@ def summarize_user_todos_for_quota(
         "backlog_items": lanes.display_open_items[:TODO_BACKLOG_ITEM_LIMIT],
         "executable_backlog_items": lanes.executable_items[:TODO_BACKLOG_ITEM_LIMIT],
     }
+    if blocker_items:
+        summary["blocker_open_count"] = len(blocker_items)
+    if current_agent_blocker_items:
+        summary["current_agent_blocker_count"] = len(current_agent_blocker_items)
+        summary["current_agent_blocker_items"] = current_agent_blocker_items[
+            :QUOTA_PAYLOAD_DIAGNOSTIC_LANE_LIMIT
+        ]
     if closure_intent:
         summary["closure_intent"] = closure_intent
     monitor_writeback = todo_summary_monitor_writeback_contract(value)
@@ -630,6 +664,40 @@ def compact_quota_todo_summary_for_payload(summary: dict[str, Any]) -> dict[str,
         "full_detail_cold_path": "status, todo list, or active state",
     }
     return compact
+
+
+def compact_agent_lane_todos_for_status_display(payload: dict[str, object]) -> None:
+    queue = payload.get("attention_queue")
+    if not isinstance(queue, dict):
+        return
+    items = queue.get("items")
+    if not isinstance(items, list):
+        return
+    compacted = 0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        for key in ("user_todos", "agent_todos"):
+            summary = item.get(key)
+            if not isinstance(summary, dict):
+                continue
+            compact = compact_quota_todo_summary_for_payload(summary)
+            compaction = compact.get("payload_compaction")
+            if isinstance(compaction, dict):
+                compaction["full_detail_cold_path"] = (
+                    "status without --agent-id, todo list, or active state"
+                )
+            item[key] = compact
+            compacted += 1
+    if compacted:
+        payload["agent_lane_todo_summary_compaction"] = {
+            "schema_version": "agent_lane_status_todo_summary_compaction_v0",
+            "compacted_summary_count": compacted,
+            "reason": (
+                "status --agent-id keeps agent-lane display payloads bounded; "
+                "full todo detail remains on cold paths"
+            ),
+        }
 
 
 def summarize_project_asset_todos_for_quota(

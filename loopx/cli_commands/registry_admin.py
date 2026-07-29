@@ -269,6 +269,24 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         help="Enable or disable waiting-projection repair for this goal.",
     )
     configure_goal_parser.add_argument(
+        "--change-quality-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable or disable exact-scope change-quality qualification for this goal.",
+    )
+    configure_goal_parser.add_argument(
+        "--change-quality-safe-fix",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Allow or forbid one bounded safe-fix pass during change qualification.",
+    )
+    configure_goal_parser.add_argument(
+        "--change-quality-strict-receipt",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Require a valid exact-scope quality receipt at premerge.",
+    )
+    configure_goal_parser.add_argument(
         "--multi-subagent-feature",
         choices=["off", "enabled"],
         help=(
@@ -306,6 +324,15 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         help=(
             "Enable or disable automatic Explore Graph projection at material "
             "refresh boundaries. This is independent from Explore Harness planning."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--lark-kanban-heartbeat-sync",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable or disable best-effort generic Lark Kanban sync from goal "
+            "heartbeats. Default is off; a local board binding alone never enables it."
         ),
     )
     configure_goal_parser.add_argument(
@@ -711,6 +738,9 @@ def handle_registry_admin_command(
                 self_repair_enabled=args.self_repair_enabled,
                 self_repair_health=args.self_repair_health,
                 self_repair_waiting_projection=args.self_repair_waiting_projection,
+                change_quality_enabled=args.change_quality_enabled,
+                change_quality_safe_fix=args.change_quality_safe_fix,
+                change_quality_strict_receipt=args.change_quality_strict_receipt,
                 multi_subagent_feature=args.multi_subagent_feature,
                 orchestration_mode=args.orchestration_mode,
                 spawn_allowed=args.spawn_allowed,
@@ -721,6 +751,7 @@ def handle_registry_admin_command(
                 explore_harness_profile=args.explore_harness_profile,
                 clear_explore_harness_profile=bool(args.clear_explore_harness_profile),
                 explore_graph_enabled=args.explore_graph_enabled,
+                lark_kanban_heartbeat_sync=args.lark_kanban_heartbeat_sync,
                 registered_agents=args.registered_agents,
                 clear_registered_agents=bool(args.clear_registered_agents),
                 agent_profiles=agent_profiles,

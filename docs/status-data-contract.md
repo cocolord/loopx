@@ -462,10 +462,12 @@ goals must stay out of the eligible lane even when they have a high
 
 By default `loopx status` is the multi-goal dashboard/control-plane view.
 `loopx status --goal-id <goal-id>` keeps global health fields such as
-`contract` and `global_registry`, but focuses goal-scoped sections such as
-`attention_queue`, `run_history`, `event_ledger_summary`, `usage_summary`, and
-`todo_index` on the requested goal. Use `loopx diagnose --goal-id <goal-id>`
-when an agent needs the richer reasoning packet for one goal.
+`global_registry`, while its `contract` projection contains only global errors
+plus errors owned by the selected goal. It also focuses goal-scoped sections
+such as `attention_queue`, `run_history`, `event_ledger_summary`,
+`usage_summary`, and `todo_index` on the requested goal. Use
+`loopx diagnose --goal-id <goal-id>` when an agent needs the richer reasoning
+packet for one goal.
 
 Consumers should treat unknown fields as additive. Required fields for a
 first-screen UI are `ok`, `contract`, and `attention_queue`.
@@ -645,10 +647,20 @@ The summary counters are intentionally small:
 - `warnings`: non-blocking issues worth showing in a secondary health panel.
 - `checks`: successful observations, useful for audit trails.
 
-`errors`, `warnings`, and `checks` are short strings. Checks should be concrete
-enough to support an operator decision without exposing local paths or private
-evidence. They must be public-safe before a project exposes this export outside
-the local machine.
+`error_diagnostics` is the source of truth for error ownership. Each row has a
+stable `code`, a human-readable `message`, and either `scope=global` or
+`scope=goal` with a `goal_id`; a finding shared by a known subset may use
+`scope=goals` with `goal_ids`. Registry parse failures, ambiguous goal identity,
+registry boundary violations, and public-boundary violations are global.
+Goal-entry, active-state, and todo contract failures are owned by the goal or
+known goal set that produced them.
+
+`errors`, `global_errors`, and `goal_errors` are compatibility projections
+derived from those structured diagnostics; consumers must not infer ownership
+from message prefixes. `warnings` and `checks` remain short strings. Checks
+should be concrete enough to support an operator decision without exposing
+local paths or private evidence. They must be public-safe before a project
+exposes this export outside the local machine.
 
 ## Attention Queue
 
@@ -981,6 +993,17 @@ Item fields:
   what it may execute. A current-agent claimed todo may be selected even when
   the active state's global `Next Action` names another peer's lane; that is not
   a state projection mismatch.
+- Agent-scoped quota payloads also expose the versioned `task_scope` enum
+  `goal_all_read_claimed_run_global_read_v0`. It means the peer may
+  read all ordinary todos in the current goal, may consider its own claimed or
+  an eligible unclaimed candidate, must claim before execution, and may execute
+  only its claimed eligible todo. Other-agent claims are diagnostic only.
+  Cross-goal reads stay outside goal-local routing and require an explicit
+  read-only global-manager inventory such as `loopx global-summary`; they never
+  grant cross-goal execution. Existing goal, agent, and cold-path command
+  fields supply the binding parameters without duplicating them. TurnEnvelope
+  retains this compact enum so the model sees the same boundary as the full
+  quota decision.
 - `dependency_blockers`: optional compact summary of unfinished user todos from
   other current attention-queue goals. This lets dashboards and heartbeat
   dispatchers show sibling/project dependency gates separately from the current
@@ -1366,7 +1389,7 @@ token is derived from scheduler action plus identity/profile inputs, while the
 hot path carries only action fields plus a short `identity_signature`; the
 profile signature, reset-condition summary, and full stateful-backoff policy are
 available from `scheduler_hint.cold_path_detail` when callers request
-`loopx quota should-run --include-scheduler-detail`. The reset moves Codex
+`loopx quota should-run --include-detail scheduler`. The reset moves Codex
 App/local cadence back to the current profile's initial interval before
 unchanged backoff resumes, and does not spend quota.
 Codex App heartbeats should use `automation_update` only when

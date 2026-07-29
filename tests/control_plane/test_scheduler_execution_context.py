@@ -22,7 +22,9 @@ from loopx.control_plane.work_items.interaction_contract import (
 
 
 VALID_COMBINATIONS = {
+    ("ark_managed_agent", "goal_runtime", "interactive"),
     ("codex_app", "host_automation", "hosted_automation"),
+    ("codex_app_ssh", "agent_cli_loop", "interactive"),
     ("local_scheduler", "host_automation", "hosted_automation"),
     *{
         (surface, owner, mode)
@@ -38,9 +40,19 @@ VALID_COMBINATIONS = {
 
 FIRST_CLASS_RUNTIME_PROFILES = (
     (
+        SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL,
+        ("ark_managed_agent", "goal_runtime", "interactive"),
+        " --runtime-profile ark_managed_agent_goal",
+    ),
+    (
         SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT,
         ("codex_app", "host_automation", "hosted_automation"),
         " --codex-app",
+    ),
+    (
+        SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE,
+        ("codex_app_ssh", "agent_cli_loop", "interactive"),
+        " --runtime-profile codex_app_ssh_goal",
     ),
     (
         SchedulerRuntimeProfile.CODEX_CLI_VISIBLE,
@@ -274,6 +286,25 @@ def test_generic_outer_controller_rerun_actions_are_typed() -> None:
     assert scheduler_args == " --runtime-profile outer_controller"
     assert all(scheduler_args in action for action in actions)
     assert all(" -H " not in action for action in actions)
+
+
+def test_codex_app_monitor_quiet_retry_uses_turn_receipt() -> None:
+    actions = interaction_next_cli_actions(
+        {
+            "goal_id": "codex-heartbeat-fixture",
+            "agent_identity": {"agent_id": "codex-fixture"},
+        },
+        mode="monitor_quiet_skip",
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
+        ),
+    )
+
+    assert actions == [
+        "on missing/write_failed heartbeat_receipt only: loopx --format json "
+        "quota should-run --goal-id codex-heartbeat-fixture --agent-id "
+        'codex-fixture --codex-app --turn-instance-id "${LOOPX_TURN:?}"'
+    ]
 
 
 def test_unbound_rerun_actions_do_not_emit_executable_bare_guards() -> None:

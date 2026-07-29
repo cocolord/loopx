@@ -217,10 +217,16 @@ ACK, it must audit the current evidence against the active
    public-safe evidence records, public web research findings, evaluation
    outputs, successor state, blocker state, or a superseding vision packet.
 3. Treat weak, indirect, stale, or protocol-only evidence as incomplete.
-4. If local evidence remains weak and the acceptance question depends on public
-   facts, run bounded public research from primary or authoritative sources and
-   write back the confirmed/refuted finding.
-5. If any requirement remains unproven, keep the vision active by creating a
+4. Before external research, inspect the selected goal's registry-declared
+   `topic_authority` and `project_materials`, preferring projected
+   `agent_material_frontier` or `required_reads`. Use role, freshness, revision,
+   boundary, gate status, and conflict rule to select permitted references.
+   Registration guides discovery; it neither grants access nor proves acceptance.
+5. If projected evidence and permitted registry references remain weak, and the
+   acceptance question depends on public facts, run bounded public web research
+   from primary or authoritative sources and write back the confirmed/refuted
+   finding.
+6. If any requirement remains unproven, keep the vision active by creating a
    successor todo or writing a compact `--vision-replan-trigger`.
 
 Quota/status expose this as `vision_continuation_audit_v0` in the CLI payload
@@ -234,9 +240,10 @@ instruction packet for the agent. It borrows the strict done-judge stance used
 by autonomous goal loops without calling an LLM: the agent is told to compare
 the active vision `acceptance_summary` with projected evidence, using
 projected required reads, an explicit agent-scoped `loopx evidence-log
---goal-id <goal> --agent-id <agent> --thin` read when available, and bounded
-public web research when local evidence is missing or stale and the gap depends
-on public facts. `done=true` is only valid
+--goal-id <goal> --agent-id <agent> --thin` read when available, then permitted
+registry-declared material references. Bounded public web research is the next
+fallback when those sources are missing or stale and the gap depends on public
+facts. `done=true` is only valid
 when the response or state clearly provides one of these outcomes:
 
 - explicit completion with authoritative evidence;
@@ -425,9 +432,20 @@ self-repair fallback. Agents should write a bounded vision patch when:
   it.
 
 The inline flags keep the common path small. A role can update only the fields
-it knows, while the CLI still enforces field budgets and projects the resulting
-`agent_vision` through status/quota. JSON packets are for generated patches,
-tests, or multi-field updates where a file is clearer than a long command.
+it knows: inline writes merge those fields into that agent's latest active
+vision, preserving omitted durable mainline fields and the current state. A
+todo, PR, capability, or monitor wait should normally update its own todo plus
+`replan_trigger_summary` or `last_patch_summary`; it must not replace the
+role's broader `vision_summary` merely because that dependency is current.
+
+JSON packets are complete generated updates. During
+`--autonomous-replan-recorded`, changing an existing `vision_summary`,
+`role_scope`, `acceptance_summary`, or `advancement_policy` requires a
+`goal_path_delta_v0` with `outcome=replan`, regardless of whether the update
+arrived through JSON or inline flags. This keeps a real mainline change
+possible while making the prior assumption, observed reality, and
+retained/changed/stopped route machine-auditable. Unchanged full packets,
+non-replan inline edits, and initial baselines do not need a path delta.
 
 When no patch is needed, the agent should still close a required checkpoint with
 `--vision-unchanged-reason`. That reason is per-agent and must explain why the

@@ -81,6 +81,30 @@ manual holds, and why the coverage is enough. One hand-picked smoke is not
 enough for runtime, quota/status, scheduler, todo, install, dashboard,
 benchmark-boundary, or public/private evidence changes.
 
+### Release Contributor Attribution
+
+Keep the shipped product changes as the primary release narrative. When the tag
+range contains merged work from community contributors other than project
+founder `@huangruiteng`, add a prominent `## Community Contributors` section
+after the English product groups and a matching `### 社区贡献者` section after
+the Chinese product groups. Place both before compatibility, validation, or
+update material so the credit remains visible without replacing the release
+summary.
+
+Link each eligible contributor's GitHub handle and relevant pull requests, and
+describe the concrete contribution instead of publishing an unannotated name
+list. Explicitly highlight external and first-time contributors when
+applicable. Do not list or thank `@huangruiteng` in contributor sections;
+founder stewardship is implicit in LoopX releases. Omit both contributor
+sections when the tag range has no eligible community contribution.
+
+Derive attribution from the previous-tag-to-current-tag Git range plus merged
+PR metadata. Do not guess from commit display names, omit contributors because
+their work is summarized elsewhere, let contributor credit displace product
+content, or invent community attribution for a founder-only release. The
+release PR and final GitHub release body must preserve the same bilingual
+attribution.
+
 ## First-Screen Review Gate
 
 Treat the first visible screen of public product surfaces as owner-reviewed
@@ -150,9 +174,10 @@ do not choose a directory from the feature name alone:
   validation;
 - put generic manifest, registration, compatibility, and lifecycle mechanics
   in `loopx/extensions/`;
-- put an independently versioned or optional provider in
-  `extensions/<extension-id>/` when it is co-located, or in its own package or
-  repository when it is distributed separately;
+- put an independently versioned or optional provider distribution in
+  `packages/<package-id>/` when it is co-located, or in its own package or
+  repository when it is distributed separately. Reserve `loopx/extensions/`
+  for extension lifecycle code and providers bundled in the LoopX wheel;
 - do not create a capability merely to make an extension installable. An
   extension-owned command or workflow may declare only its runtime and
   lifecycle when LoopX callers do not need a provider-neutral capability

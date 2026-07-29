@@ -5,6 +5,7 @@ import json
 import os
 import shlex
 import stat
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -12,6 +13,9 @@ from typing import Any
 
 
 SKILLSBENCH_RUNNER_PROFILE_SCHEMA_VERSION = "skillsbench_runner_profile_v0"
+SKILLSBENCH_RUNNER_CONNECTIVITY_PROBE_SCHEMA_VERSION = (
+    "skillsbench_runner_connectivity_probe_v0"
+)
 SKILLSBENCH_RUNNER_PROFILE_RELATIVE_PATH = Path(
     "loopx/skillsbench/runner-profile.json"
 )
@@ -24,6 +28,7 @@ REQUIRED_RUNNER_ENV = (
 ALLOWED_RUNNER_ENV = frozenset(
     {
         *REQUIRED_RUNNER_ENV,
+        "SKILLSBENCH_LOCAL_CODEX_PROXY_COMMAND",
         "SKILLSBENCH_REMOTE_CODEX_BIN",
         "SKILLSBENCH_REMOTE_COMMAND_FILE_BRIDGE_PROBE_COMMAND",
         "SKILLSBENCH_REMOTE_COMMAND_FILE_BRIDGE_SOLVER_COMMAND",
@@ -175,6 +180,164 @@ def skillsbench_runner_profile_summary(
     }
 
 
+def _gssapi_configured(ssh_options: Sequence[str]) -> bool:
+    for option in ssh_options:
+        key, separator, value = option.partition("=")
+        if not separator:
+            continue
+        normalized_key = key.strip().lower()
+        normalized_value = value.strip().lower()
+        if normalized_key == "gssapiauthentication":
+            if normalized_value in {"yes", "true"}:
+                return True
+        if normalized_key == "preferredauthentications":
+            if any(
+                method.strip().startswith("gssapi")
+                for method in normalized_value.split(",")
+            ):
+                return True
+    return False
+
+
+def _effective_gssapi_configured(
+    *,
+    ssh_options: Sequence[str],
+    destination: str,
+    timeout_seconds: int,
+) -> bool:
+    if _gssapi_configured(ssh_options):
+        return True
+    flattened_options = [
+        argument
+        for option in ssh_options
+        for argument in ("-o", option)
+    ]
+    try:
+        completed = subprocess.run(
+            ["ssh", "-G", *flattened_options, destination],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=min(timeout_seconds, 5),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if completed.returncode != 0:
+        return False
+    effective_options = [
+        "gssapiauthentication="
+        + line.partition(" ")[2]
+        if line.lower().startswith("gssapiauthentication ")
+        else "preferredauthentications="
+        + line.partition(" ")[2]
+        if line.lower().startswith("preferredauthentications ")
+        else ""
+        for line in completed.stdout.splitlines()
+    ]
+    return _gssapi_configured([option for option in effective_options if option])
+
+
+def _local_gssapi_ticket_state(*, gssapi_configured: bool) -> str:
+    if not gssapi_configured:
+        return "not_checked"
+    try:
+        completed = subprocess.run(
+            ["klist", "-s"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "probe_unavailable"
+    return "present" if completed.returncode == 0 else "missing"
+
+
+def probe_skillsbench_runner_connectivity(
+    profile: Mapping[str, str],
+    *,
+    timeout_seconds: int = 15,
+) -> dict[str, Any]:
+    ssh_options: list[str] = []
+    try:
+        options = shlex.split(str(profile.get("SKILLSBENCH_SSH_OPTIONS") or ""))
+    except ValueError as error:
+        raise SkillsBenchRunnerProfileError("ssh_options_invalid") from error
+    for option in options:
+        ssh_options.extend(["-o", option])
+    destination = str(profile.get("SKILLSBENCH_SSH_DESTINATION") or "")
+    if not destination:
+        raise SkillsBenchRunnerProfileError("required_runner_environment_missing")
+    gssapi_configured = _effective_gssapi_configured(
+        ssh_options=options,
+        destination=destination,
+        timeout_seconds=timeout_seconds,
+    )
+    local_gssapi_ticket_state = _local_gssapi_ticket_state(
+        gssapi_configured=gssapi_configured
+    )
+    try:
+        completed = subprocess.run(
+            [
+                "ssh",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                f"ConnectTimeout={timeout_seconds}",
+                *ssh_options,
+                destination,
+                "true",
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout_seconds + 5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {
+            "ok": True,
+            "schema_version": SKILLSBENCH_RUNNER_CONNECTIVITY_PROBE_SCHEMA_VERSION,
+            "reachable": False,
+            "result": "transport_unavailable",
+            "readiness_state": "transport_unavailable",
+            "gssapi_configured": gssapi_configured,
+            "local_gssapi_ticket_state": local_gssapi_ticket_state,
+            "remote_task_free_acceptance": False,
+            "task_free_connection_attempt_completed": False,
+            "task_material_read": False,
+            "benchmark_job_launched": False,
+            "raw_output_recorded": False,
+            "profile_values_recorded": False,
+        }
+    reachable = completed.returncode == 0
+    if reachable:
+        readiness_state = "ready"
+    elif not gssapi_configured:
+        readiness_state = "transport_unavailable"
+    elif local_gssapi_ticket_state == "missing":
+        readiness_state = "local_gssapi_ticket_missing"
+    elif local_gssapi_ticket_state == "present":
+        readiness_state = "remote_task_free_acceptance_failed"
+    else:
+        readiness_state = "remote_task_free_acceptance_unverified"
+    return {
+        "ok": True,
+        "schema_version": SKILLSBENCH_RUNNER_CONNECTIVITY_PROBE_SCHEMA_VERSION,
+        "reachable": reachable,
+        "result": "reachable" if reachable else "transport_unavailable",
+        "readiness_state": readiness_state,
+        "gssapi_configured": gssapi_configured,
+        "local_gssapi_ticket_state": local_gssapi_ticket_state,
+        "remote_task_free_acceptance": reachable,
+        "task_free_connection_attempt_completed": True,
+        "task_material_read": False,
+        "benchmark_job_launched": False,
+        "raw_output_recorded": False,
+        "profile_values_recorded": False,
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -183,11 +346,14 @@ def _parser() -> argparse.ArgumentParser:
         )
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("export-shell", "inspect"):
+    for name in ("export-shell", "inspect", "probe-ssh"):
         command = commands.add_parser(name)
         command.add_argument("--profile", type=Path)
         if name == "export-shell":
             command.add_argument("--if-present", action="store_true")
+        if name == "probe-ssh":
+            command.add_argument("--timeout-seconds", type=int, default=15)
+            command.add_argument("--current-environment", action="store_true")
     capture = commands.add_parser("capture")
     capture.add_argument("--profile", type=Path)
     capture.add_argument("--force", action="store_true")
@@ -197,6 +363,25 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "probe-ssh" and args.current_environment:
+            if args.profile:
+                raise SkillsBenchRunnerProfileError("probe_source_conflict")
+            if args.timeout_seconds < 1:
+                raise SkillsBenchRunnerProfileError("probe_timeout_invalid")
+            profile = {
+                key: os.environ[key]
+                for key in (
+                    "SKILLSBENCH_SSH_DESTINATION",
+                    "SKILLSBENCH_SSH_OPTIONS",
+                )
+                if os.environ.get(key)
+            }
+            summary = probe_skillsbench_runner_connectivity(
+                profile,
+                timeout_seconds=args.timeout_seconds,
+            )
+            print(json.dumps(summary, sort_keys=True))
+            return 0 if summary["reachable"] else 3
         profile_path = args.profile or default_skillsbench_runner_profile_path()
         if args.command == "capture":
             summary = capture_skillsbench_runner_profile(
@@ -216,6 +401,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "inspect":
             print(json.dumps(skillsbench_runner_profile_summary(profile), sort_keys=True))
             return 0
+        if args.command == "probe-ssh":
+            if args.timeout_seconds < 1:
+                raise SkillsBenchRunnerProfileError("probe_timeout_invalid")
+            summary = probe_skillsbench_runner_connectivity(
+                profile,
+                timeout_seconds=args.timeout_seconds,
+            )
+            print(json.dumps(summary, sort_keys=True))
+            return 0 if summary["reachable"] else 3
         exports = skillsbench_runner_profile_shell_exports(profile)
         if exports:
             print(exports)

@@ -46,9 +46,21 @@ def build_goal_configuration_catalog(
         if isinstance(feature_summary.get("lark_event_inbox"), Mapping)
         else {}
     )
+    lark_kanban_heartbeat_sync = (
+        feature_summary.get("lark_kanban_heartbeat_sync")
+        if isinstance(feature_summary.get("lark_kanban_heartbeat_sync"), Mapping)
+        else {}
+    )
     reward_memory = (
         feature_summary.get("reward_memory")
         if isinstance(feature_summary.get("reward_memory"), Mapping)
+        else {}
+    )
+    change_quality = (
+        feature_summary.get("change_quality_qualification")
+        if isinstance(
+            feature_summary.get("change_quality_qualification"), Mapping
+        )
         else {}
     )
     inspect_command = _configure_command(goal_id)
@@ -237,6 +249,89 @@ def build_goal_configuration_catalog(
                 },
             },
             {
+                "feature_id": "change_quality_qualification",
+                "display_name": "Change quality qualification",
+                "availability": "supported_opt_in",
+                "default": {
+                    "enabled": False,
+                    "safe_fix": False,
+                    "strict_receipt": False,
+                },
+                "current": {
+                    "enabled": change_quality.get("enabled") is True,
+                    "safe_fix": change_quality.get("safe_fix") is True,
+                    "strict_receipt": change_quality.get("strict_receipt") is True,
+                },
+                "consider_when": (
+                    "A goal should review every non-trivial final diff and optionally "
+                    "require exact-scope evidence before merge."
+                ),
+                "effect": (
+                    "Prepares a provider-neutral review packet, permits at most one "
+                    "policy-authorized safe-fix pass, and can enforce an exact-diff receipt."
+                ),
+                "does_not": [
+                    "change files unless safe_fix is explicitly enabled",
+                    "make subjective style preferences blocking findings",
+                    "grant authority, expand permissions, or bypass repository validation",
+                    "delegate merge authority to Turn or the reviewing model",
+                ],
+                "commands": {
+                    "preview_skill_install": (
+                        "loopx project-skill install --project . --skill "
+                        "loopx-change-quality --surface codex"
+                    ),
+                    "apply_skill_install": (
+                        "loopx project-skill install --project . --skill "
+                        "loopx-change-quality --surface codex --execute"
+                    ),
+                    "preview_enable": _configure_command(
+                        goal_id,
+                        "--change-quality-enabled",
+                        "--change-quality-safe-fix",
+                        "--change-quality-strict-receipt",
+                    ),
+                    "apply_enable": _configure_command(
+                        goal_id,
+                        "--change-quality-enabled",
+                        "--change-quality-safe-fix",
+                        "--change-quality-strict-receipt",
+                        execute=True,
+                    ),
+                    "preview_disable": _configure_command(
+                        goal_id, "--no-change-quality-enabled"
+                    ),
+                    "apply_disable": _configure_command(
+                        goal_id, "--no-change-quality-enabled", execute=True
+                    ),
+                    "verify": [
+                        inspect_command,
+                        (
+                            "loopx project-skill status --project . --skill "
+                            "loopx-change-quality --surface codex"
+                        ),
+                        shlex.join(
+                            [
+                                "loopx",
+                                "change-quality",
+                                "prepare",
+                                "--goal-id",
+                                goal_id,
+                                "--repo-path",
+                                ".",
+                            ]
+                        ),
+                    ],
+                },
+                "documentation": {
+                    "path": "docs/capabilities/change-quality/README.md",
+                    "url": (
+                        "https://github.com/huangruiteng/loopx/blob/main/"
+                        "docs/capabilities/change-quality/README.md"
+                    ),
+                },
+            },
+            {
                 "feature_id": "reward_memory",
                 "display_name": "Reward Memory experiment",
                 "availability": "experimental_opt_in",
@@ -387,6 +482,63 @@ def build_goal_configuration_catalog(
                     "url": (
                         "https://github.com/huangruiteng/loopx/blob/main/"
                         "docs/capabilities/lark-event-inbox.md"
+                    ),
+                },
+            },
+            {
+                "feature_id": "lark_kanban_heartbeat_sync",
+                "display_name": "Generic Lark Kanban heartbeat sync",
+                "availability": "supported_opt_in",
+                "default": {"enabled": False},
+                "current": {
+                    "enabled": lark_kanban_heartbeat_sync.get("enabled") is True,
+                },
+                "consider_when": (
+                    "A goal already has a reviewed generic Kanban binding and should "
+                    "best-effort refresh it after material heartbeat progress."
+                ),
+                "effect": (
+                    "Projects one nonblocking generic Kanban action through quota/status "
+                    "after material state changes."
+                ),
+                "does_not": [
+                    "create or bind a board",
+                    "authenticate Lark or make an existing local binding active",
+                    "make sink success a delivery gate or let it preempt runnable P0 work",
+                ],
+                "commands": {
+                    "preview_enable": _configure_command(
+                        goal_id, "--lark-kanban-heartbeat-sync"
+                    ),
+                    "apply_enable": _configure_command(
+                        goal_id, "--lark-kanban-heartbeat-sync", execute=True
+                    ),
+                    "preview_disable": _configure_command(
+                        goal_id, "--no-lark-kanban-heartbeat-sync"
+                    ),
+                    "apply_disable": _configure_command(
+                        goal_id, "--no-lark-kanban-heartbeat-sync", execute=True
+                    ),
+                    "verify": [
+                        inspect_command,
+                        shlex.join(
+                            [
+                                "loopx",
+                                "--format",
+                                "json",
+                                "quota",
+                                "should-run",
+                                "--goal-id",
+                                goal_id,
+                            ]
+                        ),
+                    ],
+                },
+                "documentation": {
+                    "path": "docs/lark-kanban-control-plane-adapter.md",
+                    "url": (
+                        "https://github.com/huangruiteng/loopx/blob/main/"
+                        "docs/lark-kanban-control-plane-adapter.md"
                     ),
                 },
             },

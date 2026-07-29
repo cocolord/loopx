@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from loopx.cli_commands.status import (
-    _compact_agent_lane_todos_for_status_display,
     _status_collection_limit_for_agent_lane,
     _trim_run_history_for_status_display,
     attach_agent_lane_next_actions,
+)
+from loopx.control_plane.todos.quota_summary import (
+    compact_agent_lane_todos_for_status_display,
 )
 from loopx.review_packet import build_review_packet
 from loopx.presentation.renderers.status_markdown import render_status_markdown
@@ -151,11 +153,10 @@ def assert_status_agent_lane_next_action_projection() -> None:
     assert next_action["todo_id"] == "todo_side_tui", next_action
     assert next_action["agent_id"] == "codex-side-bypass", next_action
     assert next_action["preserves_goal_next_action"] is True, next_action
-    warning = item["next_action_projection_warning"]
-    assert warning["severity"] == "info", warning
-    assert warning["requires_state_writeback"] is False, warning
-    assert warning["agent_lane_next_action"] == side_action, warning
-    assert item["project_asset"]["next_action_projection_warning"] == warning, item
+    assert "latest_run_recommended_action" not in item, item
+    assert "next_action_projection_warning" not in item, item
+    assert "latest_run_recommended_action" not in item["project_asset"], item
+    assert "next_action_projection_warning" not in item["project_asset"], item
     goal_frontier = item["goal_frontier_projection"]
     assert goal_frontier["deferred_successors"]["ready_count"] == 0, goal_frontier
     assert goal_frontier["acceptance_gaps"] == [], goal_frontier
@@ -212,7 +213,7 @@ def assert_status_agent_lane_next_action_projection() -> None:
     assert "must_attempt=True delivery_allowed=True quiet_noop_allowed=False" in markdown, markdown
     assert "current_agent_todo: agent=codex-side-bypass todo_id=todo_side_tui" in markdown, markdown
     assert "source=agent_lane_next_action" in markdown, markdown
-    assert "next_action_projection_warning: requires_state_writeback=False severity=info" in markdown, markdown
+    assert "next_action_projection_warning:" not in markdown, markdown
     assert "goal_frontier_projection: replan_required=False" in markdown, markdown
     assert "deferred_ready=0 acceptance_gaps=0" in markdown, markdown
     assert side_action in markdown, markdown
@@ -283,7 +284,7 @@ def assert_status_agent_lane_todo_summary_display_compaction() -> None:
         }
     }
 
-    _compact_agent_lane_todos_for_status_display(payload)
+    compact_agent_lane_todos_for_status_display(payload)
 
     item = payload["attention_queue"]["items"][0]
     compact_agent = item["agent_todos"]
