@@ -55,6 +55,39 @@ portfolio material, future-dated evidence, unsupported fields, and malformed
 public URLs. It never emits investment advice, a price target, a trade, or an
 automatic watch.
 
+## Owner-Only Research Surface
+
+The extension also declares an owner-only `investment-research` presentation
+surface. A `finance_research_dashboard_input_v0` packet validates Finance
+semantics and maps them to LoopX's generic
+`decision_research_dashboard_v0` view. The contract keeps beta, cycle,
+company-value, and residual-alpha reasoning distinct; requires supporting
+evidence, counterevidence, thesis breakers, scenario assumptions, and frozen
+event gates; and preserves insufficient or rejected conclusions without
+turning them into an investment recommendation.
+
+[`examples/research-dashboard.json`](examples/research-dashboard.json) is a
+fully synthetic public-safe example. It deliberately reports zero validated
+company alpha and an unchanged active method.
+
+After separately installing, enabling, and doctor-validating the extension,
+publish a validated local projection with:
+
+```bash
+loopx extension publish-projection \
+  loopx-finance-value-discovery investment-research \
+  --input-json owner-research.json \
+  --execute \
+  --format json
+```
+
+Publication is explicit and local. It validates and stores a read-only
+projection bound to the currently active extension revision. A disabled,
+doctor-stale, missing, or revision-mismatched extension projection is hidden
+from status and Dashboard surfaces. Publishing does not install or enable the
+extension, activate or replace a Finance method, spend LoopX quota, consume a
+learning queue, create a trade, or place an order.
+
 ## Worked Method: How PayPal Surfaced
 
 The historical PayPal exercise started with a fresh de-beta scout, not a

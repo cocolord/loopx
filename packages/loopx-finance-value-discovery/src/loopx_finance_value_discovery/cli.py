@@ -19,6 +19,10 @@ from .metric_packs import (
     list_finance_metric_packs,
     replay_finance_metric_pack_evaluation,
 )
+from .dashboard import (
+    FINANCE_RESEARCH_DASHBOARD_INPUT_SCHEMA_VERSION,
+    build_finance_research_dashboard_packet,
+)
 from .reducer import (
     FINANCE_VALUE_DISCOVERY_ERROR_SCHEMA_VERSION,
     build_finance_value_discovery_packet,
@@ -134,6 +138,8 @@ def run(argv: Sequence[str] | None = None) -> int:
                 packet = build_finance_beta_attribution(payload)
             elif schema_version == FINANCE_METRIC_PACK_INPUT_SCHEMA_VERSION:
                 packet = build_finance_metric_pack_evaluation(payload)
+            elif schema_version == FINANCE_RESEARCH_DASHBOARD_INPUT_SCHEMA_VERSION:
+                packet = build_finance_research_dashboard_packet(payload)
             else:
                 packet = build_finance_value_discovery_packet(payload)
         except Exception as exc:

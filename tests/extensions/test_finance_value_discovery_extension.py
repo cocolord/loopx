@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -24,9 +25,13 @@ EXAMPLE = EXTENSION_ROOT / "examples" / "paypal-debeta-discovery.json"
 CASE_EXAMPLE = EXTENSION_ROOT / "examples" / "finance-case-gates-v1.json"
 BETA_EXAMPLE = EXTENSION_ROOT / "examples" / "beta-attribution-v1.json"
 PACK_EXAMPLE = EXTENSION_ROOT / "examples" / "software-metric-pack-v1.json"
+RESEARCH_DASHBOARD_EXAMPLE = EXTENSION_ROOT / "examples" / "research-dashboard.json"
 sys.path.insert(0, str(EXTENSION_SRC))
 
 from loopx_finance_value_discovery.cli import run  # noqa: E402
+from loopx_finance_value_discovery.dashboard import (  # noqa: E402
+    build_finance_research_dashboard_packet,
+)
 from loopx_finance_value_discovery.reducer import (  # noqa: E402
     EVIDENCE_AXES,
     build_finance_value_discovery_packet,
@@ -35,6 +40,291 @@ from loopx_finance_value_discovery.reducer import (  # noqa: E402
 
 def _example() -> dict[str, object]:
     return json.loads(EXAMPLE.read_text(encoding="utf-8"))
+
+
+def _research_dashboard_input() -> dict[str, object]:
+    return {
+        "schema_version": "finance_research_dashboard_input_v0",
+        "surface_id": "investment-research",
+        "goal_id": "synthetic-research-goal",
+        "source_id": "synthetic-research-2026-01-15",
+        "source_version": 1,
+        "supersedes": [],
+        "point_in_time": "2026-01-15T12:00:00+00:00",
+        "evidence_cutoff": "2026-01-15",
+        "review_due_at": "2026-02-15T12:00:00+00:00",
+        "title": "Synthetic Technology Research",
+        "subtitle": "Evidence-gated decision review",
+        "adjudication": {
+            "status": "insufficient_evidence",
+            "label": "Insufficient Evidence",
+            "summary": "The frozen gates do not yet support a selected conclusion.",
+            "confidence": "medium",
+        },
+        "metrics": [
+            {
+                "id": "validated-alpha",
+                "label": "Validated company alpha",
+                "value": "0",
+                "detail": "No company-specific residual passed every frozen gate.",
+                "tone": "warning",
+            },
+            {
+                "id": "method-state",
+                "label": "Active method",
+                "value": "unchanged",
+                "detail": "The active method was not promoted or replaced.",
+                "tone": "neutral",
+            },
+        ],
+        "dashboard_summaries": [
+            {
+                "id": "adjudication-summary",
+                "label": "Current adjudication",
+                "title": "Evidence remains insufficient",
+                "summary": "Continue monitoring the frozen event gates.",
+                "tone": "warning",
+                "destination_anchor": "executive-adjudication",
+            }
+        ],
+        "research_layers": [
+            {
+                "id": "beta",
+                "order": 1,
+                "label": "Beta",
+                "status": "supported",
+                "summary": "Discount-rate exposure explains part of the move.",
+                "supporting_evidence": [
+                    {
+                        "classification": "current_fact",
+                        "statement": "Broad synthetic peers moved in the same direction.",
+                    }
+                ],
+                "counterevidence": [
+                    {
+                        "classification": "agent_inference",
+                        "statement": "The entity retained modest relative strength.",
+                    }
+                ],
+                "thesis_breakers": [
+                    "Peer dispersion rises while rate sensitivity disappears."
+                ],
+            },
+            {
+                "id": "cycle",
+                "order": 2,
+                "label": "Cycle",
+                "status": "partial",
+                "summary": "The cycle signal remains mixed.",
+                "supporting_evidence": [
+                    {
+                        "classification": "management_guidance",
+                        "statement": "Demand guidance remained inside the frozen range.",
+                    }
+                ],
+                "counterevidence": [
+                    {
+                        "classification": "analyst_estimate",
+                        "statement": "Consensus expects slower sequential growth.",
+                    }
+                ],
+                "thesis_breakers": ["Official guidance turns sequentially negative."],
+            },
+            {
+                "id": "company-value",
+                "order": 3,
+                "label": "Company value",
+                "status": "insufficient_evidence",
+                "summary": "Quality is visible but valuation is not yet decisive.",
+                "supporting_evidence": [
+                    {
+                        "classification": "historical_fact",
+                        "statement": "Cash conversion stayed positive in the frozen period.",
+                    }
+                ],
+                "counterevidence": [
+                    {
+                        "classification": "current_fact",
+                        "statement": "Capital intensity remains elevated.",
+                    }
+                ],
+                "thesis_breakers": [
+                    "Cash conversion deteriorates for two consecutive periods."
+                ],
+            },
+            {
+                "id": "residual-alpha",
+                "order": 4,
+                "label": "Residual alpha",
+                "status": "rejected",
+                "summary": "Validated company alpha = 0.",
+                "supporting_evidence": [
+                    {
+                        "classification": "agent_inference",
+                        "statement": "A candidate residual was observed.",
+                    }
+                ],
+                "counterevidence": [
+                    {
+                        "classification": "current_fact",
+                        "statement": "The residual failed the frozen persistence gate.",
+                    }
+                ],
+                "thesis_breakers": [
+                    "No breaker can revive a residual that failed persistence."
+                ],
+            },
+        ],
+        "entities": [
+            {
+                "entity_id": "synthetic-cloud",
+                "symbol": "SYN",
+                "display_name": "Synthetic Cloud",
+                "classification": "Watchlist",
+                "status": "insufficient_evidence",
+                "confidence": "medium",
+                "inference": "A quality business is not yet a validated mispricing.",
+                "supporting_evidence": [
+                    {
+                        "classification": "current_fact",
+                        "statement": "Official revenue remained inside the frozen range.",
+                    }
+                ],
+                "counterevidence": [
+                    {
+                        "classification": "agent_inference",
+                        "statement": "Capital intensity may remain above the assumption.",
+                    }
+                ],
+                "thesis_breakers": [
+                    "Two periods of slower growth and weaker cash conversion."
+                ],
+                "observations": [
+                    {
+                        "id": "observation-range",
+                        "label": "Observation range",
+                        "classification": "current_fact",
+                        "kind": "observation_range",
+                        "value": "90-100 synthetic units",
+                        "as_of": "2026-01-15T12:00:00+00:00",
+                        "source_ref": "filing:syn-q4",
+                        "source_type": "company_filing",
+                        "confidence": "high",
+                        "invalidation": "A verified close below 90 with weaker fundamentals.",
+                    }
+                ],
+                "scenarios": [
+                    {
+                        "scenario": "bull",
+                        "label": "Bull scenario estimate",
+                        "value": "140 synthetic units",
+                        "horizon": "24 months",
+                        "probability": 0.25,
+                        "assumptions": [
+                            "Growth reaccelerates.",
+                            "Free cash flow conversion improves.",
+                        ],
+                    },
+                    {
+                        "scenario": "base",
+                        "label": "Base scenario estimate",
+                        "value": "112 synthetic units",
+                        "horizon": "24 months",
+                        "probability": 0.5,
+                        "assumptions": [
+                            "Growth remains durable.",
+                            "The valuation multiple is stable.",
+                        ],
+                    },
+                    {
+                        "scenario": "bear",
+                        "label": "Bear scenario estimate",
+                        "value": "72 synthetic units",
+                        "horizon": "24 months",
+                        "probability": 0.25,
+                        "assumptions": [
+                            "Growth slows.",
+                            "The valuation multiple compresses.",
+                        ],
+                    },
+                ],
+                "next_events": [
+                    "Next official earnings release.",
+                    "Updated capital expenditure guidance.",
+                ],
+            }
+        ],
+        "research_ledger": [
+            {
+                "case_id": "case-rejected-residual",
+                "label": "Rejected residual-alpha case",
+                "gate_states": [
+                    {
+                        "gate_id": "persistence",
+                        "label": "Persistence",
+                        "status": "failed",
+                        "summary": "The residual did not persist.",
+                    }
+                ],
+                "decision": "rejected",
+                "summary": "The company-specific alpha claim was rejected.",
+                "evidence_refs": ["market:synthetic-peer-control"],
+            },
+            {
+                "case_id": "case-insufficient-value",
+                "label": "Insufficient company-value case",
+                "gate_states": [
+                    {
+                        "gate_id": "valuation",
+                        "label": "Valuation",
+                        "status": "insufficient_evidence",
+                        "summary": "The evidence does not establish a margin of safety.",
+                    }
+                ],
+                "decision": "insufficient_evidence",
+                "summary": "The company-value conclusion remains open.",
+                "evidence_refs": ["filing:syn-q4"],
+            },
+        ],
+        "event_gates": [
+            {
+                "event_id": "E1",
+                "label": "Synthetic cloud earnings",
+                "status": "pending",
+                "frozen_at": "2026-01-15T12:00:00+00:00",
+                "observation_window": "Next official reporting window",
+                "frozen_hypothesis": "Returns depend on monetization, not capex alone.",
+                "observables": [
+                    "Cloud growth versus frozen guidance.",
+                    "Capital expenditure and free cash flow direction.",
+                ],
+                "current_evidence": [],
+                "supports": [
+                    "Growth above the frozen range with stable cash conversion."
+                ],
+                "refutes": [
+                    "Higher capital expenditure without measurable cloud return."
+                ],
+                "thesis_breakers": [
+                    "Official guidance shows deteriorating returns on investment."
+                ],
+                "next_review": "After the official filing is available.",
+            }
+        ],
+        "method_state": {
+            "revision": "candidate-v1",
+            "lifecycle_state": "active_method_unchanged",
+            "active_method_changed": False,
+            "summary": "Active method unchanged.",
+        },
+        "boundary": {
+            "research_aid_only": True,
+            "investment_advice": False,
+            "trading_allowed": False,
+            "raw_provider_payload_recorded": False,
+            "private_source_content_read": False,
+        },
+    }
 
 
 def _installed_manifest(
@@ -96,6 +386,228 @@ def test_manifest_and_paypal_example_preserve_extension_boundary() -> None:
     assert packet["boundary"]["investment_advice"] is False
     assert packet["boundary"]["trading_allowed"] is False
     assert packet["boundary"]["continuous_watch_allowed"] is False
+
+
+def test_finance_research_dashboard_mapping_preserves_research_truth() -> None:
+    packet = build_finance_research_dashboard_packet(_research_dashboard_input())
+    assert packet == build_finance_research_dashboard_packet(
+        _research_dashboard_input()
+    )
+
+    assert packet["schema_version"] == "finance_research_dashboard_packet_v0"
+    projection = packet["presentation_projection"]
+    assert projection["surface_id"] == "investment-research"
+    assert projection["goal_id"] == "synthetic-research-goal"
+    assert projection["generated_at"] == "2026-01-15T12:00:00+00:00"
+    assert projection["review_due_at"] == "2026-02-15T12:00:00+00:00"
+    assert projection["lineage"] == {
+        "source_id": "synthetic-research-2026-01-15",
+        "version": 1,
+        "row_lifecycle": "active",
+        "supersedes": [],
+        "superseded_by": None,
+    }
+    assert projection["view_schema"] == "decision_research_dashboard_v0"
+    view = projection["view"]
+    assert view["adjudication"]["status"] == "insufficient_evidence"
+    assert view["metrics"][0]["value"] == "0"
+    assert view["metrics"][1]["value"] == "unchanged"
+    assert [layer["id"] for layer in view["layers"]] == [
+        "beta",
+        "cycle",
+        "company-value",
+        "residual-alpha",
+    ]
+    assert view["layers"][-1]["status"] == "rejected"
+    assert view["entities"][0]["scenario_estimates"][1]["probability"] == 0.5
+    assert view["research_ledger"][0]["decision"] == "rejected"
+    assert view["research_ledger"][1]["decision"] == "insufficient_evidence"
+    assert view["event_gates"][0]["status"] == "pending"
+    assert view["method_state"]["active_method_changed"] is False
+    assert view["boundary"]["trading_allowed"] is False
+    serialized = json.dumps(packet, sort_keys=True)
+    assert "supporting_evidence" not in serialized
+    assert "frozen_at" not in serialized
+
+
+@pytest.mark.parametrize(
+    ("mutator", "message"),
+    [
+        (
+            lambda payload: payload.update({"point_in_time": "not-an-iso-cutoff"}),
+            "point_in_time",
+        ),
+        (
+            lambda payload: payload.update({"evidence_cutoff": "2026-99-99"}),
+            "evidence_cutoff",
+        ),
+        (
+            lambda payload: payload.update({"unexpected": "field"}),
+            "unsupported keys",
+        ),
+        (
+            lambda payload: payload["entities"][0]["observations"][0].update(
+                {"unexpected": "field"}
+            ),
+            "unsupported keys",
+        ),
+        (
+            lambda payload: payload["research_layers"][0].update(
+                {"supporting_evidence": []}
+            ),
+            "supporting_evidence",
+        ),
+        (
+            lambda payload: payload["research_layers"][0].update(
+                {"counterevidence": []}
+            ),
+            "counterevidence",
+        ),
+        (
+            lambda payload: payload["research_layers"][0].update(
+                {"thesis_breakers": []}
+            ),
+            "thesis_breakers",
+        ),
+        (
+            lambda payload: payload["entities"][0]["scenarios"][0].update(
+                {"probability": 0.5}
+            ),
+            "sum to 1",
+        ),
+        (
+            lambda payload: payload["entities"][0]["scenarios"][0].update(
+                {"assumptions": []}
+            ),
+            "assumptions",
+        ),
+        (
+            lambda payload: payload["entities"][0]["scenarios"][0].update(
+                {"horizon": ""}
+            ),
+            "horizon",
+        ),
+        (
+            lambda payload: payload["entities"][0]["scenarios"][0].update(
+                {"label": "Target price"}
+            ),
+            "target-price wording",
+        ),
+        (
+            lambda payload: payload["entities"][0]["observations"][0].update(
+                {"invalidation": ""}
+            ),
+            "invalidation",
+        ),
+        (
+            lambda payload: payload["event_gates"][0].update(
+                {
+                    "status": "selected",
+                    "current_evidence": [
+                        {
+                            "classification": "current_fact",
+                            "statement": "The result was represented as post-event.",
+                            "observed_at": "2026-01-14T12:00:00+00:00",
+                        }
+                    ],
+                }
+            ),
+            "after frozen_at",
+        ),
+        (
+            lambda payload: payload["adjudication"].update({"status": "buy"}),
+            "status",
+        ),
+        (
+            lambda payload: payload["research_ledger"][0]["gate_states"][0].update(
+                {"status": "waived"}
+            ),
+            "status",
+        ),
+        (
+            lambda payload: payload.update(
+                {"raw_response_body": {"provider": "untrusted"}}
+            ),
+            "forbidden key",
+        ),
+        (
+            lambda payload: payload["entities"][0].update(
+                {"inference": "/tmp/private-research.json"}
+            ),
+            "local path",
+        ),
+        (
+            lambda payload: payload["entities"][0].update(
+                {"inference": "api_key=not-a-real-key"}
+            ),
+            "credential material",
+        ),
+        (
+            lambda payload: payload["entities"][0].update(
+                {"account_id": "synthetic-account"}
+            ),
+            "forbidden key",
+        ),
+    ],
+)
+def test_finance_research_dashboard_rejects_weak_or_restricted_input(
+    mutator,
+    message: str,
+) -> None:
+    payload = deepcopy(_research_dashboard_input())
+    mutator(payload)
+
+    with pytest.raises(ValueError, match=message):
+        build_finance_research_dashboard_packet(payload)
+
+
+def test_finance_research_dashboard_runs_through_provider_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(json.dumps(_research_dashboard_input())),
+    )
+
+    assert run([]) == 0
+
+    packet = json.loads(capsys.readouterr().out)
+    assert packet["schema_version"] == "finance_research_dashboard_packet_v0"
+    assert packet["presentation_projection"]["view"]["metrics"][0]["value"] == "0"
+
+
+def test_finance_presentation_surface_and_example_are_public_safe() -> None:
+    manifest = load_extension_manifest(MANIFEST)
+    assert manifest["presentation_surfaces"] == [
+        {
+            "id": "investment-research",
+            "kind": "decision_research_dashboard",
+            "title": "Investment Research",
+            "view_schema": "decision_research_dashboard_v0",
+            "visibility": "owner-only",
+            "empty_state_title": "No validated research yet",
+            "empty_state_detail": "Publish a validated projection.",
+        }
+    ]
+
+    payload = json.loads(RESEARCH_DASHBOARD_EXAMPLE.read_text(encoding="utf-8"))
+    packet = build_finance_research_dashboard_packet(payload)
+    assert packet["presentation_projection"]["surface_id"] == "investment-research"
+    assert packet["presentation_projection"]["view"]["metrics"][0]["value"] == "0"
+    serialized = RESEARCH_DASHBOARD_EXAMPLE.read_text(encoding="utf-8")
+    for forbidden in (
+        "finance-method-improvement",
+        "/Users/",
+        "bytedance",
+        "Bearer ",
+        "api_key",
+        "account_id",
+        "order_id",
+        "position_size",
+    ):
+        assert forbidden not in serialized
 
 
 @pytest.mark.parametrize("legacy_command", ["source-map", "install-check"])
