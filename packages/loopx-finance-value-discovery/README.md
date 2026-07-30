@@ -64,7 +64,9 @@ semantics and maps them to LoopX's generic
 company-value, and residual-alpha reasoning distinct; requires supporting
 evidence, counterevidence, thesis breakers, scenario assumptions, and frozen
 event gates; and preserves insufficient or rejected conclusions without
-turning them into an investment recommendation.
+allowing free labels or tones to override canonical adjudication, zero
+validated alpha, or the unchanged active method, or turn them into an
+investment recommendation.
 
 [`examples/research-dashboard.json`](examples/research-dashboard.json) is a
 fully synthetic public-safe example. It deliberately reports zero validated

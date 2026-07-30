@@ -343,10 +343,14 @@ revision rule.
 Presentation projections are display sinks, not authority. They cannot change
 goal state, promote a method, submit a trade, or grant provider permissions.
 The generic research schema rejects credentials, account or order fields, raw
-provider/request/response bodies, local paths, unsafe evidence URLs, and
-unbounded text. Providers must emit compact references and conclusions, not
-private evidence bodies. `owner-only` describes the intended operator boundary;
-it is not permission to persist secrets or bypass the public/private scan.
+provider/request/response bodies, private relative or absolute paths, sensitive
+URL parameters, non-finite numbers, and unbounded text. Canonical persistence
+uses standard JSON only; `NaN` and infinity fail closed before publication.
+Providers must emit compact references and conclusions, not private evidence
+bodies. Dashboard routing identifies a surface by both extension id and surface
+id so independently versioned providers may reuse a local surface id without
+colliding. `owner-only` describes the intended operator boundary; it is not
+permission to persist secrets or bypass the public/private scan.
 
 Run the public synthetic lifecycle proof after changing this contract:
 
