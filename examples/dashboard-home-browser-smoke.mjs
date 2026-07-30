@@ -16,6 +16,12 @@ const fixtureName = "status.home.browser-smoke.json";
 const fixturePath = resolve(dashboardDir, "public", fixtureName);
 const emptyFixtureName = "status.home.browser-smoke.empty.json";
 const emptyFixturePath = resolve(dashboardDir, "public", emptyFixtureName);
+const duplicateSurfaceFixtureName = "status.home.browser-smoke.duplicate-surface.json";
+const duplicateSurfaceFixturePath = resolve(
+  dashboardDir,
+  "public",
+  duplicateSurfaceFixtureName,
+);
 const visualOutputDir = resolve(repoRoot, "output/playwright/dashboard-home-visual-acceptance");
 const port = Number(process.env.LOOPX_DASHBOARD_HOME_SMOKE_PORT ?? "5194");
 
@@ -649,6 +655,30 @@ const statusWithoutSurfaces = {
   },
 };
 
+const statusWithDuplicateSurfaceIds = {
+  ...statusFixture,
+  presentation_surfaces: {
+    ...statusFixture.presentation_surfaces,
+    count: 2,
+    ready_count: 2,
+    items: [
+      ...statusFixture.presentation_surfaces.items,
+      {
+        ...statusFixture.presentation_surfaces.items[0],
+        extension_id: "second-research-extension",
+        title: "Second Investment Research",
+        view: {
+          ...researchView,
+          identity: {
+            ...researchView.identity,
+            title: "Second Provider Research",
+          },
+        },
+      },
+    ],
+  },
+};
+
 function loadPlaywright() {
   const candidates = [
     process.env.LOOPX_PLAYWRIGHT_PACKAGE,
@@ -859,6 +889,11 @@ async function main() {
     JSON.stringify(statusWithoutSurfaces, null, 2) + "\n",
     "utf-8",
   );
+  await writeFile(
+    duplicateSurfaceFixturePath,
+    JSON.stringify(statusWithDuplicateSurfaceIds, null, 2) + "\n",
+    "utf-8",
+  );
   await mkdir(visualOutputDir, { recursive: true });
 
   const server = startDashboardServer();
@@ -1058,8 +1093,12 @@ async function main() {
 
     await researchNav.click();
     await page.waitForTimeout(250);
-    if (new URL(page.url()).searchParams.get("surfaceId") !== "investment-research") {
-      throw new Error(`Research navigation did not set surfaceId: ${page.url()}`);
+    const researchUrl = new URL(page.url());
+    if (
+      researchUrl.searchParams.get("extensionId") !== "test-research-extension"
+      || researchUrl.searchParams.get("surfaceId") !== "investment-research"
+    ) {
+      throw new Error(`Research navigation did not set compound identity: ${page.url()}`);
     }
     const researchSurface = page.locator('[data-testid="decision-research-surface"]');
     if (!(await researchSurface.count())) {
@@ -1112,7 +1151,7 @@ async function main() {
     mobileResearchPage.on("pageerror", (error) => pageErrors.push(`mobile research: ${error.message}`));
     try {
       await mobileResearchPage.goto(
-        `${baseUrl}/?view=ops&surfaceId=investment-research&statusUrl=/${fixtureName}`,
+        `${baseUrl}/?view=ops&extensionId=test-research-extension&surfaceId=investment-research&statusUrl=/${fixtureName}`,
         { waitUntil: "networkidle" },
       );
       await mobileResearchPage.waitForSelector('[data-testid="decision-research-surface"]', {
@@ -1138,6 +1177,36 @@ async function main() {
       });
     } finally {
       await mobileResearchPage.close();
+    }
+
+    await page.goto(
+      `${baseUrl}/?view=ops&statusUrl=/${duplicateSurfaceFixtureName}`,
+      { waitUntil: "networkidle" },
+    );
+    const duplicateSurfaceNav = page.locator(
+      '[data-testid="presentation-surface-nav-investment-research"]',
+    );
+    if (await duplicateSurfaceNav.count() !== 2) {
+      throw new Error("Duplicate surface-id fixture did not render both providers.");
+    }
+    await duplicateSurfaceNav.nth(1).click();
+    await page.waitForTimeout(250);
+    const duplicateSurfaceUrl = new URL(page.url());
+    if (
+      duplicateSurfaceUrl.searchParams.get("extensionId")
+        !== "second-research-extension"
+      || duplicateSurfaceUrl.searchParams.get("surfaceId")
+        !== "investment-research"
+    ) {
+      throw new Error(
+        `Research navigation did not preserve compound surface identity: ${page.url()}`,
+      );
+    }
+    const secondProviderText = await page
+      .locator('[data-testid="decision-research-surface"]')
+      .innerText();
+    if (!secondProviderText.includes("Second Provider Research")) {
+      throw new Error("Compound surface navigation selected the wrong provider.");
     }
 
     await page.goto(
@@ -1167,6 +1236,7 @@ async function main() {
     server.kill("SIGTERM");
     await rm(fixturePath, { force: true });
     await rm(emptyFixturePath, { force: true });
+    await rm(duplicateSurfaceFixturePath, { force: true });
   }
 }
 

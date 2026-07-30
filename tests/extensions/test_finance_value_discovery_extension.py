@@ -548,6 +548,16 @@ def test_finance_research_dashboard_mapping_preserves_research_truth() -> None:
             ),
             "forbidden key",
         ),
+        (
+            lambda payload: payload["adjudication"].update(
+                {"label": "Validated upside"}
+            ),
+            "adjudication label",
+        ),
+        (
+            lambda payload: payload["metrics"][0].update({"tone": "success"}),
+            "validated-alpha",
+        ),
     ],
 )
 def test_finance_research_dashboard_rejects_weak_or_restricted_input(

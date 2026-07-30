@@ -392,6 +392,36 @@ def test_decision_research_view_preserves_strict_research_truth() -> None:
             "plain text",
         ),
         (
+            lambda view: view["identity"].update(
+                {"subtitle": "Owner account ID 998877 remains linked."}
+            ),
+            "sensitive material",
+        ),
+        (
+            lambda view: view["identity"].update(
+                {"subtitle": "Owner account_id 998877 remains linked."}
+            ),
+            "sensitive material",
+        ),
+        (
+            lambda view: view["identity"].update(
+                {"subtitle": "Research source: .codex/goals/private-research.md"}
+            ),
+            "local path",
+        ),
+        (
+            lambda view: view["identity"].update(
+                {"subtitle": "Research source: ../.codex/goals/private-research.md"}
+            ),
+            "local path",
+        ),
+        (
+            lambda view: view["identity"].update(
+                {"subtitle": "Research source: project/.local/private-research.md"}
+            ),
+            "local path",
+        ),
+        (
             lambda view: view["layers"][0]["evidence_points"].append(
                 "/tmp/private-research.json"
             ),
@@ -433,6 +463,14 @@ def test_decision_research_view_rejects_invalid_or_private_content(
         validate_decision_research_view(view)
 
 
+def test_decision_research_view_rejects_non_finite_probability() -> None:
+    view = deepcopy(_valid_view())
+    view["entities"][0]["scenario_estimates"][0]["probability"] = float("nan")
+
+    with pytest.raises(ValueError, match="finite"):
+        validate_decision_research_view(view)
+
+
 def test_decision_research_view_allows_explicit_public_evidence_url() -> None:
     view = _valid_view()
     view["research_ledger"][0]["evidence_refs"].append(
@@ -453,6 +491,12 @@ def test_decision_research_view_allows_explicit_public_evidence_url() -> None:
         "https://localhost/evidence",
         "https://127.0.0.1/evidence",
         "https://private.example.internal/evidence",
+        "https://example.com/private/report?"
+        + "".join(("to", "ken"))
+        + "=synthetic-value",
+        "https://example.com/report?"
+        + "".join(("refresh_", "to", "ken"))
+        + "=synthetic-value",
     ],
 )
 def test_decision_research_view_rejects_unsafe_evidence_urls(
