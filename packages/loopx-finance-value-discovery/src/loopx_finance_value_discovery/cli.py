@@ -19,6 +19,13 @@ from .metric_packs import (
     list_finance_metric_packs,
     replay_finance_metric_pack_evaluation,
 )
+from .qualification import (
+    FINANCE_SHADOW_QUALIFICATION_INPUT_SCHEMA_VERSION,
+    build_finance_promotion_request,
+    build_finance_rollback_request,
+    build_finance_shadow_qualification,
+    replay_finance_shadow_qualification,
+)
 from .reducer import (
     FINANCE_VALUE_DISCOVERY_ERROR_SCHEMA_VERSION,
     build_finance_value_discovery_packet,
@@ -116,6 +123,29 @@ def _direct_parser() -> argparse.ArgumentParser:
     )
     pack_replay_parser.add_argument("--input-json", required=True)
     pack_replay_parser.add_argument("--expected-json", required=True)
+    qualification_parser = sub.add_parser(
+        "qualify-shadow",
+        help="Qualify a candidate revision for human promotion review.",
+    )
+    qualification_parser.add_argument("--input-json", required=True)
+    qualification_replay_parser = sub.add_parser(
+        "replay-qualification",
+        help="Verify a prior shadow qualification byte-for-byte.",
+    )
+    qualification_replay_parser.add_argument("--input-json", required=True)
+    qualification_replay_parser.add_argument("--expected-json", required=True)
+    promotion_parser = sub.add_parser(
+        "request-promotion",
+        help="Build a human-owner promotion request without activating a revision.",
+    )
+    promotion_parser.add_argument("--qualification-json", required=True)
+    promotion_parser.add_argument("--requested-by", required=True)
+    rollback_parser = sub.add_parser(
+        "request-rollback",
+        help="Build a human-owner rollback request without changing a revision.",
+    )
+    rollback_parser.add_argument("--activation-receipt-json", required=True)
+    rollback_parser.add_argument("--requested-by", required=True)
     sub.add_parser("list-packs", help="List bundled industry metric packs.")
     return parser
 
@@ -134,6 +164,8 @@ def run(argv: Sequence[str] | None = None) -> int:
                 packet = build_finance_beta_attribution(payload)
             elif schema_version == FINANCE_METRIC_PACK_INPUT_SCHEMA_VERSION:
                 packet = build_finance_metric_pack_evaluation(payload)
+            elif schema_version == FINANCE_SHADOW_QUALIFICATION_INPUT_SCHEMA_VERSION:
+                packet = build_finance_shadow_qualification(payload)
             else:
                 packet = build_finance_value_discovery_packet(payload)
         except Exception as exc:
@@ -169,12 +201,33 @@ def run(argv: Sequence[str] | None = None) -> int:
                 _load_json(args.input_json),
                 _load_json(args.expected_json),
             )
+        elif args.command == "qualify-shadow":
+            packet = build_finance_shadow_qualification(
+                _load_json(args.input_json)
+            )
+        elif args.command == "replay-qualification":
+            packet = replay_finance_shadow_qualification(
+                _load_json(args.input_json),
+                _load_json(args.expected_json),
+            )
+        elif args.command == "request-promotion":
+            packet = build_finance_promotion_request(
+                _load_json(args.qualification_json),
+                requested_by=args.requested_by,
+            )
+        elif args.command == "request-rollback":
+            packet = build_finance_rollback_request(
+                _load_json(args.activation_receipt_json),
+                requested_by=args.requested_by,
+            )
         elif args.command == "list-packs":
             packet = list_finance_metric_packs()
         else:
             raise ValueError(
                 "use --doctor, reduce, evaluate, replay, attribute-beta, "
-                "replay-beta, evaluate-pack, replay-pack, or list-packs"
+                "replay-beta, evaluate-pack, replay-pack, qualify-shadow, "
+                "replay-qualification, request-promotion, request-rollback, "
+                "or list-packs"
             )
     except Exception as exc:
         print(json.dumps(_error_packet(exc), indent=2, sort_keys=True))

@@ -23,6 +23,18 @@ from .metric_packs import (
     list_finance_metric_packs,
     replay_finance_metric_pack_evaluation,
 )
+from .qualification import (
+    FINANCE_METHOD_ACTIVATION_RECEIPT_SCHEMA_VERSION,
+    FINANCE_METHOD_PROMOTION_REQUEST_SCHEMA_VERSION,
+    FINANCE_METHOD_ROLLBACK_REQUEST_SCHEMA_VERSION,
+    FINANCE_SHADOW_QUALIFICATION_INPUT_SCHEMA_VERSION,
+    FINANCE_SHADOW_QUALIFICATION_SCHEMA_VERSION,
+    FINANCE_SHADOW_QUALIFICATION_STAGE_IDS,
+    build_finance_promotion_request,
+    build_finance_rollback_request,
+    build_finance_shadow_qualification,
+    replay_finance_shadow_qualification,
+)
 from .reducer import (
     EVIDENCE_AXES,
     FINANCE_VALUE_DISCOVERY_CARD_SCHEMA_VERSION,
@@ -51,6 +63,12 @@ __all__ = [
     "FINANCE_METRIC_PACK_EVALUATION_SCHEMA_VERSION",
     "FINANCE_METRIC_PACK_INPUT_SCHEMA_VERSION",
     "FINANCE_METRIC_PACK_REPLAY_SCHEMA_VERSION",
+    "FINANCE_METHOD_ACTIVATION_RECEIPT_SCHEMA_VERSION",
+    "FINANCE_METHOD_PROMOTION_REQUEST_SCHEMA_VERSION",
+    "FINANCE_METHOD_ROLLBACK_REQUEST_SCHEMA_VERSION",
+    "FINANCE_SHADOW_QUALIFICATION_INPUT_SCHEMA_VERSION",
+    "FINANCE_SHADOW_QUALIFICATION_SCHEMA_VERSION",
+    "FINANCE_SHADOW_QUALIFICATION_STAGE_IDS",
     "FINANCE_VALUE_DISCOVERY_CARD_SCHEMA_VERSION",
     "FINANCE_VALUE_DISCOVERY_EXTENSION_PROTOCOL",
     "FINANCE_VALUE_DISCOVERY_INPUT_SCHEMA_VERSION",
@@ -58,6 +76,9 @@ __all__ = [
     "build_finance_beta_attribution",
     "build_finance_case_evaluation",
     "build_finance_metric_pack_evaluation",
+    "build_finance_promotion_request",
+    "build_finance_rollback_request",
+    "build_finance_shadow_qualification",
     "build_finance_value_discovery_packet",
     "evaluate_finance_case_gates",
     "list_finance_metric_packs",
@@ -65,5 +86,6 @@ __all__ = [
     "replay_finance_beta_attribution",
     "replay_finance_case_evaluation",
     "replay_finance_metric_pack_evaluation",
+    "replay_finance_shadow_qualification",
     "validate_finance_case_contract",
 ]
