@@ -37,6 +37,7 @@ from .execution_profile import (
     compact_execution_profile,
     execution_profile_outcome_floor,
 )
+from .extensions.presentation import collect_active_extension_presentation_surfaces
 from .control_plane.goals.goal_channel_projection import build_goal_channel_projection
 from .handoff_budget import handoff_budget_contract
 from .history import collect_history, load_registry
@@ -3049,6 +3050,9 @@ def build_status_collection_context() -> StatusCollectionContext:
         build_status_contract=build_status_contract,
         build_contract_health_projection=build_contract_health_projection,
         build_agent_management_projection=_build_agent_management_projection_read_model,
+        collect_extension_presentation_surfaces=(
+            collect_active_extension_presentation_surfaces
+        ),
         status_control_plane_context_limit=STATUS_CONTROL_PLANE_CONTEXT_LIMIT,
         max_todo_index_items=MAX_TODO_INDEX_ITEMS,
     )

@@ -26,6 +26,7 @@ class StatusCollectionContext:
     build_status_contract: StatusCallback
     build_contract_health_projection: StatusCallback
     build_agent_management_projection: StatusCallback
+    collect_extension_presentation_surfaces: StatusCallback
     status_control_plane_context_limit: int
     max_todo_index_items: int
 
@@ -103,6 +104,9 @@ def collect_status(
             else None
         )
     }
+    presentation_surfaces = context.collect_extension_presentation_surfaces(
+        state_file=runtime_root / "extensions" / "state.json",
+    )
     contract_projection = {
         "ok": contract.get("ok"),
         "summary": contract.get("summary"),
@@ -127,6 +131,7 @@ def collect_status(
         "attention_queue": queue,
         **runtime_summaries,
         "promotion_gate": promotion_gate,
+        "presentation_surfaces": presentation_surfaces,
     }
     payload["runtime_projection_routes"] = runtime_projection_route_health
     agent_management_projection = context.build_agent_management_projection(
