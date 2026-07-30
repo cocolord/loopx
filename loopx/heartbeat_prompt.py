@@ -1260,7 +1260,7 @@ missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
 DONT_NOTIFY+false/0 only: quiet.
 {RUNTIME_CAPABILITY_PROJECTION_THIN_RULE}
 {SCHEDULER_HINT_THIN_RULE}
-writeback: actual class/scale/outcome accountable refresh->spend; no upgrade.
+writeback: actual class/scale/outcome refresh->spend; no upgrade.
 Done->todo/rationale; guard receipt; 2 stalls->replan.
 `lark_event_inbox`: reply_due; drain_command/reply-readback/ACK.
 
