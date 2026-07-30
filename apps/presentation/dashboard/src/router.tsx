@@ -12,6 +12,7 @@ import { FrontstagePage } from "./views/frontstage-page";
 
 const searchSchema = z.object({
   actionKind: z.enum(["all", "reward", "controller", "codex", "evidence", "health"]).optional().default("all"),
+  extensionId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/).optional(),
   goalId: z.string().optional().default(""),
   lane: z.enum(["all", "user", "codex", "watch"]).optional().default("all"),
   severity: z.enum(["all", "high", "action", "watch"]).optional().default("all"),

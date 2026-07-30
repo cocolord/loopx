@@ -4,12 +4,13 @@ from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 import tempfile
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 from ..file_lock import exclusive_file_lock
 from .runtime import (
@@ -39,9 +40,18 @@ _LOCAL_PATH_RE = re.compile(
     r"(?:^|[\s(])(?:~[/\\]|/+(?:Users|home|tmp|private|var|etc|opt)/|"
     r"[A-Za-z]:[\\/])"
 )
+_PRIVATE_RELATIVE_PATH_RE = re.compile(
+    r"(?:^|[\s:=('/\\])\.(?:codex|git|local)(?:[/\\]|$)",
+    re.IGNORECASE,
+)
 _CREDENTIAL_RE = re.compile(
     r"(?:bearer\s+[A-Za-z0-9._~+/=-]{8,}|"
     r"(?:api[_ -]?key|access[_ -]?token|secret|password)\s*[:=]\s*\S+)",
+    re.IGNORECASE,
+)
+_SENSITIVE_TEXT_RE = re.compile(
+    r"\b(?:account[\s_-]*(?:id|number)|order[\s_-]*(?:id|request)|"
+    r"portfolio(?:[\s_-]+holdings)?|position[\s_-]*size)\b",
     re.IGNORECASE,
 )
 _FORBIDDEN_KEY_TOKENS = {
@@ -98,6 +108,16 @@ _EVENT_STATES = {
 }
 
 
+def _is_forbidden_key_name(value: Any) -> bool:
+    normalized = str(value).lower().replace("-", "_")
+    return any(
+        normalized == token
+        or normalized.startswith(f"{token}_")
+        or normalized.endswith(f"_{token}")
+        for token in _FORBIDDEN_KEY_TOKENS
+    )
+
+
 def _record(
     value: Any,
     *,
@@ -128,10 +148,12 @@ def _plain_text(
         raise ValueError(f"{context} must contain at most {max_length} characters")
     if "\x00" in text or _MARKUP_RE.search(text):
         raise ValueError(f"{context} must be plain text without markup")
-    if _LOCAL_PATH_RE.search(text):
+    if _LOCAL_PATH_RE.search(text) or _PRIVATE_RELATIVE_PATH_RE.search(text):
         raise ValueError(f"{context} must not contain a local path")
     if _CREDENTIAL_RE.search(text):
         raise ValueError(f"{context} must not contain credential material")
+    if _SENSITIVE_TEXT_RE.search(text):
+        raise ValueError(f"{context} must not contain sensitive material")
     return text
 
 
@@ -172,7 +194,10 @@ def _boolean(value: Any, *, context: str) -> bool:
 def _number(value: Any, *, context: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{context} must be numeric")
-    return float(value)
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"{context} must be finite")
+    return number
 
 
 def _iso_value(value: Any, *, context: str, date_only_allowed: bool = True) -> str:
@@ -237,10 +262,7 @@ def _assert_allowed_keys_recursively(value: Any, *, context: str = "view") -> No
     if isinstance(value, Mapping):
         for key, child in value.items():
             normalized = str(key).lower().replace("-", "_")
-            if any(
-                normalized == token or normalized.startswith(f"{token}_")
-                for token in _FORBIDDEN_KEY_TOKENS
-            ):
+            if _is_forbidden_key_name(normalized):
                 if normalized not in {
                     "raw_provider_payload_recorded",
                     "private_source_content_read",
@@ -271,6 +293,13 @@ def _evidence_reference(value: Any, *, context: str) -> str:
         or parsed.username
         or parsed.password
     ):
+        raise ValueError(f"{context} contains an unsafe evidence reference")
+    sensitive_url_fields = {
+        key.lower().replace("-", "_")
+        for component in (parsed.query, parsed.fragment)
+        for key, _value in parse_qsl(component, keep_blank_values=True)
+    }
+    if any(_is_forbidden_key_name(field) for field in sensitive_url_fields):
         raise ValueError(f"{context} contains an unsafe evidence reference")
     return reference
 
@@ -1145,6 +1174,7 @@ def _declared_surface(
 def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
     return json.dumps(
         dict(value),
+        allow_nan=False,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

@@ -138,7 +138,12 @@ export function DecisionResearchSurface({
           <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700 dark:text-amber-300">
             Current adjudication
           </div>
-          <div className="mt-1 text-base font-semibold">{view.adjudication.label}</div>
+          <div className="mt-1 text-base font-semibold">
+            {view.adjudication.status}
+          </div>
+          <div className="mt-0.5 text-xs text-amber-800 dark:text-amber-200">
+            {view.adjudication.label}
+          </div>
         </div>
         {view.metrics.slice(0, 2).map((metric) => (
           <div
@@ -173,6 +178,9 @@ export function DecisionResearchSurface({
                   Current adjudication
                 </div>
                 <div className="mt-2 text-2xl font-semibold text-amber-950 dark:text-amber-100">
+                  {view.adjudication.status}
+                </div>
+                <div className="mt-1 text-sm font-semibold text-amber-900 dark:text-amber-200">
                   {view.adjudication.label}
                 </div>
                 <p className="mt-2 text-sm leading-6 text-amber-900 dark:text-amber-200">
@@ -424,7 +432,7 @@ export function DecisionResearchDashboardSummaries({
   onSelect,
   surfaces,
 }: {
-  onSelect: (surfaceId: string) => void;
+  onSelect: (extensionId: string, surfaceId: string) => void;
   surfaces: PresentationSurface[];
 }) {
   const summaries = surfaces.flatMap((surface) => {
@@ -449,7 +457,7 @@ export function DecisionResearchDashboardSummaries({
           className="rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
           data-testid="research-dashboard-summary"
           key={`${surface.extension_id}-${surface.surface_id}-${summary.id}`}
-          onClick={() => onSelect(surface.surface_id)}
+          onClick={() => onSelect(surface.extension_id, surface.surface_id)}
           type="button"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">

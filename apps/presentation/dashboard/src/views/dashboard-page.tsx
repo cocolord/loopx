@@ -6633,7 +6633,9 @@ export function DashboardPage() {
   const controlPlaneApiUrls = useMemo(() => buildControlPlaneApiUrls(source, payload), [payload, source]);
   const presentationSurfaces = payload.presentation_surfaces.items;
   const selectedPresentationSurface = presentationSurfaces.find(
-    (surface) => surface.surface_id === search.surfaceId,
+    (surface) =>
+      surface.extension_id === search.extensionId
+      && surface.surface_id === search.surfaceId,
   );
 
   async function loadFromUrl(url: string) {
@@ -6742,14 +6744,17 @@ export function DashboardPage() {
       return;
     }
     if (
-      search.surfaceId
+      (search.extensionId || search.surfaceId)
       && !presentationSurfaces.some(
-        (surface) => surface.surface_id === search.surfaceId,
+        (surface) =>
+          surface.extension_id === search.extensionId
+          && surface.surface_id === search.surfaceId,
       )
     ) {
       void navigate({
         search: (current) => ({
           ...current,
+          extensionId: undefined,
           surfaceId: undefined,
         }),
       });
@@ -6757,6 +6762,7 @@ export function DashboardPage() {
   }, [
     navigate,
     presentationSurfaces,
+    search.extensionId,
     search.statusUrl,
     search.surfaceId,
     source.kind,
@@ -6842,6 +6848,7 @@ export function DashboardPage() {
                   navigate({
                     search: (current) => ({
                       ...current,
+                      extensionId: undefined,
                       surfaceId: undefined,
                     }),
                   })
@@ -6854,7 +6861,8 @@ export function DashboardPage() {
               {presentationSurfaces.map((surface) => (
                 <button
                   className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-white ${
-                    selectedPresentationSurface?.surface_id === surface.surface_id
+                    selectedPresentationSurface?.extension_id === surface.extension_id
+                      && selectedPresentationSurface.surface_id === surface.surface_id
                       ? "bg-white/10"
                       : "hover:bg-white/10"
                   }`}
@@ -6864,6 +6872,7 @@ export function DashboardPage() {
                     navigate({
                       search: (current) => ({
                         ...current,
+                        extensionId: surface.extension_id,
                         surfaceId: surface.surface_id,
                       }),
                     })
@@ -6917,10 +6926,11 @@ export function DashboardPage() {
               ) : (
                 <>
               <DecisionResearchDashboardSummaries
-                onSelect={(surfaceId) =>
+                onSelect={(extensionId, surfaceId) =>
                   navigate({
                     search: (current) => ({
                       ...current,
+                      extensionId,
                       surfaceId,
                     }),
                   })

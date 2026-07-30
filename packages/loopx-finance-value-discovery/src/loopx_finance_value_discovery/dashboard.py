@@ -54,6 +54,13 @@ _EVIDENCE_CLASSIFICATIONS = {
     "analyst_estimate",
     "agent_inference",
 }
+_ADJUDICATION_LABELS = {
+    "selected": "Selected",
+    "rejected": "Rejected",
+    "insufficient_evidence": "Insufficient Evidence",
+    "blocked": "Blocked",
+    "superseded": "Superseded",
+}
 
 
 def _record(
@@ -148,6 +155,41 @@ def _parsed_datetime(value: str) -> datetime:
     return datetime.fromisoformat(
         value[:-1] + "+00:00" if value.endswith("Z") else value
     )
+
+
+def _assert_finance_truth(view: Mapping[str, Any]) -> None:
+    adjudication = view["adjudication"]
+    expected_label = _ADJUDICATION_LABELS[adjudication["status"]]
+    if adjudication["label"] != expected_label:
+        raise ValueError(
+            "input.adjudication label must match its canonical status "
+            f"(`{expected_label}`)"
+        )
+
+    metrics = {metric["id"]: metric for metric in view["metrics"]}
+    if len(metrics) != len(view["metrics"]):
+        raise ValueError("input.metrics ids must be unique")
+    validated_alpha = metrics.get("validated-alpha")
+    if validated_alpha is None:
+        raise ValueError("input.metrics requires canonical `validated-alpha`")
+    if validated_alpha["value"] != "0" or validated_alpha["tone"] != "warning":
+        raise ValueError(
+            "input.metrics `validated-alpha` must preserve value 0 with warning tone"
+        )
+    method_metric = metrics.get("method-state")
+    if method_metric is None:
+        raise ValueError("input.metrics requires canonical `method-state`")
+    if method_metric["value"] != "unchanged" or method_metric["tone"] != "neutral":
+        raise ValueError(
+            "input.metrics `method-state` must preserve unchanged with neutral tone"
+        )
+
+    method_state = view["method_state"]
+    if (
+        method_state["active_method_changed"]
+        or method_state["lifecycle_state"] != "active_method_unchanged"
+    ):
+        raise ValueError("input.method_state must preserve active method unchanged")
 
 
 def _reject_forbidden_material(value: Any, *, context: str = "input") -> None:
@@ -752,6 +794,7 @@ def build_finance_research_dashboard_packet(
             ),
         }
     )
+    _assert_finance_truth(view)
     return {
         "schema_version": FINANCE_RESEARCH_DASHBOARD_PACKET_SCHEMA_VERSION,
         "presentation_projection": {
