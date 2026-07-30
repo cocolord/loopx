@@ -4,7 +4,10 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from loopx.control_plane.todos.contract import normalize_todo_decision_scope
+
 from .boundary import reject_forbidden_material
+from .contract import _iso_date
 from .replay import canonical_json_bytes, canonical_sha256
 
 FINANCE_SHADOW_QUALIFICATION_INPUT_SCHEMA_VERSION = (
@@ -57,6 +60,28 @@ def _evidence_refs(value: object, *, field: str) -> list[str]:
     if len(refs) != len(set(refs)):
         raise ValueError(f"{field} must use unique evidence refs")
     return refs
+
+
+def _owner_decision_scope(*, action: str, revision: str) -> str:
+    scope_key = f"{action}:{revision}"
+    scope = f"direction:action:{scope_key}"
+    normalized = normalize_todo_decision_scope(scope)
+    if normalized is None or normalized["scope_key"] != scope_key:
+        raise ValueError("revision must produce a canonical decision scope")
+    return (
+        f"{normalized['kind']}:{normalized['granularity']}:"
+        f"{normalized['scope_key']}"
+    )
+
+
+def _request_with_content_id(
+    prefix: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "request_id": f"{prefix}-{canonical_sha256(payload)}",
+        **payload,
+    }
 
 
 def _stage(value: object, *, index: int) -> dict[str, Any]:
@@ -148,10 +173,9 @@ def _qualification_input(value: object) -> dict[str, Any]:
         "method_id": _text(value.get("method_id"), field="method_id", limit=100),
         "current_active_revision": current_revision,
         "candidate_revision": candidate_revision,
-        "point_in_time": _text(
+        "point_in_time": _iso_date(
             value.get("point_in_time"),
             field="point_in_time",
-            limit=40,
         ),
         "executor_id": executor_id,
         "evaluator_id": evaluator_id,
@@ -241,6 +265,23 @@ def replay_finance_shadow_qualification(
 def _validated_qualification(value: object) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("qualification must be an object")
+    allowed = {
+        "schema_version",
+        "qualification_id",
+        "method_id",
+        "current_active_revision",
+        "candidate_revision",
+        "point_in_time",
+        "executor_id",
+        "evaluator_id",
+        "stages",
+        "disposition",
+        "first_blocking_stage",
+        "boundary",
+        "replay",
+    }
+    if set(value) - allowed:
+        raise ValueError("qualification has unsupported fields")
     replay = value.get("replay")
     if not isinstance(replay, Mapping):
         raise ValueError("qualification requires a replay receipt")
@@ -313,9 +354,8 @@ def build_finance_promotion_request(
         field="current_active_revision",
         limit=100,
     )
-    return {
+    request = {
         "schema_version": FINANCE_METHOD_PROMOTION_REQUEST_SCHEMA_VERSION,
-        "request_id": f"promote-{payload['qualification_id']}",
         "status": "awaiting_owner_decision",
         "requested_by": requester,
         "method_id": payload["method_id"],
@@ -323,12 +363,17 @@ def build_finance_promotion_request(
         "candidate_revision": candidate_revision,
         "rollback_target_revision": current_revision,
         "qualification_sha256": payload["replay"]["qualification_sha256"],
-        "decision_scope": (
-            f"direction:action:promote_finance_method:{candidate_revision}"
+        "decision_scope": _owner_decision_scope(
+            action="promote_finance_method",
+            revision=candidate_revision,
         ),
         "activation_performed": False,
         "automatic_promotion_allowed": False,
     }
+    return _request_with_content_id(
+        f"promote-{payload['qualification_id']}",
+        request,
+    )
 
 
 def build_finance_rollback_request(
@@ -390,9 +435,8 @@ def build_finance_rollback_request(
         limit=100,
     )
     requester = _text(requested_by, field="requested_by", limit=80)
-    return {
+    request = {
         "schema_version": FINANCE_METHOD_ROLLBACK_REQUEST_SCHEMA_VERSION,
-        "request_id": f"rollback-{activation_id}",
         "status": "awaiting_owner_decision",
         "requested_by": requester,
         "method_id": method_id,
@@ -400,9 +444,11 @@ def build_finance_rollback_request(
         "rollback_target_revision": previous_revision,
         "activation_receipt_sha256": canonical_sha256(activation_receipt),
         "qualification_sha256": qualification_sha256,
-        "decision_scope": (
-            f"direction:action:rollback_finance_method:{active_revision}"
+        "decision_scope": _owner_decision_scope(
+            action="rollback_finance_method",
+            revision=active_revision,
         ),
         "rollback_performed": False,
         "automatic_rollback_allowed": False,
     }
+    return _request_with_content_id(f"rollback-{activation_id}", request)

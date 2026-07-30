@@ -43,7 +43,9 @@ point-in-time, historical positive and negative, walk-forward, prospective
 shadow, transaction-cost, and independent-evaluator stages are all explicit.
 Passing produces an owner review request, never an activation. Rollback is also
 an owner review request and requires an exact prior human-approved activation
-receipt.
+receipt. Point-in-time cutoffs are ISO-8601 values, owner decision scopes must
+normalize under the LoopX todo contract, and request ids bind the normalized
+request contents.
 
 The packet enforces:
 

@@ -75,12 +75,17 @@ Every stage is explicit `passed`, `failed`, `missing`, or `conflict`.
 `failed` produces `rejected`; `missing` and `conflict` produce
 `insufficient_evidence`. Only seven passed stages produce
 `ready_for_owner_review`. The result carries canonical input and qualification
-hashes and still reports `active_revision_changed=false`.
+hashes and still reports `active_revision_changed=false`. `point_in_time` must
+be an ISO-8601 date or datetime. Qualification inputs, results, and replay
+receipts reject unsupported fields rather than treating them as unhashed
+metadata.
 
 The promotion helper accepts only a byte-replayable ready qualification. It
 emits `finance_method_promotion_request_v1` with a typed owner decision scope,
 the current and candidate revisions, a rollback target, and
-`activation_performed=false`. It has no activation operation.
+`activation_performed=false`. Revision values must produce a decision scope
+accepted by LoopX's canonical todo scope normalizer. It has no activation
+operation.
 
 The rollback helper accepts only an explicit
 `finance_method_activation_receipt_v1` whose authority is `human_owner` and
@@ -88,6 +93,12 @@ whose outcome is `approve`. It emits a separate owner decision request bound
 to the exact active and previous revisions. It has no rollback operation.
 Agents therefore may qualify and request review, but cannot activate a
 candidate or roll back an active method.
+
+Promotion and rollback request ids retain the caller-provided qualification or
+activation id as a readable prefix, then append a SHA-256 of the complete
+normalized request body. Reusing a source id for different revisions, evidence,
+receipts, or requesters therefore cannot silently collide at an idempotent
+consumer.
 
 ## Replay
 

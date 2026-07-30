@@ -153,6 +153,14 @@ def test_independent_evaluator_cannot_be_the_executor() -> None:
         build_finance_shadow_qualification(payload)
 
 
+def test_point_in_time_requires_an_iso_date_or_datetime() -> None:
+    payload = _example()
+    payload["point_in_time"] = "not-an-iso-cutoff"
+
+    with pytest.raises(ValueError, match="ISO-8601"):
+        build_finance_shadow_qualification(payload)
+
+
 def test_ready_qualification_builds_a_request_not_an_activation() -> None:
     qualification = build_finance_shadow_qualification(_example())
 
@@ -181,15 +189,19 @@ def test_normalized_input_can_still_build_a_promotion_request() -> None:
     payload = _example()
     payload["qualification_id"] = "  finance-method-v1-shadow-qualification  "
     qualification = build_finance_shadow_qualification(payload)
-
     request = build_finance_promotion_request(
         qualification,
         requested_by="finance-method-maintainer",
     )
-
-    assert request["request_id"] == (
-        "promote-finance-method-v1-shadow-qualification"
+    canonical_request = build_finance_promotion_request(
+        build_finance_shadow_qualification(_example()),
+        requested_by="finance-method-maintainer",
     )
+
+    assert request["request_id"].startswith(
+        "promote-finance-method-v1-shadow-qualification-"
+    )
+    assert request["request_id"] == canonical_request["request_id"]
 
 
 def test_promotion_request_rejects_unqualified_or_mutated_evidence() -> None:
@@ -241,6 +253,89 @@ def test_promotion_request_rejects_unqualified_or_mutated_evidence() -> None:
             forged,
             requested_by="finance-method-maintainer",
         )
+
+
+def test_promotion_request_rejects_unsupported_qualification_fields() -> None:
+    qualification = build_finance_shadow_qualification(_example())
+    qualification["unreviewed_note"] = "extra qualification metadata"
+    qualification_without_replay = deepcopy(qualification)
+    qualification_without_replay.pop("replay")
+    qualification["replay"]["qualification_sha256"] = canonical_sha256(
+        qualification_without_replay
+    )
+
+    with pytest.raises(ValueError, match="unsupported fields"):
+        build_finance_promotion_request(
+            qualification,
+            requested_by="finance-method-maintainer",
+        )
+
+
+def test_owner_requests_require_canonical_decision_scope_revisions() -> None:
+    promotion_input = _example()
+    promotion_input["candidate_revision"] = "finance method v1"
+    qualification = build_finance_shadow_qualification(promotion_input)
+
+    with pytest.raises(ValueError, match="canonical decision scope"):
+        build_finance_promotion_request(
+            qualification,
+            requested_by="finance-method-maintainer",
+        )
+
+    receipt = {
+        "schema_version": "finance_method_activation_receipt_v1",
+        "activation_id": "activation-finance-method-v1",
+        "method_id": "finance-value-discovery",
+        "decision_authority": "human_owner",
+        "decision_outcome": "approve",
+        "previous_revision": "finance-method-v0",
+        "active_revision": "finance method v1",
+        "qualification_sha256": "a" * 64,
+    }
+    with pytest.raises(ValueError, match="canonical decision scope"):
+        build_finance_rollback_request(
+            receipt,
+            requested_by="finance-method-maintainer",
+        )
+
+
+def test_owner_request_ids_bind_the_complete_request_source() -> None:
+    first_input = _example()
+    first = build_finance_promotion_request(
+        build_finance_shadow_qualification(first_input),
+        requested_by="finance-method-maintainer",
+    )
+    second_input = _example()
+    second_input["candidate_revision"] = "finance-method-v2-candidate"
+    second = build_finance_promotion_request(
+        build_finance_shadow_qualification(second_input),
+        requested_by="finance-method-maintainer",
+    )
+
+    assert first["request_id"] != second["request_id"]
+
+    first_receipt = {
+        "schema_version": "finance_method_activation_receipt_v1",
+        "activation_id": "activation-finance-method-v1",
+        "method_id": "finance-value-discovery",
+        "decision_authority": "human_owner",
+        "decision_outcome": "approve",
+        "previous_revision": "finance-method-v0",
+        "active_revision": "finance-method-v1-candidate",
+        "qualification_sha256": "a" * 64,
+    }
+    first_rollback = build_finance_rollback_request(
+        first_receipt,
+        requested_by="finance-method-maintainer",
+    )
+    second_receipt = deepcopy(first_receipt)
+    second_receipt["previous_revision"] = "finance-method-v0.1"
+    second_rollback = build_finance_rollback_request(
+        second_receipt,
+        requested_by="finance-method-maintainer",
+    )
+
+    assert first_rollback["request_id"] != second_rollback["request_id"]
 
 
 def test_qualification_replay_and_cli_are_deterministic(
