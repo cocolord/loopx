@@ -16,6 +16,7 @@ const searchSchema = z.object({
   lane: z.enum(["all", "user", "codex", "watch"]).optional().default("all"),
   severity: z.enum(["all", "high", "action", "watch"]).optional().default("all"),
   statusUrl: z.string().optional().default(""),
+  surfaceId: z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/).optional(),
   todoGoalId: z.string().optional().default("all"),
   todoQuery: z.string().optional().default(""),
   todoRole: z.enum(["all", "user", "agent"]).optional().default("all"),

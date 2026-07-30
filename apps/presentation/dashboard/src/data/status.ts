@@ -697,6 +697,278 @@ export const localDashboardApiSchema = z.object({
   control_plane_write_enabled: z.boolean().optional().default(false),
 }).optional().nullable();
 
+const researchDecisionSchema = z.enum([
+  "selected",
+  "rejected",
+  "insufficient_evidence",
+  "blocked",
+  "superseded",
+]);
+
+const researchConfidenceSchema = z.enum(["high", "medium", "low"]);
+
+const researchToneSchema = z.enum([
+  "neutral",
+  "success",
+  "warning",
+  "info",
+  "danger",
+]);
+
+const researchLayerStateSchema = z.enum([
+  "supported",
+  "partial",
+  "rejected",
+  "insufficient_evidence",
+  "blocked",
+  "pending",
+]);
+
+const researchGateStateSchema = z.enum([
+  "passed",
+  "failed",
+  "pending",
+  "blocked",
+  "insufficient_evidence",
+  "partial",
+]);
+
+const researchEventStateSchema = z.enum([
+  "pending",
+  "partially_adjudicated",
+  "selected",
+  "rejected",
+  "insufficient_evidence",
+  "blocked",
+  "superseded",
+]);
+
+const researchMetricSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  value: z.string().min(1),
+  detail: z.string().min(1),
+  tone: researchToneSchema,
+}).strict();
+
+const researchSummarySchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  title: z.string().min(1),
+  summary: z.string().min(1),
+  tone: researchToneSchema,
+  destination_anchor: z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/),
+}).strict();
+
+const researchLayerSchema = z.object({
+  id: z.string().min(1),
+  order: z.number().int().positive(),
+  label: z.string().min(1),
+  status: researchLayerStateSchema,
+  summary: z.string().min(1),
+  evidence_points: z.array(z.string().min(1)).min(1).max(12),
+}).strict();
+
+const researchObservationSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  kind: z.enum([
+    "observation_range",
+    "current_fact",
+    "historical_fact",
+    "management_guidance",
+    "analyst_estimate",
+    "agent_inference",
+  ]),
+  value: z.string().min(1),
+  as_of: z.string().min(1),
+  source_ref: z.string().min(1),
+  source_type: z.enum([
+    "company_filing",
+    "company_guidance",
+    "regulator",
+    "exchange",
+    "market_data",
+    "industry_source",
+    "high_quality_media",
+    "community_signal",
+    "agent_analysis",
+  ]),
+  confidence: researchConfidenceSchema,
+  invalidation: z.string().min(1),
+}).strict();
+
+const researchScenarioSchema = z.object({
+  scenario: z.enum(["bull", "base", "bear"]),
+  label: z.string().min(1),
+  value: z.string().min(1),
+  horizon: z.string().min(1),
+  probability: z.number().min(0).max(1),
+  assumptions: z.array(z.string().min(1)).min(1).max(8),
+}).strict();
+
+const researchEntitySchema = z.object({
+  entity_id: z.string().min(1),
+  symbol: z.string().min(1),
+  display_name: z.string().min(1),
+  classification: z.string().min(1),
+  status: researchDecisionSchema,
+  confidence: researchConfidenceSchema,
+  inference: z.string().min(1),
+  observations: z.array(researchObservationSchema).min(1).max(20),
+  scenario_estimates: z.array(researchScenarioSchema).length(3),
+  counterevidence: z.array(z.string().min(1)).min(1).max(12),
+  thesis_breakers: z.array(z.string().min(1)).min(1).max(12),
+  next_events: z.array(z.string().min(1)).max(12),
+}).strict().superRefine((entity, context) => {
+  const scenarioNames = new Set(entity.scenario_estimates.map((item) => item.scenario));
+  if (
+    scenarioNames.size !== 3
+    || !scenarioNames.has("bull")
+    || !scenarioNames.has("base")
+    || !scenarioNames.has("bear")
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "scenario_estimates must contain bull, base and bear",
+      path: ["scenario_estimates"],
+    });
+  }
+  const probability = entity.scenario_estimates.reduce(
+    (sum, item) => sum + item.probability,
+    0,
+  );
+  if (Math.abs(probability - 1) > 0.000001) {
+    context.addIssue({
+      code: "custom",
+      message: "scenario_estimates probabilities must sum to 1",
+      path: ["scenario_estimates"],
+    });
+  }
+});
+
+const researchLedgerSchema = z.object({
+  case_id: z.string().min(1),
+  label: z.string().min(1),
+  gate_states: z.array(z.object({
+    gate_id: z.string().min(1),
+    label: z.string().min(1),
+    status: researchGateStateSchema,
+    summary: z.string().min(1),
+  }).strict()).min(1).max(16),
+  decision: researchDecisionSchema,
+  summary: z.string().min(1),
+  evidence_refs: z.array(z.string().min(1)).min(1).max(20),
+}).strict();
+
+const researchEventGateSchema = z.object({
+  event_id: z.string().min(1),
+  label: z.string().min(1),
+  status: researchEventStateSchema,
+  observation_window: z.string().min(1),
+  frozen_hypothesis: z.string().min(1),
+  observables: z.array(z.string().min(1)).min(1).max(16),
+  current_evidence: z.array(z.string().min(1)).max(16),
+  supports: z.array(z.string().min(1)).min(1).max(12),
+  refutes: z.array(z.string().min(1)).min(1).max(12),
+  thesis_breakers: z.array(z.string().min(1)).min(1).max(12),
+  next_review: z.string().min(1),
+}).strict();
+
+export const decisionResearchViewSchema = z.object({
+  identity: z.object({
+    title: z.string().min(1),
+    subtitle: z.string().min(1),
+    as_of: z.string().min(1),
+    evidence_cutoff: z.string().min(1),
+  }).strict(),
+  adjudication: z.object({
+    status: researchDecisionSchema,
+    label: z.string().min(1),
+    summary: z.string().min(1),
+    confidence: researchConfidenceSchema,
+  }).strict(),
+  metrics: z.array(researchMetricSchema).min(1).max(12),
+  dashboard_summaries: z.array(researchSummarySchema).max(3),
+  layers: z.array(researchLayerSchema).min(1).max(12),
+  entities: z.array(researchEntitySchema).max(24),
+  research_ledger: z.array(researchLedgerSchema).max(40),
+  event_gates: z.array(researchEventGateSchema).max(32),
+  method_state: z.object({
+    revision: z.string().min(1),
+    lifecycle_state: z.string().min(1),
+    active_method_changed: z.boolean(),
+    summary: z.string().min(1),
+  }).strict(),
+  boundary: z.object({
+    research_aid_only: z.literal(true),
+    investment_advice: z.literal(false),
+    trading_allowed: z.literal(false),
+    raw_provider_payload_recorded: z.literal(false),
+    private_source_content_read: z.literal(false),
+  }).strict(),
+}).strict();
+
+const presentationSurfaceBaseSchema = z.object({
+  extension_id: z.string().min(1),
+  extension_revision: z.string().min(1),
+  surface_id: z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/),
+  surface_kind: z.literal("decision_research_dashboard"),
+  title: z.string().min(1),
+  view_schema: z.literal("decision_research_dashboard_v0"),
+  visibility: z.enum(["public-safe", "owner-only"]),
+  goal_id: z.string().min(1).nullable(),
+  generated_at: z.string().min(1).nullable(),
+  review_due_at: z.string().min(1).nullable(),
+  diagnostic: z.string().min(1).nullable(),
+  empty_state_title: z.string().min(1),
+  empty_state_detail: z.string().min(1),
+});
+
+const readyPresentationSurfaceSchema = presentationSurfaceBaseSchema.extend({
+  state: z.enum(["ready", "review_due"]),
+  goal_id: z.string().min(1),
+  generated_at: z.string().min(1),
+  view: decisionResearchViewSchema,
+}).strict();
+
+const emptyPresentationSurfaceSchema = presentationSurfaceBaseSchema.extend({
+  state: z.literal("empty"),
+  view: z.never().optional(),
+}).strict();
+
+const invalidPresentationSurfaceSchema = presentationSurfaceBaseSchema.extend({
+  state: z.literal("invalid"),
+  diagnostic: z.string().min(1),
+  view: z.never().optional(),
+}).strict();
+
+export const presentationSurfaceSchema = z.union([
+  readyPresentationSurfaceSchema,
+  emptyPresentationSurfaceSchema,
+  invalidPresentationSurfaceSchema,
+]);
+
+export const presentationSurfaceCollectionSchema = z.object({
+  schema_version: z.literal("extension_presentation_surfaces_v0"),
+  count: z.number().int().nonnegative(),
+  ready_count: z.number().int().nonnegative(),
+  review_due_count: z.number().int().nonnegative(),
+  empty_count: z.number().int().nonnegative(),
+  invalid_count: z.number().int().nonnegative(),
+  items: z.array(presentationSurfaceSchema),
+}).strict();
+
+const emptyPresentationSurfaceCollection = {
+  schema_version: "extension_presentation_surfaces_v0" as const,
+  count: 0,
+  ready_count: 0,
+  review_due_count: 0,
+  empty_count: 0,
+  invalid_count: 0,
+  items: [],
+};
+
 export const statusPayloadSchema = z.object({
   ok: z.boolean(),
   registry: z.string(),
@@ -759,6 +1031,9 @@ export const statusPayloadSchema = z.object({
   usage_summary: usageSummarySchema.default(null),
   todo_index: todoIndexSchema.optional().nullable().default(null),
   agent_management_projection: agentManagementProjectionSchema.optional().nullable().default(null),
+  presentation_surfaces: presentationSurfaceCollectionSchema.optional().default(
+    emptyPresentationSurfaceCollection,
+  ),
 });
 
 export const rewardDryRunResponseSchema = z.object({
@@ -818,6 +1093,9 @@ export type PromotionGate = NonNullable<z.infer<typeof promotionGateSchema>>;
 export type DecisionFreshnessSummary = NonNullable<z.infer<typeof decisionFreshnessSummarySchema>>;
 export type DecisionFreshnessItem = z.infer<typeof decisionFreshnessItemSchema>;
 export type UsageSummary = NonNullable<z.infer<typeof usageSummarySchema>>;
+export type DecisionResearchView = z.infer<typeof decisionResearchViewSchema>;
+export type PresentationSurface = z.infer<typeof presentationSurfaceSchema>;
+export type PresentationSurfaceCollection = z.infer<typeof presentationSurfaceCollectionSchema>;
 export type RunGoal = z.infer<typeof runGoalSchema>;
 export type RunRecord = z.infer<typeof runRecordSchema>;
 export type RewardDryRunResponse = z.infer<typeof rewardDryRunResponseSchema>;
