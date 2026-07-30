@@ -33,11 +33,11 @@ two separate layers:
   --thin`, preferred as the local machine default when the target Codex agent is
   trusted to inspect LoopX registry/global quota truth, active state,
   status/run history, repo state, and project signals at wakeup time. It does
-  not paste command branches into the automation prompt; it may point the worker
-  to the installed `loopx-project` skill for procedural details, but the
-  runtime source of truth is still the CLI payload, especially
-  `quota should-run.interaction_contract`. This makes the Codex thread a
-  replaceable worker and leaves durable task truth in LoopX.
+  not paste command branches into the automation prompt. Normal turns use CLI
+  `interaction_contract`; use `loopx-project` for lifecycle/registry and
+  `loopx-self-repair` for runtime/projection drift. The CLI payload remains the
+  runtime source of truth. This makes the Codex thread a replaceable worker and
+  leaves durable task truth in LoopX.
 
 Do not paste the full lifecycle protocol into the visible goal text, and do not
 use a short goal text such as "advance TODO" as the recurring automation body.
@@ -473,9 +473,12 @@ If the result says should_run=true:
 
    loopx refresh-state --goal-id <GOAL_ID> \
      --classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION> \
-     --delivery-batch-scale multi_surface \
-     --delivery-outcome outcome_progress
+     --delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE> \
+     --delivery-outcome <ACTUAL_DELIVERY_OUTCOME>
 
+   Replace all three placeholders with values proven by this validated turn.
+   Never default or upgrade smaller/preparatory work to
+   `multi_surface` / `outcome_progress`.
    This refresh is the causal delivery record consumed by `quota spend-slot`.
    A plain state-only refresh is quota-neutral and cannot replace it. Then, for
    a minute-based heartbeat, spend one slot:

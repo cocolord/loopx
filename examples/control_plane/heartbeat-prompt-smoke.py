@@ -93,8 +93,9 @@ def main() -> int:
             "schema_version": "agent_profile_v1",
             "agent_id": "codex-product-capability",
             "scope_summary": (
-                "Peer task claims, task leases, agent profile routing, and related "
-                "control-plane correctness."
+                "Agent-facing CLI output budgets, deterministic control-plane "
+                "qualification, model-behavior shadow evaluation, and release "
+                "outcome baseline correctness."
             ),
         },
         registered_agents=["codex-main-control", "codex-product-capability"],
@@ -238,7 +239,7 @@ def main() -> int:
         "loopx todo add --goal-id public-heartbeat-goal --role user --task-class user_gate|user_action",
         "owner todos and `--role agent` for agent todos, not prose",
         'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
-        "Accountable refresh, then spend",
+        "Account actual validated class/scale/outcome",
         "Optional state-only post-spend",
         "No spend for quiet skips",
     ):
@@ -313,21 +314,25 @@ def main() -> int:
     assert live_peer_budget["budget_char_count"] <= live_peer_budget["max_chars"], live_peer_budget
     assert live_peer_budget["within_budget"] is True, live_peer_budget
     assert len(str(live_peer_payload["task_body"])) <= int(live_peer_budget["max_chars"]), live_peer_budget
-    assert "control-plane correctness.." not in live_peer_task, live_peer_task
+    assert "correctness.." not in live_peer_task, live_peer_task
+    assert live_peer_task.index("`LOOPX_TURN=<current_time_iso>`") < live_peer_task.index(
+        "quota should-run"
+    ), live_peer_task
     for phrase in (
         "Equal peer `codex-product-capability` (peer_v1)",
-        "Peer task claims, task leases, agent profile routing, and related control-plane correctness",
+        "Agent-facing CLI output budgets, deterministic control-plane qualification, "
+        "model-behavior shadow evaluation, and release outcome baseline correctness",
         "Claim/lease first",
         "independent repo worktree",
         "todo continuation",
         "no cross-agent authority",
         "no scope in todo metadata",
-        "No runtime `loopx-project`",
+        "Normal turns use CLI `interaction_contract`; use `loopx-project` for "
+        "lifecycle/registry and `loopx-self-repair` for runtime/projection drift",
         "heartbeat-prequota",
         'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run '
         "--goal-id loopx-meta --agent-id codex-product-capability --available-capability network "
         "--available-capability external_evidence_poll",
-        "follow `interaction_contract`",
         "NOTIFY Chinese actions incl. non_blocking false/0",
         'not only "owner gate"',
         "具体 user todo 未投影，需修复 LoopX 状态投影",
@@ -335,7 +340,7 @@ def main() -> int:
         "Observed capabilities -> `--available-capability`; never user gates",
         "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend)",
         "else RRULE/ack/fail",
-        "writeback: accountable refresh->spend; optional state-only after",
+        "writeback: actual class/scale/outcome refresh->spend; no upgrade",
         "guard receipt; 2 stalls->replan",
         "`lark_event_inbox`: reply_due",
         "drain_command/reply-readback/ACK",
@@ -401,7 +406,7 @@ def main() -> int:
         "goal_boundary",
         "bounded segment/batch",
         "validate/writeback/todos",
-        "Progress refresh",
+        "Progress (actual values; no upgrade)",
         "Optional state-only post-spend",
         'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
         "No spend for quiet skips",
@@ -421,18 +426,17 @@ def main() -> int:
     thin_task = normalized(str(thin_payload["task_body"]))
     for phrase in (
         "Advance `public-heartbeat-goal` from /tmp/public-heartbeat-goal/ACTIVE_GOAL_STATE.md",
-        "No runtime `loopx-project`",
-        "`loopx-self-repair`",
-        "LoopX CLI = truth",
+        "Normal turns use CLI `interaction_contract`; use `loopx-project` for "
+        "lifecycle/registry and `loopx-self-repair` for runtime/projection drift",
         "state/status/repo",
-        "`quota should-run`; follow `interaction_contract`",
+        "`quota should-run`",
         "NOTIFY Chinese actions incl. non_blocking false/0",
         'not only "owner gate"',
         "DONT_NOTIFY+false/0 only: quiet",
         "具体 user todo 未投影，需修复 LoopX 状态投影",
         "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend)",
         "else RRULE/ack/fail",
-        "writeback: accountable refresh->spend; optional state-only after",
+        "writeback: actual class/scale/outcome refresh->spend; no upgrade",
         "guard receipt; 2 stalls->replan",
         "P0 blocked: safe P1/P2",
         "monitor quiet/no-spend",
@@ -568,8 +572,9 @@ def main() -> int:
         'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute',
         "loopx refresh-state --goal-id <GOAL_ID>",
         "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
-        "--delivery-batch-scale multi_surface",
-        "--delivery-outcome outcome_progress",
+        "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE>",
+        "--delivery-outcome <ACTUAL_DELIVERY_OUTCOME>",
+        "Never default or upgrade smaller/preparatory work",
         "append exactly one",
         "Do not append spend for quiet should_run=false skips, preflight failures, pure dry-run previews, or duplicate accounting attempts",
         "safe_bypass_allowed=true and you actually completed a bounded safe-bypass step",
@@ -673,8 +678,9 @@ def main() -> int:
         'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
         "loopx refresh-state --goal-id public-heartbeat-goal",
         "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
-        "--delivery-batch-scale multi_surface",
-        "--delivery-outcome outcome_progress",
+        "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE>",
+        "--delivery-outcome <ACTUAL_DELIVERY_OUTCOME>",
+        "never default or upgrade to `multi_surface` / `outcome_progress`",
         "Spend consumes this causal record",
         "Do not append spend for quiet `should_run=false` skips",
         "safe_bypass_kind=outcome_floor_recovery",
@@ -796,8 +802,9 @@ def main() -> int:
     assert "visible goal text short" in project_skill, project_skill
     assert "--source heartbeat --execute" in project_skill, project_skill
     assert "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>" in project_skill, project_skill
-    assert "--delivery-batch-scale multi_surface" in project_skill, project_skill
-    assert "--delivery-outcome outcome_progress" in project_skill, project_skill
+    assert "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE>" in project_skill, project_skill
+    assert "--delivery-outcome <ACTUAL_DELIVERY_OUTCOME>" in project_skill, project_skill
+    assert "Never default or upgrade a smaller/preparatory turn" in normalized(project_skill), project_skill
     assert "do not infer scale/outcome from the classification name" in normalized(project_skill), project_skill
     assert "no-progress self-repair guard" in project_skill, project_skill
     assert "2 consecutive stalled turns" in normalized(project_skill), project_skill
