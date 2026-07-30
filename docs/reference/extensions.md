@@ -268,6 +268,92 @@ profile/chat schema and private config reads stay in the extension. If the
 extension is missing, disabled, or stale, urgency is unavailable and cannot
 activate a Lark work lane. This adds no agent-facing CLI arguments.
 
+## Presentation Surfaces
+
+An independently delivered extension can declare an operator-facing
+presentation surface without shipping browser code or making Core understand
+the provider's domain. The provider owns source validation and mapping. Core
+owns lifecycle resolution, revision binding, persistence, and the public-safe
+status projection. Dashboard renders only the generic status contract.
+
+The first supported surface is a read-only decision-research view:
+
+```toml
+[[presentation_surfaces]]
+id = "investment-research"
+kind = "decision_research_dashboard"
+title = "Investment Research"
+view_schema = "decision_research_dashboard_v0"
+visibility = "owner-only"
+empty_state_title = "No validated research yet"
+empty_state_detail = "Publish a validated projection."
+```
+
+Declarations are strict and bounded. Surface ids are stable kebab-case
+identifiers. Titles and empty-state text are plain text without markup, URLs,
+or local paths. A declaration does not make the surface visible by itself:
+the extension must be installed, enabled, and doctor-ready at its active
+manifest revision.
+
+Publication uses the same managed, dry-run-by-default lifecycle gate as a
+standalone extension invocation:
+
+```bash
+loopx extension publish-projection \
+  <extension-id> \
+  <surface-id> \
+  --input-json <validated-owner-input.json> \
+  --format json
+
+loopx extension publish-projection \
+  <extension-id> \
+  <surface-id> \
+  --input-json <validated-owner-input.json> \
+  --execute \
+  --format json
+```
+
+The preview resolves the active declaration but does not run the provider or
+write a file. With `--execute`, LoopX runs the exact ready provider, validates
+its `extension_presentation_projection_v0`, binds extension id, active revision,
+surface kind, schema, and visibility from lifecycle state, then atomically
+writes an `extension_projection_surface_v0` envelope. The receipt includes the
+canonical payload SHA-256 and confirms exact readback. If lifecycle identity or
+the declaration changes while publishing, the write fails closed.
+
+Status collection never executes the provider and never reads its owner input.
+It reads only the active manifest snapshot and the persisted, bounded envelope.
+Visibility follows this matrix:
+
+| Lifecycle or projection state | Status projection | Dashboard |
+| --- | --- | --- |
+| Not installed, disabled, or doctor-stale | No item | Tab and home summary hidden |
+| Ready declaration, no matching active-revision file | `empty` | Declarative empty state |
+| Valid active-revision envelope | `ready` | Read-only view and summaries |
+| Valid envelope past `review_due_at` | `review_due` | View retained with review warning |
+| Corrupt active-revision envelope | `invalid` without `view` | Safe diagnostic, no partial content |
+| File belongs to another revision | `empty` | No fallback to old content |
+
+Disable hides the surface but does not delete its projection. Re-enabling and
+successfully re-running doctor restores a matching-revision projection.
+Upgrade keeps the old file for audit continuity, but the new revision sees
+`empty` until it publishes its own envelope. Rollback applies the same exact
+revision rule.
+
+Presentation projections are display sinks, not authority. They cannot change
+goal state, promote a method, submit a trade, or grant provider permissions.
+The generic research schema rejects credentials, account or order fields, raw
+provider/request/response bodies, local paths, unsafe evidence URLs, and
+unbounded text. Providers must emit compact references and conclusions, not
+private evidence bodies. `owner-only` describes the intended operator boundary;
+it is not permission to persist secrets or bypass the public/private scan.
+
+Run the public synthetic lifecycle proof after changing this contract:
+
+```bash
+uv run --extra test python examples/extension-presentation-surface-smoke.py
+```
+
 ## Placement Decision For Agents
 
 Before creating a directory, LoopX or an executing agent must answer these
