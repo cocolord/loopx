@@ -58,6 +58,37 @@ than silently accepted.
 Passing every gate means only `eligible_for_research_successor`. It never means
 method promotion, investment advice, or permission to trade.
 
+## Shadow Qualification And Human Decisions
+
+`finance_shadow_qualification_input_v1` evaluates a complete candidate method,
+not an individual stock case. Its ordered stages are fixed:
+
+1. point-in-time integrity;
+2. historical positive replay;
+3. historical negative and counterexample replay;
+4. walk-forward evaluation;
+5. prospective shadow evaluation;
+6. transaction cost, turnover, and slippage evaluation;
+7. independent evaluation by an identity distinct from the executor.
+
+Every stage is explicit `passed`, `failed`, `missing`, or `conflict`.
+`failed` produces `rejected`; `missing` and `conflict` produce
+`insufficient_evidence`. Only seven passed stages produce
+`ready_for_owner_review`. The result carries canonical input and qualification
+hashes and still reports `active_revision_changed=false`.
+
+The promotion helper accepts only a byte-replayable ready qualification. It
+emits `finance_method_promotion_request_v1` with a typed owner decision scope,
+the current and candidate revisions, a rollback target, and
+`activation_performed=false`. It has no activation operation.
+
+The rollback helper accepts only an explicit
+`finance_method_activation_receipt_v1` whose authority is `human_owner` and
+whose outcome is `approve`. It emits a separate owner decision request bound
+to the exact active and previous revisions. It has no rollback operation.
+Agents therefore may qualify and request review, but cannot activate a
+candidate or roll back an active method.
+
 ## Replay
 
 The replay receipt binds three SHA-256 values:

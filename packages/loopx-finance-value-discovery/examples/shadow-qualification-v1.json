@@ -1,0 +1,69 @@
+{
+  "schema_version": "finance_shadow_qualification_input_v1",
+  "qualification_id": "finance-method-v1-shadow-qualification",
+  "method_id": "finance-value-discovery",
+  "current_active_revision": "finance-method-v0",
+  "candidate_revision": "finance-method-v1-candidate",
+  "point_in_time": "2026-07-29T23:59:59Z",
+  "executor_id": "finance-shadow-executor",
+  "evaluator_id": "finance-independent-evaluator",
+  "stages": [
+    {
+      "stage_id": "point_in_time_integrity",
+      "state": "passed",
+      "evidence_refs": [
+        "pit-lineage-seal"
+      ],
+      "reason": "All inputs and labels are bounded by the frozen cutoff."
+    },
+    {
+      "stage_id": "historical_positive_replay",
+      "state": "passed",
+      "evidence_refs": [
+        "historical-positive-replay"
+      ],
+      "reason": "The candidate preserves the accepted historical positive case."
+    },
+    {
+      "stage_id": "historical_negative_replay",
+      "state": "passed",
+      "evidence_refs": [
+        "historical-rejection-replay",
+        "historical-counterexample-replay"
+      ],
+      "reason": "The candidate preserves rejection and counterexample behavior."
+    },
+    {
+      "stage_id": "walk_forward",
+      "state": "passed",
+      "evidence_refs": [
+        "walk-forward-evaluation"
+      ],
+      "reason": "Frozen walk-forward windows satisfy the candidate contract."
+    },
+    {
+      "stage_id": "prospective_shadow",
+      "state": "passed",
+      "evidence_refs": [
+        "prospective-shadow-seal"
+      ],
+      "reason": "Prospective outputs were sealed before outcome access."
+    },
+    {
+      "stage_id": "transaction_costs",
+      "state": "passed",
+      "evidence_refs": [
+        "cost-and-slippage-evaluation"
+      ],
+      "reason": "Turnover, transaction cost, and slippage guardrails pass."
+    },
+    {
+      "stage_id": "independent_evaluation",
+      "state": "passed",
+      "evidence_refs": [
+        "independent-evaluator-attestation"
+      ],
+      "reason": "An evaluator distinct from the executor accepted the evidence."
+    }
+  ]
+}

@@ -38,6 +38,13 @@ Two P1 overlays reuse that contract without weakening it:
   directions. They do not contain thresholds or evaluate provider-declared
   pass/fail states.
 
+The P2 shadow-qualification surface evaluates a method revision only after
+point-in-time, historical positive and negative, walk-forward, prospective
+shadow, transaction-cost, and independent-evaluator stages are all explicit.
+Passing produces an owner review request, never an activation. Rollback is also
+an owner review request and requires an exact prior human-approved activation
+receipt.
+
 The packet enforces:
 
 - a cross-sectional screen before a named candidate is selected;
@@ -147,6 +154,11 @@ loopx-finance-value-discovery attribute-beta \
   --input-json packages/loopx-finance-value-discovery/examples/beta-attribution-v1.json
 loopx-finance-value-discovery evaluate-pack \
   --input-json packages/loopx-finance-value-discovery/examples/software-metric-pack-v1.json
+loopx-finance-value-discovery qualify-shadow \
+  --input-json packages/loopx-finance-value-discovery/examples/shadow-qualification-v1.json
+loopx-finance-value-discovery replay-qualification \
+  --input-json packages/loopx-finance-value-discovery/examples/shadow-qualification-v1.json \
+  --expected-json qualification.json
 ```
 
 The manifest declares no permissions: this workflow is a deterministic reducer
