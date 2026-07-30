@@ -22,6 +22,7 @@ from loopx.capabilities.semantic_preference.cli import (
 )
 from loopx.capabilities.semantic_preference.contract import provider_doctor, recall
 from loopx.cli import main
+from loopx.extensions.manifest import load_extension_manifest
 from loopx.extensions.runtime import (
     MAX_EXTENSION_REQUEST_BYTES,
     MAX_EXTENSION_RESPONSE_BYTES,
@@ -129,6 +130,215 @@ def _standalone_manifest(
         )
     manifest.write_text(contents, encoding="utf-8")
     return manifest
+
+
+def _presentation_surface_manifest(
+    path: Path,
+    *,
+    entrypoint: Path,
+    declaration: str = "",
+) -> Path:
+    manifest = _standalone_manifest(path, entrypoint=entrypoint)
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8")
+        + (
+            declaration
+            or """
+[[presentation_surfaces]]
+id = "investment-research"
+kind = "decision_research_dashboard"
+title = "Investment Research"
+view_schema = "decision_research_dashboard_v0"
+visibility = "owner-only"
+empty_state_title = "No validated research yet"
+empty_state_detail = "Publish a validated projection."
+"""
+        ),
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def test_presentation_surface_manifest_is_normalized(tmp_path: Path) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest = load_extension_manifest(
+        _presentation_surface_manifest(
+            tmp_path / "extension.toml",
+            entrypoint=provider,
+        )
+    )
+
+    assert manifest["presentation_surfaces"] == [
+        {
+            "id": "investment-research",
+            "kind": "decision_research_dashboard",
+            "title": "Investment Research",
+            "view_schema": "decision_research_dashboard_v0",
+            "visibility": "owner-only",
+            "empty_state_title": "No validated research yet",
+            "empty_state_detail": "Publish a validated projection.",
+        }
+    ]
+
+
+def test_manifest_without_presentation_surface_keeps_empty_collection(
+    tmp_path: Path,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest = load_extension_manifest(
+        _standalone_manifest(tmp_path / "extension.toml", entrypoint=provider)
+    )
+
+    assert manifest["presentation_surfaces"] == []
+
+
+@pytest.mark.parametrize(
+    ("declaration", "message"),
+    [
+        (
+            """
+[[presentation_surfaces]]
+id = "investment-research"
+kind = "decision_research_dashboard"
+title = "Investment Research"
+view_schema = "decision_research_dashboard_v0"
+visibility = "owner-only"
+empty_state_title = "No validated research yet"
+empty_state_detail = "Publish a validated projection."
+
+[[presentation_surfaces]]
+id = "investment-research"
+kind = "decision_research_dashboard"
+title = "Duplicate"
+view_schema = "decision_research_dashboard_v0"
+visibility = "public-safe"
+empty_state_title = "Empty"
+empty_state_detail = "No projection."
+""",
+            "duplicate presentation surface id",
+        ),
+        (
+            """
+[[presentation_surfaces]]
+id = "Investment Research"
+kind = "decision_research_dashboard"
+title = "Investment Research"
+view_schema = "decision_research_dashboard_v0"
+visibility = "owner-only"
+empty_state_title = "No validated research yet"
+empty_state_detail = "Publish a validated projection."
+""",
+            "lower-kebab token",
+        ),
+        (
+            """
+[[presentation_surfaces]]
+id = "investment-research"
+kind = "decision_research_dashboard"
+title = "Investment Research"
+view_schema = "finance_dashboard_v0"
+visibility = "owner-only"
+empty_state_title = "No validated research yet"
+empty_state_detail = "Publish a validated projection."
+""",
+            "unsupported kind/view_schema",
+        ),
+        (
+            """
+[[presentation_surfaces]]
+id = "investment-research"
+kind = "decision_research_dashboard"
+title = "Investment Research"
+view_schema = "decision_research_dashboard_v0"
+visibility = "private"
+empty_state_title = "No validated research yet"
+empty_state_detail = "Publish a validated projection."
+""",
+            "visibility",
+        ),
+        (
+            """
+[[presentation_surfaces]]
+id = "investment-research"
+kind = "decision_research_dashboard"
+title = "<script>alert(1)</script>"
+view_schema = "decision_research_dashboard_v0"
+visibility = "owner-only"
+empty_state_title = "No validated research yet"
+empty_state_detail = "Publish a validated projection."
+""",
+            "plain text",
+        ),
+        (
+            """
+[[presentation_surfaces]]
+id = "investment-research"
+kind = "decision_research_dashboard"
+title = "Investment Research"
+view_schema = "decision_research_dashboard_v0"
+visibility = "owner-only"
+empty_state_title = "No validated research yet"
+empty_state_detail = "Read https://example.com/research"
+""",
+            "plain text",
+        ),
+        (
+            """
+[[presentation_surfaces]]
+id = "investment-research"
+kind = "decision_research_dashboard"
+title = "Investment Research"
+view_schema = "decision_research_dashboard_v0"
+visibility = "owner-only"
+empty_state_title = "No validated research yet"
+empty_state_detail = "/tmp/research.json"
+""",
+            "plain text",
+        ),
+        (
+            """
+[[presentation_surfaces]]
+id = "investment-research"
+kind = "decision_research_dashboard"
+title = "Investment Research"
+view_schema = "decision_research_dashboard_v0"
+visibility = "owner-only"
+empty_state_title = "No validated research yet"
+empty_state_detail = "%s"
+"""
+            % ("x" * 241),
+            "at most 240",
+        ),
+        (
+            """
+[[presentation_surfaces]]
+id = "investment-research"
+kind = "decision_research_dashboard"
+title = "Investment Research"
+view_schema = "decision_research_dashboard_v0"
+visibility = "owner-only"
+empty_state_title = "No validated research yet"
+empty_state_detail = "Publish a validated projection."
+unexpected = "not allowed"
+""",
+            "unsupported keys",
+        ),
+    ],
+)
+def test_presentation_surface_manifest_rejects_invalid_declarations(
+    tmp_path: Path,
+    declaration: str,
+    message: str,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest = _presentation_surface_manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+        declaration=declaration,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        load_extension_manifest(manifest)
 
 
 def _overflow_provider(
