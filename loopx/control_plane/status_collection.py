@@ -131,8 +131,9 @@ def collect_status(
         "attention_queue": queue,
         **runtime_summaries,
         "promotion_gate": promotion_gate,
-        "presentation_surfaces": presentation_surfaces,
     }
+    if presentation_surfaces.get("count"):
+        payload["presentation_surfaces"] = presentation_surfaces
     payload["runtime_projection_routes"] = runtime_projection_route_health
     agent_management_projection = context.build_agent_management_projection(
         payload,
