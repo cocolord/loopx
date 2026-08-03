@@ -1,5 +1,4 @@
 import {
-  decisionResearchViewSchema,
   exampleStatusPayload,
   parseStatusPayload,
   presentationSurfaceCollectionSchema,
@@ -12,154 +11,15 @@ function assert(condition: boolean, message: string) {
   }
 }
 
-function validView() {
+const PAYLOAD_SHA256 =
+  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+function detailRef() {
   return {
-    identity: {
-      title: "Synthetic Technology Research",
-      subtitle: "Evidence-gated decision review",
-      as_of: "2026-01-15T12:00:00+00:00",
-      evidence_cutoff: "2026-01-15",
-    },
-    adjudication: {
-      status: "insufficient_evidence",
-      label: "Insufficient Evidence",
-      summary: "The frozen gates do not yet support a selected conclusion.",
-      confidence: "medium",
-    },
-    metrics: [
-      {
-        id: "validated-alpha",
-        label: "Validated company alpha",
-        value: "0",
-        detail: "No company-specific residual passed every frozen gate.",
-        tone: "warning",
-      },
-      {
-        id: "method-state",
-        label: "Active method",
-        value: "unchanged",
-        detail: "The active method was not promoted or replaced.",
-        tone: "neutral",
-      },
-    ],
-    dashboard_summaries: [
-      {
-        id: "adjudication-summary",
-        label: "Current adjudication",
-        title: "Evidence remains insufficient",
-        summary: "Continue monitoring the frozen event gates.",
-        tone: "warning",
-        destination_anchor: "executive-adjudication",
-      },
-    ],
-    layers: [
-      {
-        id: "beta",
-        order: 1,
-        label: "Beta",
-        status: "supported",
-        summary: "Discount-rate exposure explains part of the move.",
-        evidence_points: ["Support: broad synthetic peers moved together."],
-      },
-    ],
-    entities: [
-      {
-        entity_id: "synthetic-cloud",
-        symbol: "SYN",
-        display_name: "Synthetic Cloud",
-        classification: "Watchlist",
-        status: "insufficient_evidence",
-        confidence: "medium",
-        inference: "A quality business is not yet a validated mispricing.",
-        observations: [
-          {
-            id: "observation-range",
-            label: "Observation range",
-            kind: "observation_range",
-            value: "90-100 synthetic units",
-            as_of: "2026-01-15T12:00:00+00:00",
-            source_ref: "filing:syn-q4",
-            source_type: "company_filing",
-            confidence: "high",
-            invalidation: "A verified close below 90 with weaker fundamentals.",
-          },
-        ],
-        scenario_estimates: [
-          {
-            scenario: "bull",
-            label: "Bull scenario estimate",
-            value: "140 synthetic units",
-            horizon: "24 months",
-            probability: 0.25,
-            assumptions: ["Growth reaccelerates."],
-          },
-          {
-            scenario: "base",
-            label: "Base scenario estimate",
-            value: "112 synthetic units",
-            horizon: "24 months",
-            probability: 0.5,
-            assumptions: ["Growth remains durable."],
-          },
-          {
-            scenario: "bear",
-            label: "Bear scenario estimate",
-            value: "72 synthetic units",
-            horizon: "24 months",
-            probability: 0.25,
-            assumptions: ["Growth slows."],
-          },
-        ],
-        counterevidence: ["Capital intensity may remain elevated."],
-        thesis_breakers: ["Growth and cash conversion weaken together."],
-        next_events: ["Next official earnings release."],
-      },
-    ],
-    research_ledger: [
-      {
-        case_id: "case-synthetic-cloud",
-        label: "Synthetic residual-alpha case",
-        gate_states: [
-          {
-            gate_id: "persistence",
-            label: "Persistence",
-            status: "failed",
-            summary: "The residual did not persist.",
-          },
-        ],
-        decision: "rejected",
-        summary: "The company-specific alpha claim was rejected.",
-        evidence_refs: ["market:synthetic-peer-control"],
-      },
-    ],
-    event_gates: [
-      {
-        event_id: "E1",
-        label: "Synthetic cloud earnings",
-        status: "pending",
-        observation_window: "Next official reporting window",
-        frozen_hypothesis: "Returns depend on monetization, not capex alone.",
-        observables: ["Cloud growth versus frozen guidance."],
-        current_evidence: [],
-        supports: ["Growth above the frozen range."],
-        refutes: ["Higher capex without measurable return."],
-        thesis_breakers: ["Official guidance shows deteriorating returns."],
-        next_review: "After the official filing is available.",
-      },
-    ],
-    method_state: {
-      revision: "candidate-v1",
-      lifecycle_state: "active_method_unchanged",
-      active_method_changed: false,
-      summary: "Active method unchanged.",
-    },
-    boundary: {
-      research_aid_only: true,
-      investment_advice: false,
-      trading_allowed: false,
-      raw_provider_payload_recorded: false,
-      private_source_content_read: false,
-    },
+    extension_id: "test-research-extension",
+    surface_id: "investment-research",
+    extension_revision: "0123456789abcdef",
+    payload_sha256: PAYLOAD_SHA256,
   };
 }
 
@@ -171,7 +31,7 @@ function baseSurface(state: "empty" | "ready" | "review_due" | "invalid") {
     surface_kind: "decision_research_dashboard",
     title: "Investment Research",
     view_schema: "decision_research_dashboard_v0",
-    visibility: "owner-only",
+    visibility: "public-safe",
     state,
     goal_id: state === "empty" || state === "invalid" ? null : "synthetic-research-goal",
     generated_at:
@@ -188,22 +48,40 @@ function baseSurface(state: "empty" | "ready" | "review_due" | "invalid") {
   };
 }
 
-const view = decisionResearchViewSchema.parse(validView());
-assert(view.metrics[0]?.value === "0", "validated company alpha must remain zero");
-assert(
-  view.method_state.active_method_changed === false,
-  "active method must remain unchanged",
-);
-
+// The Core status contract is provider-neutral: ready/review_due carry a compact
+// detail_ref pointer, not an inline domain view.
 for (const state of ["empty", "ready", "review_due", "invalid"] as const) {
   const candidate = baseSurface(state);
   const parsed = presentationSurfaceSchema.parse(
     state === "ready" || state === "review_due"
-      ? { ...candidate, view: validView() }
+      ? { ...candidate, detail_ref: detailRef() }
       : candidate,
   );
   assert(parsed.state === state, `surface state drifted: ${state}`);
 }
+
+const readySurface = presentationSurfaceSchema.parse({
+  ...baseSurface("ready"),
+  detail_ref: detailRef(),
+});
+assert(
+  readySurface.state === "ready" && "detail_ref" in readySurface,
+  "ready surface must carry a detail_ref",
+);
+assert(
+  !("view" in readySurface),
+  "ready surface must not carry an inline view",
+);
+
+// A generic view_schema token (a different domain) must still parse: Core does
+// not freeze any one domain's schema.
+const genericSurface = presentationSurfaceSchema.safeParse({
+  ...baseSurface("ready"),
+  surface_kind: "release_dashboard",
+  view_schema: "release_dashboard_v0",
+  detail_ref: detailRef(),
+});
+assert(genericSurface.success, "generic provider view_schema must parse");
 
 const collection = presentationSurfaceCollectionSchema.parse({
   schema_version: "extension_presentation_surfaces_v0",
@@ -213,8 +91,8 @@ const collection = presentationSurfaceCollectionSchema.parse({
   empty_count: 0,
   invalid_count: 0,
   items: [
-    { ...baseSurface("ready"), view: validView() },
-    { ...baseSurface("review_due"), view: validView() },
+    { ...baseSurface("ready"), detail_ref: detailRef() },
+    { ...baseSurface("review_due"), detail_ref: detailRef() },
   ],
 });
 assert(collection.items.length === 2, "ready and review-due surfaces must parse");
@@ -227,13 +105,40 @@ assert(
   "missing presentation surfaces must default to an empty collection",
 );
 
+// An inline `view` on a ready surface must fail closed: status is index-only.
+const readyWithInlineView = {
+  ...baseSurface("ready"),
+  detail_ref: detailRef(),
+  view: { headline: "should not be here" },
+};
+assert(
+  !presentationSurfaceSchema.safeParse(readyWithInlineView).success,
+  "ready surface with an inline view must fail closed",
+);
+
+// A ready surface without a detail_ref must fail closed.
+const readyWithoutDetailRef = baseSurface("ready");
+assert(
+  !presentationSurfaceSchema.safeParse(readyWithoutDetailRef).success,
+  "ready surface without a detail_ref must fail closed",
+);
+
 const invalidSurface = {
   ...baseSurface("invalid"),
-  view: validView(),
+  detail_ref: detailRef(),
 };
 assert(
   !presentationSurfaceSchema.safeParse(invalidSurface).success,
-  "invalid surface with view must fail closed",
+  "invalid surface with a detail_ref must fail closed",
+);
+
+const malformedDetailRef = {
+  ...baseSurface("ready"),
+  detail_ref: { ...detailRef(), payload_sha256: "not-a-hash" },
+};
+assert(
+  !presentationSurfaceSchema.safeParse(malformedDetailRef).success,
+  "malformed detail_ref payload hash must fail closed",
 );
 
 const unknownCollection = {
@@ -248,29 +153,6 @@ const unknownCollection = {
 assert(
   !presentationSurfaceCollectionSchema.safeParse(unknownCollection).success,
   "unknown collection schema must fail closed",
-);
-
-const invalidProbability = {
-  ...baseSurface("ready"),
-  view: {
-    ...validView(),
-    entities: [
-      {
-        ...validView().entities[0],
-        scenario_estimates: [
-          {
-            ...validView().entities[0].scenario_estimates[0],
-            probability: "0.25",
-          },
-          ...validView().entities[0].scenario_estimates.slice(1),
-        ],
-      },
-    ],
-  },
-};
-assert(
-  !presentationSurfaceSchema.safeParse(invalidProbability).success,
-  "invalid scenario probability type must fail closed",
 );
 
 console.log("presentation surface schema smoke ok");

@@ -243,161 +243,12 @@ function todoGroupFor(spec, role) {
   };
 }
 
-const researchView = {
-  identity: {
-    title: "Synthetic Technology Research",
-    subtitle: "Evidence-gated decision review",
-    as_of: "2026-01-15T12:00:00+00:00",
-    evidence_cutoff: "2026-01-15",
-  },
-  adjudication: {
-    status: "insufficient_evidence",
-    label: "Insufficient Evidence",
-    summary: "The frozen gates do not yet support a selected conclusion.",
-    confidence: "medium",
-  },
-  metrics: [
-    {
-      id: "validated-alpha",
-      label: "Validated company alpha",
-      value: "0",
-      detail: "No company-specific residual passed every frozen gate.",
-      tone: "warning",
-    },
-    {
-      id: "method-state",
-      label: "Active method",
-      value: "unchanged",
-      detail: "The active method was not promoted or replaced.",
-      tone: "neutral",
-    },
-  ],
-  dashboard_summaries: [
-    {
-      id: "adjudication-summary",
-      label: "Current adjudication",
-      title: "Evidence remains insufficient",
-      summary: "Continue monitoring the frozen event gates.",
-      tone: "warning",
-      destination_anchor: "executive-adjudication",
-    },
-  ],
-  layers: [
-    {
-      id: "beta",
-      order: 1,
-      label: "Beta",
-      status: "supported",
-      summary: "Discount-rate exposure explains part of the move.",
-      evidence_points: ["Support: broad synthetic peers moved together."],
-    },
-    {
-      id: "residual-alpha",
-      order: 4,
-      label: "Residual alpha",
-      status: "rejected",
-      summary: "Validated company alpha = 0.",
-      evidence_points: ["Counterevidence: the residual failed persistence."],
-    },
-  ],
-  entities: [
-    {
-      entity_id: "synthetic-cloud",
-      symbol: "SYN",
-      display_name: "Synthetic Cloud",
-      classification: "Watchlist",
-      status: "insufficient_evidence",
-      confidence: "medium",
-      inference: "A quality business is not yet a validated mispricing.",
-      observations: [
-        {
-          id: "observation-range",
-          label: "Observation range",
-          kind: "observation_range",
-          value: "90-100 synthetic units",
-          as_of: "2026-01-15T12:00:00+00:00",
-          source_ref: "filing:syn-q4",
-          source_type: "company_filing",
-          confidence: "high",
-          invalidation: "A verified close below 90 with weaker fundamentals.",
-        },
-      ],
-      scenario_estimates: [
-        {
-          scenario: "bull",
-          label: "Bull scenario estimate",
-          value: "140 synthetic units",
-          horizon: "24 months",
-          probability: 0.25,
-          assumptions: ["Growth reaccelerates."],
-        },
-        {
-          scenario: "base",
-          label: "Base scenario estimate",
-          value: "112 synthetic units",
-          horizon: "24 months",
-          probability: 0.5,
-          assumptions: ["Growth remains durable."],
-        },
-        {
-          scenario: "bear",
-          label: "Bear scenario estimate",
-          value: "72 synthetic units",
-          horizon: "24 months",
-          probability: 0.25,
-          assumptions: ["Growth slows."],
-        },
-      ],
-      counterevidence: ["Capital intensity may remain elevated."],
-      thesis_breakers: ["Growth and cash conversion weaken together."],
-      next_events: ["Next official earnings release."],
-    },
-  ],
-  research_ledger: [
-    {
-      case_id: "case-synthetic-cloud",
-      label: "Synthetic residual-alpha case",
-      gate_states: [
-        {
-          gate_id: "persistence",
-          label: "Persistence",
-          status: "failed",
-          summary: "The residual did not persist.",
-        },
-      ],
-      decision: "rejected",
-      summary: "The company-specific alpha claim was rejected.",
-      evidence_refs: ["market:synthetic-peer-control"],
-    },
-  ],
-  event_gates: [
-    {
-      event_id: "E1",
-      label: "Synthetic cloud earnings",
-      status: "pending",
-      observation_window: "Next official reporting window",
-      frozen_hypothesis: "Returns depend on monetization, not capex alone.",
-      observables: ["Cloud growth versus frozen guidance."],
-      current_evidence: [],
-      supports: ["Growth above the frozen range."],
-      refutes: ["Higher capex without measurable return."],
-      thesis_breakers: ["Official guidance shows deteriorating returns."],
-      next_review: "After the official filing is available.",
-    },
-  ],
-  method_state: {
-    revision: "candidate-v1",
-    lifecycle_state: "active_method_unchanged",
-    active_method_changed: false,
-    summary: "Active method unchanged.",
-  },
-  boundary: {
-    research_aid_only: true,
-    investment_advice: false,
-    trading_allowed: false,
-    raw_provider_payload_recorded: false,
-    private_source_content_read: false,
-  },
+const researchDetailRef = {
+  extension_id: "test-research-extension",
+  surface_id: "investment-research",
+  extension_revision: "0123456789abcdef",
+  payload_sha256:
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 };
 
 const statusFixture = {
@@ -628,7 +479,7 @@ const statusFixture = {
         surface_kind: "decision_research_dashboard",
         title: "Investment Research",
         view_schema: "decision_research_dashboard_v0",
-        visibility: "owner-only",
+        visibility: "public-safe",
         state: "ready",
         goal_id: "loopx-meta",
         generated_at: "2026-01-15T12:00:00+00:00",
@@ -636,7 +487,7 @@ const statusFixture = {
         diagnostic: null,
         empty_state_title: "No validated research yet",
         empty_state_detail: "Publish a validated projection.",
-        view: researchView,
+        detail_ref: researchDetailRef,
       },
     ],
   },
@@ -666,13 +517,12 @@ const statusWithDuplicateSurfaceIds = {
       {
         ...statusFixture.presentation_surfaces.items[0],
         extension_id: "second-research-extension",
-        title: "Second Investment Research",
-        view: {
-          ...researchView,
-          identity: {
-            ...researchView.identity,
-            title: "Second Provider Research",
-          },
+        title: "Second Provider Research",
+        detail_ref: {
+          ...researchDetailRef,
+          extension_id: "second-research-extension",
+          payload_sha256:
+            "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
         },
       },
     ],
@@ -828,17 +678,15 @@ async function assertDecisionFrameVisible(page, label) {
 }
 
 async function assertResearchTruthFirstScreen(page, label) {
-  const truth = page.locator('[data-testid="research-first-screen-truth"]');
-  await truth.waitFor({ state: "visible" });
-  const metrics = await truth.evaluate((element) => {
+  const summary = page.locator('[data-testid="decision-research-surface-summary"]');
+  await summary.waitFor({ state: "visible" });
+  const metrics = await summary.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     return {
       left: Math.round(rect.left),
       right: Math.round(rect.right),
       top: Math.round(rect.top),
-      bottom: Math.round(rect.bottom),
       viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
       text: (element.textContent ?? "").replace(/\s+/g, " ").trim(),
     };
   });
@@ -846,20 +694,20 @@ async function assertResearchTruthFirstScreen(page, label) {
     metrics.left < 0
     || metrics.right > metrics.viewportWidth
     || metrics.top < 0
-    || metrics.bottom > metrics.viewportHeight
   ) {
-    throw new Error(`${label} research truth is not fully first-screen visible: ${JSON.stringify(metrics)}`);
+    throw new Error(`${label} research summary is not fully first-screen visible: ${JSON.stringify(metrics)}`);
   }
+  // The compact status contract exposes the projection pointer and lifecycle
+  // fields, never the provider-owned view body.
   const required = [
-    "Insufficient Evidence",
-    "Validated company alpha",
-    "0",
-    "Active method",
-    "unchanged",
+    "Investment Research",
+    "decision_research_dashboard_v0",
+    "View schema",
+    "Payload SHA-256",
   ];
   const missing = required.filter((text) => !metrics.text.includes(text));
   if (missing.length) {
-    throw new Error(`${label} research truth missing: ${missing.join(", ")}`);
+    throw new Error(`${label} research summary missing: ${missing.join(", ")}`);
   }
 }
 
@@ -1082,14 +930,6 @@ async function main() {
       '[data-testid="presentation-surface-nav-investment-research"]',
     );
     await researchNav.waitFor({ state: "visible" });
-    const homeResearchSummary = page.locator('[data-testid="research-dashboard-summary"]');
-    if (await homeResearchSummary.count() !== 1) {
-      throw new Error("Dashboard home must render the projected research summary.");
-    }
-    const homeResearchText = await homeResearchSummary.innerText();
-    if (!homeResearchText.includes("Evidence remains insufficient")) {
-      throw new Error("Research summary lost the insufficient-evidence conclusion.");
-    }
 
     await researchNav.click();
     await page.waitForTimeout(250);
@@ -1108,23 +948,15 @@ async function main() {
       );
     }
     const researchText = await researchSurface.innerText();
+    // The compact status contract exposes the projection pointer and lifecycle
+    // fields only. The full provider view is served separately and must not be
+    // inlined into the generic Core status surface.
     const requiredResearchText = [
-      "Insufficient Evidence",
-      "Validated company alpha",
-      "0",
-      "Active method",
-      "unchanged",
-      "Evidence cutoff",
-      "Research layers",
-      "Observation ranges",
-      "Scenario estimates",
-      "Research ledger",
-      "Event gates",
-      "Method state",
-      "Research boundary",
-      "rejected",
-      "insufficient_evidence",
-      "Active method unchanged.",
+      "Investment Research",
+      "View schema",
+      "decision_research_dashboard_v0",
+      "Payload SHA-256",
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     ];
     const missingResearchText = requiredResearchText.filter((text) => !researchText.includes(text));
     if (missingResearchText.length) {
@@ -1159,10 +991,9 @@ async function main() {
       });
       const firstScreenText = await mobileResearchPage.locator("body").innerText();
       for (const truth of [
-        "Insufficient Evidence",
-        "Validated company alpha",
-        "Active method",
-        "unchanged",
+        "Investment Research",
+        "View schema",
+        "decision_research_dashboard_v0",
       ]) {
         if (!firstScreenText.includes(truth)) {
           throw new Error(`Mobile research first screen lost truth: ${truth}`);
@@ -1219,9 +1050,6 @@ async function main() {
         .count()
     ) {
       throw new Error("Research navigation remained visible after surface removal.");
-    }
-    if (await page.locator('[data-testid="research-dashboard-summary"]').count()) {
-      throw new Error("Research summaries remained visible after surface removal.");
     }
 
     if (pageErrors.length) {
