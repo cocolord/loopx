@@ -13,6 +13,7 @@ _API_CLAUSE = re.compile(r"^(>=|<=|==|>|<)?\s*(\d+)$")
 _PROTOCOL_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}_v\d+$")
 _PYTHON_MODULE_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$")
 _SURFACE_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+_SURFACE_KIND_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 _PRESENTATION_SURFACE_KEYS = {
     "id",
     "kind",
@@ -21,9 +22,6 @@ _PRESENTATION_SURFACE_KEYS = {
     "visibility",
     "empty_state_title",
     "empty_state_detail",
-}
-_PRESENTATION_SURFACE_CONTRACTS = {
-    ("decision_research_dashboard", "decision_research_dashboard_v0")
 }
 _PRESENTATION_SURFACE_VISIBILITIES = {"public-safe", "owner-only"}
 _UNSAFE_PRESENTATION_TEXT_RE = re.compile(
@@ -104,11 +102,14 @@ def _presentation_surfaces(
         seen_ids.add(surface_id)
 
         kind = _required_string(item, "kind", context=item_context)
-        view_schema = _required_string(item, "view_schema", context=item_context)
-        if (kind, view_schema) not in _PRESENTATION_SURFACE_CONTRACTS:
+        if not _SURFACE_KIND_RE.fullmatch(kind):
             raise ValueError(
-                f"{item_context} has unsupported kind/view_schema "
-                f"`{kind}`/`{view_schema}`"
+                f"{item_context} kind must be a bounded lower_snake token"
+            )
+        view_schema = _required_string(item, "view_schema", context=item_context)
+        if not _PROTOCOL_RE.fullmatch(view_schema):
+            raise ValueError(
+                f"{item_context} view_schema must be a `<name>_v<n>` token"
             )
         visibility = _required_string(item, "visibility", context=item_context)
         if visibility not in _PRESENTATION_SURFACE_VISIBILITIES:
