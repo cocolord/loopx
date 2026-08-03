@@ -272,11 +272,15 @@ activate a Lark work lane. This adds no agent-facing CLI arguments.
 
 An independently delivered extension can declare an operator-facing
 presentation surface without shipping browser code or making Core understand
-the provider's domain. The provider owns source validation and mapping. Core
-owns lifecycle resolution, revision binding, persistence, and the public-safe
-status projection. Dashboard renders only the generic status contract.
+the provider's domain. The provider owns source validation, the `view_schema`
+contract, and the mapping into it. Core owns lifecycle resolution, revision
+binding, persistence, and the public-safe status projection. Core keeps the
+`view` opaque unless the owning extension registers a validator for its
+`view_schema`; it does not freeze any one domain's view into core. Dashboard
+renders only the generic status contract.
 
-The first supported surface is a read-only decision-research view:
+The finance value-discovery extension registers the first such view,
+`decision_research_dashboard_v0`, a read-only decision-research view:
 
 ```toml
 [[presentation_surfaces]]
@@ -284,7 +288,7 @@ id = "investment-research"
 kind = "decision_research_dashboard"
 title = "Investment Research"
 view_schema = "decision_research_dashboard_v0"
-visibility = "owner-only"
+visibility = "public-safe"
 empty_state_title = "No validated research yet"
 empty_state_detail = "Publish a validated projection."
 ```
@@ -323,15 +327,19 @@ the declaration changes while publishing, the write fails closed.
 
 Status collection never executes the provider and never reads its owner input.
 It reads only the active manifest snapshot and the persisted, bounded envelope.
-Visibility follows this matrix:
+Status stays a compact index: a `ready` or `review_due` item carries a
+content-addressed `detail_ref` (extension id, surface id, revision, and payload
+SHA-256) rather than inlining the full provider view. Consumers that need the
+view read the referenced projection payload directly. Visibility follows this
+matrix:
 
 | Lifecycle or projection state | Status projection | Dashboard |
 | --- | --- | --- |
 | Not installed, disabled, or doctor-stale | No item | Tab and home summary hidden |
 | Ready declaration, no matching active-revision file | `empty` | Declarative empty state |
-| Valid active-revision envelope | `ready` | Read-only view and summaries |
-| Valid envelope past `review_due_at` | `review_due` | View retained with review warning |
-| Corrupt active-revision envelope | `invalid` without `view` | Safe diagnostic, no partial content |
+| Valid active-revision envelope | `ready` with `detail_ref` | Read-only view and summaries |
+| Valid envelope past `review_due_at` | `review_due` with `detail_ref` | View retained with review warning |
+| Corrupt active-revision envelope | `invalid` without `detail_ref` | Safe diagnostic, no partial content |
 | File belongs to another revision | `empty` | No fallback to old content |
 
 Disable hides the surface but does not delete its projection. Re-enabling and
@@ -342,15 +350,16 @@ revision rule.
 
 Presentation projections are display sinks, not authority. They cannot change
 goal state, promote a method, submit a trade, or grant provider permissions.
-The generic research schema rejects credentials, account or order fields, raw
+The finance research view rejects credentials, account or order fields, raw
 provider/request/response bodies, private relative or absolute paths, sensitive
 URL parameters, non-finite numbers, and unbounded text. Canonical persistence
 uses standard JSON only; `NaN` and infinity fail closed before publication.
 Providers must emit compact references and conclusions, not private evidence
 bodies. Dashboard routing identifies a surface by both extension id and surface
 id so independently versioned providers may reuse a local surface id without
-colliding. `owner-only` describes the intended operator boundary; it is not
-permission to persist secrets or bypass the public/private scan.
+colliding. A `public-safe` surface still passes the public/private scan; an
+`owner-only` surface describes an operator boundary and is never permission to
+persist secrets or bypass that scan.
 
 Run the public synthetic lifecycle proof after changing this contract:
 

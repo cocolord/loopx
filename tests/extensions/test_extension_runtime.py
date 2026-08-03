@@ -236,12 +236,25 @@ empty_state_detail = "Publish a validated projection."
 id = "investment-research"
 kind = "decision_research_dashboard"
 title = "Investment Research"
-view_schema = "finance_dashboard_v0"
+view_schema = "decision-research-dashboard"
 visibility = "owner-only"
 empty_state_title = "No validated research yet"
 empty_state_detail = "Publish a validated projection."
 """,
-            "unsupported kind/view_schema",
+            "view_schema must be",
+        ),
+        (
+            """
+[[presentation_surfaces]]
+id = "investment-research"
+kind = "Decision Research Dashboard"
+title = "Investment Research"
+view_schema = "decision_research_dashboard_v0"
+visibility = "owner-only"
+empty_state_title = "No validated research yet"
+empty_state_detail = "Publish a validated projection."
+""",
+            "kind must be",
         ),
         (
             """

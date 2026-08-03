@@ -596,7 +596,7 @@ def test_finance_presentation_surface_and_example_are_public_safe() -> None:
             "kind": "decision_research_dashboard",
             "title": "Investment Research",
             "view_schema": "decision_research_dashboard_v0",
-            "visibility": "owner-only",
+            "visibility": "public-safe",
             "empty_state_title": "No validated research yet",
             "empty_state_detail": "Publish a validated projection.",
         }

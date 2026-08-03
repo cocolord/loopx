@@ -25,65 +25,23 @@ from loopx.extensions.runtime import (
 
 EXTENSION_ID = "synthetic-research-extension"
 SURFACE_ID = "investment-research"
+VIEW_SCHEMA = "synthetic_dashboard_v0"
 
 
 def _view() -> dict[str, object]:
+    # Core keeps views opaque unless an extension registers a validator for the
+    # declared view_schema. This lifecycle smoke uses a synthetic, structure-only
+    # view so it proves generic Core behavior without depending on any one
+    # domain's schema (finance owns and tests its own view separately).
     return {
-        "identity": {
-            "title": "Synthetic Research Review",
-            "subtitle": "Evidence-gated lifecycle smoke",
-            "as_of": "2026-01-15T12:00:00+00:00",
-            "evidence_cutoff": "2026-01-15",
-        },
-        "adjudication": {
-            "status": "insufficient_evidence",
-            "label": "Insufficient Evidence",
-            "summary": "The frozen gates do not support a selected conclusion.",
-            "confidence": "medium",
-        },
-        "metrics": [
+        "headline": "Synthetic lifecycle view",
+        "sections": [
             {
-                "id": "validated-alpha",
-                "label": "Validated company alpha",
-                "value": "0",
-                "detail": "No residual passed every frozen gate.",
-                "tone": "warning",
-            },
-            {
-                "id": "method-state",
-                "label": "Active method",
-                "value": "unchanged",
-                "detail": "The active method was not promoted or replaced.",
-                "tone": "neutral",
-            },
-        ],
-        "dashboard_summaries": [],
-        "layers": [
-            {
-                "id": "residual-alpha",
-                "order": 1,
-                "label": "Residual alpha",
-                "status": "rejected",
-                "summary": "Validated company alpha = 0.",
-                "evidence_points": ["The synthetic residual failed persistence."],
+                "id": "summary",
+                "title": "Summary",
+                "body": "Opaque passthrough content for the lifecycle proof.",
             }
         ],
-        "entities": [],
-        "research_ledger": [],
-        "event_gates": [],
-        "method_state": {
-            "revision": "candidate-v1",
-            "lifecycle_state": "active_method_unchanged",
-            "active_method_changed": False,
-            "summary": "Active method unchanged.",
-        },
-        "boundary": {
-            "research_aid_only": True,
-            "investment_advice": False,
-            "trading_allowed": False,
-            "raw_provider_payload_recorded": False,
-            "private_source_content_read": False,
-        },
     }
 
 
@@ -103,7 +61,7 @@ def _provider_result() -> dict[str, object]:
                 "supersedes": [],
                 "superseded_by": None,
             },
-            "view_schema": "decision_research_dashboard_v0",
+            "view_schema": VIEW_SCHEMA,
             "view": _view(),
         },
     }
@@ -150,10 +108,10 @@ timeout_seconds = 5
 
 [[presentation_surfaces]]
 id = "{SURFACE_ID}"
-kind = "decision_research_dashboard"
+kind = "synthetic_dashboard"
 title = "Investment Research"
-view_schema = "decision_research_dashboard_v0"
-visibility = "owner-only"
+view_schema = "synthetic_dashboard_v0"
+visibility = "public-safe"
 empty_state_title = "No validated research yet"
 empty_state_detail = "Publish a validated projection."
 """,
@@ -282,7 +240,15 @@ def main() -> int:
             now=datetime(2026, 1, 16, tzinfo=timezone.utc),
         )
         ready_item = _only_item(ready, expected_state="ready")
-        assert ready_item["view"] == envelope_a["view"]
+        # Status is a compact index: it references the published projection by
+        # content-addressed pointer rather than inlining the full view.
+        assert "view" not in ready_item, ready_item
+        assert ready_item["detail_ref"] == {
+            "extension_id": EXTENSION_ID,
+            "surface_id": SURFACE_ID,
+            "extension_revision": revision_a,
+            "payload_sha256": envelope_a["payload_sha256"],
+        }, ready_item
 
         disable_extension(EXTENSION_ID, state_file=state_file, execute=True)
         hidden = collect_active_extension_presentation_surfaces(
