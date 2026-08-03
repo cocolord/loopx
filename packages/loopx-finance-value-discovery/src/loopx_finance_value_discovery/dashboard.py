@@ -5,7 +5,7 @@ from datetime import date, datetime
 import re
 from typing import Any
 
-from loopx.extensions.presentation import validate_decision_research_view
+from .presentation_view import validate_decision_research_view
 
 
 FINANCE_RESEARCH_DASHBOARD_INPUT_SCHEMA_VERSION = "finance_research_dashboard_input_v0"

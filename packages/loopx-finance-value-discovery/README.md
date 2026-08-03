@@ -55,11 +55,11 @@ portfolio material, future-dated evidence, unsupported fields, and malformed
 public URLs. It never emits investment advice, a price target, a trade, or an
 automatic watch.
 
-## Owner-Only Research Surface
+## Public-Safe Research Surface
 
-The extension also declares an owner-only `investment-research` presentation
+The extension also declares a public-safe `investment-research` presentation
 surface. A `finance_research_dashboard_input_v0` packet validates Finance
-semantics and maps them to LoopX's generic
+semantics and maps them to the finance-owned
 `decision_research_dashboard_v0` view. The contract keeps beta, cycle,
 company-value, and residual-alpha reasoning distinct; requires supporting
 evidence, counterevidence, thesis breakers, scenario assumptions, and frozen
