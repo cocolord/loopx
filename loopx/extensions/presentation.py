@@ -890,3 +890,65 @@ def collect_active_extension_presentation_surfaces(
         "invalid_count": counts["invalid"],
         "items": items,
     }
+
+
+def read_extension_projection(
+    *,
+    state_file: str | Path,
+    extension_id: str,
+    surface_id: str,
+    extension_revision: str,
+    payload_sha256: str,
+) -> dict[str, Any]:
+    """Resolve one published projection by its compact status detail reference."""
+
+    state_path = Path(state_file).expanduser()
+    safe_extension_id = _identifier(extension_id, context="extension_id")
+    safe_surface_id = _identifier(surface_id, context="surface_id")
+    requested_revision = _identifier(
+        extension_revision,
+        context="extension_revision",
+    )
+    requested_hash = validate_projection_hash(
+        payload_sha256,
+        context="payload_sha256",
+    )
+    active_revision, _entrypoint, manifest = _resolved_active_extension(
+        safe_extension_id,
+        state_file=state_path,
+    )
+    if active_revision != requested_revision:
+        raise ValueError(
+            "extension_revision does not match the active extension revision"
+        )
+    declared_surface = _declared_surface(
+        manifest,
+        extension_id=safe_extension_id,
+        surface_id=safe_surface_id,
+    )
+    if declared_surface.get("visibility") != "public-safe":
+        raise ValueError(
+            "owner-only projection reads require an authenticated audience"
+        )
+    projection_path = (
+        default_extension_projection_root(state_path)
+        / safe_extension_id
+        / f"{safe_surface_id}.json"
+    )
+    if not projection_path.exists():
+        raise ValueError("no published projection for the requested surface")
+    try:
+        raw = json.loads(projection_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("published projection is unreadable") from exc
+    if isinstance(raw, Mapping) and raw.get("extension_revision") != active_revision:
+        raise ValueError("published projection belongs to another revision")
+    envelope = _validate_persisted_envelope(
+        raw,
+        extension_id=safe_extension_id,
+        revision=active_revision,
+        declared_surface=declared_surface,
+    )
+    if envelope["payload_sha256"] != requested_hash:
+        raise ValueError("payload_sha256 does not match the published projection")
+    return envelope

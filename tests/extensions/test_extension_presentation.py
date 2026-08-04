@@ -12,6 +12,7 @@ from loopx.extensions.presentation import (
     collect_active_extension_presentation_surfaces,
     default_extension_projection_root,
     publish_extension_projection,
+    read_extension_projection,
 )
 from loopx.extensions.runtime import (
     disable_extension,
@@ -97,6 +98,7 @@ def _projection_manifest(
     *,
     entrypoint: Path,
     version: str = "1.0.0",
+    visibility: str = "public-safe",
 ) -> Path:
     path.write_text(
         f"""\
@@ -118,7 +120,7 @@ id = "investment-research"
 kind = "synthetic_dashboard"
 title = "Investment Research"
 view_schema = "synthetic_dashboard_v0"
-visibility = "public-safe"
+visibility = "{visibility}"
 empty_state_title = "No validated research yet"
 empty_state_detail = "Publish a validated projection."
 """,
@@ -132,6 +134,7 @@ def _installed_projection_extension(
     *,
     projection: dict[str, object] | None = None,
     invocation_marker: Path | None = None,
+    visibility: str = "public-safe",
 ) -> tuple[Path, dict[str, object]]:
     provider = _projection_provider(
         tmp_path / "provider",
@@ -141,6 +144,7 @@ def _installed_projection_extension(
     manifest = _projection_manifest(
         tmp_path / "extension.toml",
         entrypoint=provider,
+        visibility=visibility,
     )
     state_file = tmp_path / "runtime" / "extensions" / "state.json"
     installed = install_extension(manifest, state_file=state_file, execute=True)
@@ -459,3 +463,134 @@ def test_publish_projection_cli_supports_dry_run_and_execute(
     assert published["status"] == "published"
     assert published["revision"] == installed["revision"]
     assert published["readback_verified"] is True
+
+
+def _publish_for_read(
+    tmp_path: Path,
+) -> tuple[Path, dict[str, object], dict[str, object]]:
+    state_file, installed = _installed_projection_extension(tmp_path)
+    receipt = publish_extension_projection(
+        "test-research-extension",
+        "investment-research",
+        state_file=state_file,
+        request={"schema_version": "synthetic_request_v0"},
+        execute=True,
+    )
+    return state_file, installed, receipt
+
+
+def test_read_extension_projection_returns_full_view_by_detail_ref(
+    tmp_path: Path,
+) -> None:
+    state_file, installed, receipt = _publish_for_read(tmp_path)
+
+    envelope = read_extension_projection(
+        state_file=state_file,
+        extension_id="test-research-extension",
+        surface_id="investment-research",
+        extension_revision=str(installed["revision"]),
+        payload_sha256=str(receipt["payload_sha256"]),
+    )
+
+    assert envelope["extension_id"] == "test-research-extension"
+    assert envelope["extension_revision"] == installed["revision"]
+    assert envelope["surface_id"] == "investment-research"
+    assert envelope["payload_sha256"] == receipt["payload_sha256"]
+    assert envelope["view"]["headline"] == "Synthetic lifecycle view"
+
+
+def test_read_extension_projection_rejects_hash_mismatch(tmp_path: Path) -> None:
+    state_file, installed, _ = _publish_for_read(tmp_path)
+
+    with pytest.raises(ValueError, match="payload_sha256 does not match"):
+        read_extension_projection(
+            state_file=state_file,
+            extension_id="test-research-extension",
+            surface_id="investment-research",
+            extension_revision=str(installed["revision"]),
+            payload_sha256="f" * 64,
+        )
+
+
+def test_read_extension_projection_rejects_owner_only_surface(
+    tmp_path: Path,
+) -> None:
+    state_file, installed = _installed_projection_extension(
+        tmp_path,
+        visibility="owner-only",
+    )
+    receipt = publish_extension_projection(
+        "test-research-extension",
+        "investment-research",
+        state_file=state_file,
+        request={"schema_version": "synthetic_request_v0"},
+        execute=True,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="owner-only projection reads require an authenticated audience",
+    ):
+        read_extension_projection(
+            state_file=state_file,
+            extension_id="test-research-extension",
+            surface_id="investment-research",
+            extension_revision=str(installed["revision"]),
+            payload_sha256=str(receipt["payload_sha256"]),
+        )
+
+
+def test_read_extension_projection_rejects_stale_revision(tmp_path: Path) -> None:
+    state_file, _installed, receipt = _publish_for_read(tmp_path)
+
+    with pytest.raises(ValueError, match="extension_revision does not match"):
+        read_extension_projection(
+            state_file=state_file,
+            extension_id="test-research-extension",
+            surface_id="investment-research",
+            extension_revision="0000000000000000",
+            payload_sha256=str(receipt["payload_sha256"]),
+        )
+
+
+def test_read_extension_projection_rejects_undeclared_surface(
+    tmp_path: Path,
+) -> None:
+    state_file, installed, receipt = _publish_for_read(tmp_path)
+
+    with pytest.raises(ValueError, match="does not declare presentation surface"):
+        read_extension_projection(
+            state_file=state_file,
+            extension_id="test-research-extension",
+            surface_id="other-surface",
+            extension_revision=str(installed["revision"]),
+            payload_sha256=str(receipt["payload_sha256"]),
+        )
+
+
+def test_read_extension_projection_rejects_missing_projection(
+    tmp_path: Path,
+) -> None:
+    state_file, installed = _installed_projection_extension(tmp_path)
+
+    with pytest.raises(ValueError, match="no published projection"):
+        read_extension_projection(
+            state_file=state_file,
+            extension_id="test-research-extension",
+            surface_id="investment-research",
+            extension_revision=str(installed["revision"]),
+            payload_sha256="a" * 64,
+        )
+
+
+def test_read_extension_projection_rejects_path_escaping_ids(tmp_path: Path) -> None:
+    state_file, installed, receipt = _publish_for_read(tmp_path)
+
+    with pytest.raises(ValueError, match="stable identifier"):
+        read_extension_projection(
+            state_file=state_file,
+            extension_id="../../etc",
+            surface_id="investment-research",
+            extension_revision=str(installed["revision"]),
+            payload_sha256=str(receipt["payload_sha256"]),
+        )
