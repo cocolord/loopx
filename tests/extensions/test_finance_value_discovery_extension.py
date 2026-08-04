@@ -3,7 +3,9 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
+import tomllib
 from copy import deepcopy
 from pathlib import Path
 
@@ -761,6 +763,49 @@ def test_reducer_fails_closed_on_weak_or_restricted_evidence(
     mutator(payload)
     with pytest.raises(ValueError, match=message):
         build_finance_value_discovery_packet(payload)
+
+
+def test_declared_minimum_core_without_presentation_api_can_import_and_doctor(
+    tmp_path: Path,
+) -> None:
+    metadata = tomllib.loads((EXTENSION_ROOT / "pyproject.toml").read_text())
+    assert "loopx>=0.4.0" in metadata["project"]["dependencies"]
+
+    legacy_core = tmp_path / "legacy-core" / "loopx"
+    legacy_core.mkdir(parents=True)
+    (legacy_core / "__init__.py").write_text('__version__ = "0.4.0"\n')
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = os.pathsep.join(
+        (str(EXTENSION_SRC), str(legacy_core.parent))
+    )
+
+    imported = subprocess.run(
+        [sys.executable, "-S", "-c", "import loopx_finance_value_discovery"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert imported.returncode == 0, imported.stderr
+
+    doctor = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            "from loopx_finance_value_discovery.cli import main; raise SystemExit(main(['--doctor']))",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert doctor.returncode == 1
+    assert "does not provide the extension presentation API" in json.loads(
+        doctor.stdout
+    )["error"]
 
 
 def test_provider_doctor_is_side_effect_free() -> None:

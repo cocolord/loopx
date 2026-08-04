@@ -5,7 +5,11 @@ from datetime import date, datetime
 import re
 from typing import Any
 
-from .presentation_view import validate_decision_research_view
+from .presentation_compat import require_presentation_api
+
+require_presentation_api()
+
+from .presentation_view import validate_decision_research_view  # noqa: E402
 
 
 FINANCE_RESEARCH_DASHBOARD_INPUT_SCHEMA_VERSION = "finance_research_dashboard_input_v0"

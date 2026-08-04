@@ -1,5 +1,7 @@
 """Finance value-discovery extension."""
 
+from importlib import import_module
+
 from .attribution import (
     EXPLAINED_BETA_COMPONENTS,
     FINANCE_BETA_ATTRIBUTION_INPUT_SCHEMA_VERSION,
@@ -22,11 +24,6 @@ from .metric_packs import (
     build_finance_metric_pack_evaluation,
     list_finance_metric_packs,
     replay_finance_metric_pack_evaluation,
-)
-from .dashboard import (
-    FINANCE_RESEARCH_DASHBOARD_INPUT_SCHEMA_VERSION,
-    FINANCE_RESEARCH_DASHBOARD_PACKET_SCHEMA_VERSION,
-    build_finance_research_dashboard_packet,
 )
 from .reducer import (
     EVIDENCE_AXES,
@@ -75,3 +72,13 @@ __all__ = [
     "replay_finance_metric_pack_evaluation",
     "validate_finance_case_contract",
 ]
+
+
+def __getattr__(name: str) -> object:
+    if name in {
+        "FINANCE_RESEARCH_DASHBOARD_INPUT_SCHEMA_VERSION",
+        "FINANCE_RESEARCH_DASHBOARD_PACKET_SCHEMA_VERSION",
+        "build_finance_research_dashboard_packet",
+    }:
+        return getattr(import_module(".dashboard", __name__), name)
+    raise AttributeError(name)
