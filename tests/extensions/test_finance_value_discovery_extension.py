@@ -286,6 +286,19 @@ def _research_dashboard_input() -> dict[str, object]:
                 "evidence_refs": ["filing:syn-q4"],
             },
         ],
+        "artifacts": [
+            {
+                "artifact_id": "synthetic-research-packet",
+                "kind": "research_packet",
+                "label": "Synthetic research packet",
+                "summary": "Frozen adjudication, scenarios, and evidence lineage.",
+                "artifact_ref": "artifact:synthetic-research-packet",
+                "evidence_refs": [
+                    "filing:syn-q4",
+                    "market:synthetic-peer-control",
+                ],
+            }
+        ],
         "event_gates": [
             {
                 "event_id": "E1",
@@ -422,6 +435,9 @@ def test_finance_research_dashboard_mapping_preserves_research_truth() -> None:
     assert view["entities"][0]["scenario_estimates"][1]["probability"] == 0.5
     assert view["research_ledger"][0]["decision"] == "rejected"
     assert view["research_ledger"][1]["decision"] == "insufficient_evidence"
+    assert view["artifacts"][0]["artifact_ref"] == (
+        "artifact:synthetic-research-packet"
+    )
     assert view["event_gates"][0]["status"] == "pending"
     assert view["method_state"]["active_method_changed"] is False
     assert view["boundary"]["trading_allowed"] is False

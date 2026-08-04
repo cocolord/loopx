@@ -247,6 +247,19 @@
       ]
     }
   ],
+  "artifacts": [
+    {
+      "artifact_id": "synthetic-research-packet",
+      "kind": "research_packet",
+      "label": "Synthetic research packet",
+      "summary": "Frozen adjudication, scenarios, and evidence lineage.",
+      "artifact_ref": "artifact:synthetic-research-packet",
+      "evidence_refs": [
+        "filing:syn-q4",
+        "market:synthetic-peer-control"
+      ]
+    }
+  ],
   "event_gates": [
     {
       "event_id": "E1",

@@ -172,6 +172,19 @@ def _valid_view() -> dict[str, object]:
                 "evidence_refs": ["filing:syn-q4", "market:synthetic-peer-control"],
             }
         ],
+        "artifacts": [
+            {
+                "artifact_id": "synthetic-research-packet",
+                "kind": "research_packet",
+                "label": "Synthetic research packet",
+                "summary": "Frozen adjudication, scenarios, and evidence lineage.",
+                "artifact_ref": "artifact:synthetic-research-packet",
+                "evidence_refs": [
+                    "filing:syn-q4",
+                    "market:synthetic-peer-control",
+                ],
+            }
+        ],
         "event_gates": [
             {
                 "event_id": "E1",
@@ -226,12 +239,25 @@ def test_decision_research_view_preserves_strict_research_truth() -> None:
     assert validated["metrics"][1]["value"] == "unchanged"
     assert validated["layers"][1]["status"] == "rejected"
     assert validated["research_ledger"][0]["decision"] == "rejected"
+    assert validated["artifacts"][0]["kind"] == "research_packet"
+    assert validated["artifacts"][0]["artifact_ref"] == (
+        "artifact:synthetic-research-packet"
+    )
     assert [item["probability"] for item in validated["entities"][0]["scenario_estimates"]] == [
         0.25,
         0.5,
         0.25,
     ]
     assert validated["boundary"]["trading_allowed"] is False
+
+
+def test_decision_research_view_defaults_missing_artifacts_to_empty() -> None:
+    view = _valid_view()
+    del view["artifacts"]
+
+    validated = validate_decision_research_view(view)
+
+    assert validated["artifacts"] == []
 
 
 @pytest.mark.parametrize(
@@ -322,6 +348,12 @@ def test_decision_research_view_preserves_strict_research_truth() -> None:
                 {"raw_provider_response": "secret"}
             ),
             "forbidden key",
+        ),
+        (
+            lambda view: view["artifacts"][0].update(
+                {"artifact_ref": "/tmp/private-research-packet.json"}
+            ),
+            "local path",
         ),
         (
             lambda view: view["boundary"].update({"investment_advice": True}),

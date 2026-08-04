@@ -63,10 +63,12 @@ semantics and maps them to the finance-owned
 `decision_research_dashboard_v0` view. The contract keeps beta, cycle,
 company-value, and residual-alpha reasoning distinct; requires supporting
 evidence, counterevidence, thesis breakers, scenario assumptions, and frozen
-event gates; and preserves insufficient or rejected conclusions without
-allowing free labels or tones to override canonical adjudication, zero
-validated alpha, or the unchanged active method, or turn them into an
-investment recommendation.
+event gates; and can publish compact research-artifact pointers with the
+evidence references used to produce them. Artifact pointers contain no raw
+content or local paths. The view preserves insufficient or rejected conclusions
+without allowing free labels or tones to override canonical adjudication, zero
+validated alpha, or the unchanged active method, or turn them into an investment
+recommendation.
 
 [`examples/research-dashboard.json`](examples/research-dashboard.json) is a
 fully synthetic public-safe example. It deliberately reports zero validated

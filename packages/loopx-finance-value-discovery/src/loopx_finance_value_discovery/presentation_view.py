@@ -591,6 +591,78 @@ def _research_ledger(value: Any) -> list[dict[str, Any]]:
     return ledger
 
 
+def _artifacts(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    artifacts: list[dict[str, Any]] = []
+    for index, item in enumerate(
+        _bounded_list(value, context="view.artifacts", maximum=20)
+    ):
+        context = f"view.artifacts[{index}]"
+        record = _record(
+            item,
+            context=context,
+            allowed={
+                "artifact_id",
+                "kind",
+                "label",
+                "summary",
+                "artifact_ref",
+                "evidence_refs",
+            },
+        )
+        evidence_refs = [
+            _evidence_reference(
+                reference,
+                context=f"{context}.evidence_refs[{reference_index}]",
+            )
+            for reference_index, reference in enumerate(
+                _bounded_list(
+                    record.get("evidence_refs"),
+                    context=f"{context}.evidence_refs",
+                    minimum=1,
+                    maximum=20,
+                )
+            )
+        ]
+        artifacts.append(
+            {
+                "artifact_id": _identifier(
+                    record.get("artifact_id"),
+                    context=f"{context}.artifact_id",
+                ),
+                "kind": _enum(
+                    record.get("kind"),
+                    {
+                        "research_packet",
+                        "evidence_matrix",
+                        "event_gate_packet",
+                        "methodology_note",
+                    },
+                    context=f"{context}.kind",
+                ),
+                "label": _required_text(
+                    record,
+                    "label",
+                    context=context,
+                    max_length=160,
+                ),
+                "summary": _required_text(
+                    record,
+                    "summary",
+                    context=context,
+                    max_length=700,
+                ),
+                "artifact_ref": _evidence_reference(
+                    record.get("artifact_ref"),
+                    context=f"{context}.artifact_ref",
+                ),
+                "evidence_refs": evidence_refs,
+            }
+        )
+    return artifacts
+
+
 def _event_gates(value: Any) -> list[dict[str, Any]]:
     event_gates: list[dict[str, Any]] = []
     for index, item in enumerate(
@@ -756,6 +828,7 @@ def validate_decision_research_view(
             "layers",
             "entities",
             "research_ledger",
+            "artifacts",
             "event_gates",
             "method_state",
             "boundary",
@@ -771,6 +844,7 @@ def validate_decision_research_view(
         "layers": _layers(record.get("layers")),
         "entities": _entities(record.get("entities")),
         "research_ledger": _research_ledger(record.get("research_ledger")),
+        "artifacts": _artifacts(record.get("artifacts")),
         "event_gates": _event_gates(record.get("event_gates")),
         "method_state": _method_state(record.get("method_state")),
         "boundary": _boundary(record.get("boundary")),

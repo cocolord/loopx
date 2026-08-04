@@ -537,6 +537,44 @@ def _research_ledger(value: Any) -> list[dict[str, Any]]:
     return rows
 
 
+def _artifacts(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    rows: list[dict[str, Any]] = []
+    for index, item in enumerate(
+        _list(value, context="input.artifacts", maximum=20)
+    ):
+        context = f"input.artifacts[{index}]"
+        record = _record(
+            item,
+            context=context,
+            allowed={
+                "artifact_id",
+                "kind",
+                "label",
+                "summary",
+                "artifact_ref",
+                "evidence_refs",
+            },
+        )
+        rows.append(
+            {
+                "artifact_id": record.get("artifact_id"),
+                "kind": record.get("kind"),
+                "label": record.get("label"),
+                "summary": record.get("summary"),
+                "artifact_ref": record.get("artifact_ref"),
+                "evidence_refs": _text_list(
+                    record.get("evidence_refs"),
+                    context=f"{context}.evidence_refs",
+                    minimum=1,
+                    maximum=20,
+                ),
+            }
+        )
+    return rows
+
+
 def _event_evidence(
     value: Any,
     *,
@@ -696,6 +734,7 @@ def build_finance_research_dashboard_packet(
             "research_layers",
             "entities",
             "research_ledger",
+            "artifacts",
             "event_gates",
             "method_state",
             "boundary",
@@ -763,6 +802,7 @@ def build_finance_research_dashboard_packet(
             "layers": _layers(record.get("research_layers")),
             "entities": _entities(record.get("entities")),
             "research_ledger": _research_ledger(record.get("research_ledger")),
+            "artifacts": _artifacts(record.get("artifacts")),
             "event_gates": _event_gates(
                 record.get("event_gates"),
                 point_in_time=point_in_time,
