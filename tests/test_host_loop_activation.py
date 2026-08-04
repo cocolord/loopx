@@ -9,6 +9,7 @@ from loopx.heartbeat_prompt import (
 from loopx.host_loop_activation import (
     AgentTypeError,
     agent_type_for_host_surface,
+    agent_type_uses_host_managed_skills,
     build_host_loop_activation_packet,
     normalize_agent_type,
     scheduler_command_binding_for_agent_type,
@@ -59,6 +60,7 @@ def test_codex_ide_plugin_is_an_exact_host_type_with_visible_goal_activation() -
         ("codex-ide-plugin", "codex_cli"),
         ("claude-code", "claude_code"),
         ("opencode", "generic_cli"),
+        ("traex-cli", "generic_cli"),
     ),
 )
 def test_first_class_hosts_bind_one_runtime_profile(
@@ -315,6 +317,34 @@ def test_opencode_activation_uses_bridge_tool_and_generic_cli_quota() -> None:
         "--surface opencode --with-goal-bridge"
     )
     assert "--runtime-profile generic_cli" in packet["commands"]["heartbeat_prompt"]
+
+
+def test_traex_cli_is_an_exact_visible_goal_host_on_the_generic_cli_loop() -> None:
+    assert normalize_agent_type("traex") == "traex-cli"
+    assert normalize_agent_type("TraeX CLI") == "traex-cli"
+    assert normalize_agent_type("trae") == "traex-cli"
+    assert agent_type_for_host_surface("traex-cli") == "traex-cli"
+    assert agent_type_for_host_surface("traex") == "traex-cli"
+
+    packet = build_host_loop_activation_packet(
+        agent_type="traex-cli",
+        goal_id="fixture-goal",
+        agent_id="traex-fixture",
+        registered_agents=["traex-fixture"],
+    )
+
+    assert packet["host_surface"] == "traex_visible_goal_mode"
+    assert packet["activation_method"] == "set_visible_goal"
+    assert packet["host_mutation"]["owner"] == "TraeX CLI TUI"
+    assert packet["host_mutation"]["host_command"] == "/goal <task_body>"
+    assert packet["host_mutation"]["requires_host_feature_flag"] == (
+        "[features] goals = true in ~/.trae/traecli.toml"
+    )
+    # TraeX is a generic visible CLI loop, not the Codex-native goal contract, and
+    # LoopX ships no Codex App automation for it.
+    assert "--runtime-profile generic_cli" in packet["commands"]["heartbeat_prompt"]
+    assert "automation_update" not in str(packet)
+    assert agent_type_uses_host_managed_skills("traex-cli") is True
 
 
 def test_ambiguous_codex_requires_app_ide_or_cli_selection() -> None:
