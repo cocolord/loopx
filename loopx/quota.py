@@ -2458,6 +2458,7 @@ def _build_quota_paused_should_run_payload(
     requested_agent_id: str | None,
     item: dict[str, Any],
     plan: dict[str, Any],
+    goal_health_ok: bool,
     include_scheduler_detail: bool,
     codex_app_current_rrule: Any,
     resolved_scheduler_context: SchedulerExecutionContextResolution,
@@ -2491,8 +2492,8 @@ def _build_quota_paused_should_run_payload(
         heartbeat_recommendation=heartbeat_recommendation,
     )
     payload: dict[str, Any] = {
-        "ok": True,
-        "status_health_ok": True,
+        "ok": goal_health_ok,
+        "status_health_ok": goal_health_ok,
         "mode": "should-run",
         "goal_id": safe_goal_id,
         "decision": "skip",
@@ -2592,6 +2593,7 @@ def build_quota_should_run(
                 requested_agent_id=agent_id,
                 item=item,
                 plan=plan,
+                goal_health_ok=goal_health_ok,
                 include_scheduler_detail=include_scheduler_detail,
                 codex_app_current_rrule=codex_app_current_rrule,
                 resolved_scheduler_context=resolved_scheduler_context,

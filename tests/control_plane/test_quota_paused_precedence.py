@@ -8,6 +8,8 @@ import pytest
 from loopx.configure_goal import configure_goal
 from loopx.control_plane.scheduler.execution_context import (
     GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT,
+    SchedulerRuntimeProfile,
+    scheduler_execution_context_for_runtime_profile,
 )
 from loopx.control_plane.testing.quota_fixtures import (
     quota_status_payload,
@@ -82,7 +84,11 @@ def _assert_authoritatively_paused(payload: dict) -> None:
     assert payload["heartbeat_recommendation"]["notify"] == "DONT_NOTIFY"
     assert payload["execution_obligation"]["must_attempt_work"] is False
     assert payload["interaction_contract"]["mode"] == "skip"
-    assert payload["scheduler_hint"]["action"] != "run_now"
+    assert payload["automation_liveness"]["keep_active"] is False
+    assert payload["automation_liveness"]["pause_allowed"] is True
+    assert payload["automation_liveness"]["automation_action"] == "stop_quota_paused"
+    assert payload["scheduler_hint"]["action"] == "stop_until_explicit_resume"
+    assert payload["scheduler_hint"]["cadence_class"] == "quota_paused"
     # No selector lane should have been constructed under the pause.
     for lane_key in (
         "capability_gate",
@@ -132,6 +138,51 @@ def test_paused_quota_preempts_workspace_repair(
 
     _assert_authoritatively_paused(payload)
     assert "workspace_guard" not in payload
+
+
+def test_paused_quota_stops_codex_app_heartbeat_until_explicit_resume() -> None:
+    payload = build_quota_should_run(
+        _paused_status(),
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        codex_app_current_rrule="FREQ=MINUTELY;INTERVAL=30",
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
+        ),
+    )
+
+    _assert_authoritatively_paused(payload)
+    liveness = payload["automation_liveness"]
+    assert liveness["next_trigger"] == "explicit quota resume with quota.compute > 0"
+    assert liveness["spend_policy"] == "no quota spend for paused automation shutdown"
+
+    scheduler = payload["scheduler_hint"]
+    assert scheduler["reason_code"] == "quota_paused"
+    codex_app = scheduler["codex_app"]
+    assert codex_app["applicability"] == "applicable"
+    assert codex_app["apply"] == "pause_or_delete_current_heartbeat_if_possible"
+    assert codex_app["host_action"] == "pause_or_delete_current_heartbeat"
+    assert codex_app["host_action_required"] is True
+    assert codex_app["ack_required"] is False
+    assert codex_app["resume_trigger"] == "explicit quota resume with quota.compute > 0"
+    assert "recommended_rrule" not in codex_app
+
+
+def test_paused_quota_preserves_unhealthy_status_fact() -> None:
+    status_payload = _paused_status()
+    status_payload["contract"] = {"error_diagnostics": []}
+    status_payload["global_registry"] = {"ok": False}
+
+    payload = build_quota_should_run(
+        status_payload,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        scheduler_execution_context=GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT,
+    )
+
+    _assert_authoritatively_paused(payload)
+    assert payload["ok"] is False
+    assert payload["status_health_ok"] is False
 
 
 def _paused_status_with_due_monitor() -> dict:
