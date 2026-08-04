@@ -808,6 +808,40 @@ def test_declared_minimum_core_without_presentation_api_can_import_and_doctor(
     )["error"]
 
 
+def test_dashboard_requires_only_public_presentation_registration_api(
+    tmp_path: Path,
+) -> None:
+    """A Core with the public hook need not preserve Core-private helpers."""
+
+    core_package = tmp_path / "minimal-core" / "loopx" / "extensions"
+    core_package.mkdir(parents=True)
+    (core_package.parent / "__init__.py").write_text('__version__ = "0.4.0"\n')
+    (core_package / "__init__.py").write_text("")
+    (core_package / "presentation.py").write_text(
+        "def register_presentation_view_validator(_schema, _validator):\n    return None\n"
+    )
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = os.pathsep.join(
+        (str(EXTENSION_SRC), str(core_package.parents[1]))
+    )
+
+    dashboard_import = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            "from loopx_finance_value_discovery.dashboard import "
+            "build_finance_research_dashboard_packet",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert dashboard_import.returncode == 0, dashboard_import.stderr
+
+
 def test_provider_doctor_is_side_effect_free() -> None:
     assert run(["--doctor"]) == 0
 

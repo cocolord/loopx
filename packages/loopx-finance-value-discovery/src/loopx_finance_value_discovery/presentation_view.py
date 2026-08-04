@@ -12,22 +12,21 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from loopx.extensions.presentation import (
-    register_presentation_view_validator,
-)
-from loopx.extensions.presentation import (
-    _record,
-    _enum,
-    _boolean,
-    _number,
-    _iso_value,
-    _bounded_list,
-    _text_list,
-    _identifier,
-    _required_text,
-    _evidence_reference,
-    _assert_allowed_keys_recursively,
-    _ANCHOR_RE,
+from loopx.extensions.presentation import register_presentation_view_validator
+
+from .presentation_validation import (
+    ANCHOR_RE,
+    assert_allowed_keys_recursively as _assert_allowed_keys_recursively,
+    boolean as _boolean,
+    bounded_list as _bounded_list,
+    enum as _enum,
+    evidence_reference as _evidence_reference,
+    identifier as _identifier,
+    iso_value as _iso_value,
+    number as _number,
+    record as _record,
+    required_text as _required_text,
+    text_list as _text_list,
 )
 
 DECISION_RESEARCH_VIEW_SCHEMA_VERSION = "decision_research_dashboard_v0"
@@ -179,7 +178,7 @@ def _dashboard_summaries(value: Any) -> list[dict[str, Any]]:
             context=context,
             max_length=80,
         )
-        if not _ANCHOR_RE.fullmatch(destination_anchor):
+        if not ANCHOR_RE.fullmatch(destination_anchor):
             raise ValueError(
                 f"{context}.destination_anchor must be a lower-kebab anchor"
             )
