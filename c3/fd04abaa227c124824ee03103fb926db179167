@@ -1,0 +1,29 @@
+packages/loopx-finance-value-discovery/src/loopx_finance_value_discovery/__init__.py
+  s_ac85a5ede27655::t_efb546ed7c5886 3,26-35
+packages/loopx-finance-value-discovery/src/loopx_finance_value_discovery/cli.py
+  s_ac85a5ede27655::t_e6bfbc8b7a1e12 15-18,84-85,97-99
+packages/loopx-finance-value-discovery/src/loopx_finance_value_discovery/dashboard.py
+  s_ac85a5ede27655::t_2538ba2baec3de 8-12
+packages/loopx-finance-value-discovery/src/loopx_finance_value_discovery/presentation_compat.py
+  s_ac85a5ede27655::t_e9c4c177b4bd0e 1-39
+tests/extensions/test_finance_value_discovery_extension.py
+  s_ac85a5ede27655::t_ec07429e690536 6,8,766-808
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c3fd04abaa227c124824ee03103fb926db179167",
+  "prompts": {},
+  "sessions": {
+    "s_ac85a5ede27655": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fcc9c-077a-77d0-a0e7-7ac99ff36fab",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
