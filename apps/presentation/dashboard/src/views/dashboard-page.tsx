@@ -72,6 +72,10 @@ import {
   parseRewardDryRunResponse,
   parseStatusPayload,
 } from "../data/status";
+import {
+  DecisionResearchView,
+  fetchPresentationProjection,
+} from "../data/decision-research";
 import { buildActionPacket, buildApprovedAgentHandoff, ProjectAssetSource } from "../data/action-packet";
 import {
   DecisionResearchDashboardSummaries,
@@ -6637,6 +6641,54 @@ export function DashboardPage() {
       surface.extension_id === search.extensionId
       && surface.surface_id === search.surfaceId,
   );
+  const presentationDetailUrl = localApiUrl(
+    source,
+    payload.local_dashboard_api?.presentation_detail_url,
+  );
+  const [projectionView, setProjectionView] = useState<DecisionResearchView | null>(null);
+  const [projectionError, setProjectionError] = useState<string | null>(null);
+  const [projectionLoading, setProjectionLoading] = useState(false);
+
+  useEffect(() => {
+    setProjectionView(null);
+    setProjectionError(null);
+    if (
+      !presentationDetailUrl
+      || !selectedPresentationSurface
+      || (
+        selectedPresentationSurface.state !== "ready"
+        && selectedPresentationSurface.state !== "review_due"
+      )
+    ) {
+      setProjectionLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setProjectionLoading(true);
+    void fetchPresentationProjection(
+      presentationDetailUrl,
+      selectedPresentationSurface,
+    )
+      .then((projection) => {
+        if (cancelled) {
+          return;
+        }
+        setProjectionView(projection.view);
+        setProjectionLoading(false);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        setProjectionError(formatStatusError(error));
+        setProjectionLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [presentationDetailUrl, selectedPresentationSurface]);
 
   async function loadFromUrl(url: string) {
     const trimmed = url.trim();
@@ -6922,6 +6974,9 @@ export function DashboardPage() {
                 <DecisionResearchSurface
                   goals={runHistory.goals}
                   surface={selectedPresentationSurface}
+                  view={projectionView}
+                  viewError={projectionError}
+                  viewLoading={projectionLoading}
                 />
               ) : (
                 <>

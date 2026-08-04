@@ -12,6 +12,15 @@ import { fileURLToPath } from "node:url";
 const require = createRequire(import.meta.url);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dashboardDir = resolve(repoRoot, "apps/presentation/dashboard");
+const projectionResponse = require(
+  resolve(dashboardDir, "src/data/fixtures/presentation-projection.example.json"),
+);
+const projectionDetailRef = {
+  extension_id: projectionResponse.projection.extension_id,
+  surface_id: projectionResponse.projection.surface_id,
+  extension_revision: projectionResponse.projection.extension_revision,
+  payload_sha256: projectionResponse.projection.payload_sha256,
+};
 const fixtureName = "status.home.browser-smoke.json";
 const fixturePath = resolve(dashboardDir, "public", fixtureName);
 const emptyFixtureName = "status.home.browser-smoke.empty.json";
@@ -22,6 +31,8 @@ const duplicateSurfaceFixturePath = resolve(
   "public",
   duplicateSurfaceFixtureName,
 );
+const projectionFixtureName = "status.home.browser-smoke.projection.json";
+const projectionFixturePath = resolve(dashboardDir, "public", projectionFixtureName);
 const visualOutputDir = resolve(repoRoot, "output/playwright/dashboard-home-visual-acceptance");
 const port = Number(process.env.LOOPX_DASHBOARD_HOME_SMOKE_PORT ?? "5194");
 
@@ -243,13 +254,7 @@ function todoGroupFor(spec, role) {
   };
 }
 
-const researchDetailRef = {
-  extension_id: "test-research-extension",
-  surface_id: "investment-research",
-  extension_revision: "0123456789abcdef",
-  payload_sha256:
-    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-};
+const researchDetailRef = { ...projectionDetailRef };
 
 const statusFixture = {
   ok: true,
@@ -473,8 +478,8 @@ const statusFixture = {
     invalid_count: 0,
     items: [
       {
-        extension_id: "test-research-extension",
-        extension_revision: "0123456789abcdef",
+        extension_id: researchDetailRef.extension_id,
+        extension_revision: researchDetailRef.extension_revision,
         surface_id: "investment-research",
         surface_kind: "decision_research_dashboard",
         title: "Investment Research",
@@ -490,6 +495,11 @@ const statusFixture = {
         detail_ref: researchDetailRef,
       },
     ],
+  },
+  local_dashboard_api: {
+    source: "browser-smoke",
+    status_url: `/${fixtureName}`,
+    presentation_detail_url: `/${projectionFixtureName}`,
   },
 };
 
@@ -742,6 +752,11 @@ async function main() {
     JSON.stringify(statusWithDuplicateSurfaceIds, null, 2) + "\n",
     "utf-8",
   );
+  await writeFile(
+    projectionFixturePath,
+    JSON.stringify(projectionResponse, null, 2) + "\n",
+    "utf-8",
+  );
   await mkdir(visualOutputDir, { recursive: true });
 
   const server = startDashboardServer();
@@ -931,12 +946,17 @@ async function main() {
     );
     await researchNav.waitFor({ state: "visible" });
 
-    await researchNav.click();
-    await page.waitForTimeout(250);
+    await page.goto(
+      `${baseUrl}/?view=ops&extensionId=${researchDetailRef.extension_id}&surfaceId=${researchDetailRef.surface_id}&statusUrl=${baseUrl}/${fixtureName}`,
+      { waitUntil: "networkidle" },
+    );
+    await page.waitForSelector('[data-testid="research-first-screen-truth"]', {
+      timeout: 10_000,
+    });
     const researchUrl = new URL(page.url());
     if (
-      researchUrl.searchParams.get("extensionId") !== "test-research-extension"
-      || researchUrl.searchParams.get("surfaceId") !== "investment-research"
+      researchUrl.searchParams.get("extensionId") !== researchDetailRef.extension_id
+      || researchUrl.searchParams.get("surfaceId") !== researchDetailRef.surface_id
     ) {
       throw new Error(`Research navigation did not set compound identity: ${page.url()}`);
     }
@@ -948,15 +968,18 @@ async function main() {
       );
     }
     const researchText = await researchSurface.innerText();
-    // The compact status contract exposes the projection pointer and lifecycle
-    // fields only. The full provider view is served separately and must not be
-    // inlined into the generic Core status surface.
     const requiredResearchText = [
-      "Investment Research",
-      "View schema",
-      "decision_research_dashboard_v0",
-      "Payload SHA-256",
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      projectionResponse.projection.view.identity.title,
+      projectionResponse.projection.view.adjudication.label,
+      "Observations & evidence",
+      "evidence:",
+      "Research ledger",
+      "Research artifacts",
+      projectionResponse.projection.view.artifacts[0].label,
+      projectionResponse.projection.view.artifacts[0].artifact_ref,
+      "Event gates",
+      "Research boundary",
+      projectionResponse.projection.view.entities[0].symbol,
     ];
     const missingResearchText = requiredResearchText.filter((text) => !researchText.includes(text));
     if (missingResearchText.length) {
@@ -983,17 +1006,17 @@ async function main() {
     mobileResearchPage.on("pageerror", (error) => pageErrors.push(`mobile research: ${error.message}`));
     try {
       await mobileResearchPage.goto(
-        `${baseUrl}/?view=ops&extensionId=test-research-extension&surfaceId=investment-research&statusUrl=/${fixtureName}`,
+        `${baseUrl}/?view=ops&extensionId=${researchDetailRef.extension_id}&surfaceId=${researchDetailRef.surface_id}&statusUrl=${baseUrl}/${fixtureName}`,
         { waitUntil: "networkidle" },
       );
-      await mobileResearchPage.waitForSelector('[data-testid="decision-research-surface"]', {
+      await mobileResearchPage.waitForSelector('[data-testid="research-first-screen-truth"]', {
         timeout: 10_000,
       });
       const firstScreenText = await mobileResearchPage.locator("body").innerText();
       for (const truth of [
-        "Investment Research",
-        "View schema",
-        "decision_research_dashboard_v0",
+        projectionResponse.projection.view.identity.title,
+        projectionResponse.projection.view.adjudication.label,
+        projectionResponse.projection.view.metrics[0].value,
       ]) {
         if (!firstScreenText.includes(truth)) {
           throw new Error(`Mobile research first screen lost truth: ${truth}`);
@@ -1065,6 +1088,7 @@ async function main() {
     await rm(fixturePath, { force: true });
     await rm(emptyFixturePath, { force: true });
     await rm(duplicateSurfaceFixturePath, { force: true });
+    await rm(projectionFixturePath, { force: true });
   }
 }
 

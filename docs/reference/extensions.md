@@ -276,8 +276,10 @@ the provider's domain. The provider owns source validation, the `view_schema`
 contract, and the mapping into it. Core owns lifecycle resolution, revision
 binding, persistence, and the public-safe status projection. Core keeps the
 `view` opaque unless the owning extension registers a validator for its
-`view_schema`; it does not freeze any one domain's view into core. Dashboard
-renders only the generic status contract.
+`view_schema`; it does not freeze any one domain's view into core. Dashboard's
+generic status parser consumes only that compact contract. A built-in renderer
+may separately own a provider view schema, as the Finance renderer does for
+`decision_research_dashboard_v0`.
 
 The finance value-discovery extension registers the first such view,
 `decision_research_dashboard_v0`, a read-only decision-research view:
@@ -330,8 +332,12 @@ It reads only the active manifest snapshot and the persisted, bounded envelope.
 Status stays a compact index: a `ready` or `review_due` item carries a
 content-addressed `detail_ref` (extension id, surface id, revision, and payload
 SHA-256) rather than inlining the full provider view. Consumers that need the
-view read the referenced projection payload directly. Visibility follows this
-matrix:
+view use the loopback status server's advertised cold-path endpoint. That read
+revalidates the active extension revision, declared surface, persisted envelope,
+and payload hash before returning a `public-safe` projection. Because the
+endpoint has no authenticated audience contract, it rejects `owner-only`
+surfaces rather than treating loopback access as owner authentication.
+Visibility follows this matrix:
 
 | Lifecycle or projection state | Status projection | Dashboard |
 | --- | --- | --- |
