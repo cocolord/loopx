@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import json
+import os
+import shlex
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from loopx.heartbeat_prompt import (
@@ -15,6 +21,9 @@ from loopx.host_loop_activation import (
     scheduler_command_binding_for_agent_type,
 )
 from loopx.project_prompt import render_accountable_progress_refresh_command
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_codex_ide_plugin_is_an_exact_host_type_with_visible_goal_activation() -> None:
@@ -345,6 +354,83 @@ def test_traex_cli_is_an_exact_visible_goal_host_on_the_generic_cli_loop() -> No
     assert "--runtime-profile generic_cli" in packet["commands"]["heartbeat_prompt"]
     assert "automation_update" not in str(packet)
     assert agent_type_uses_host_managed_skills("traex-cli") is True
+
+
+def test_traex_activation_command_renders_visible_goal_task_body(tmp_path: Path) -> None:
+    goal_id = "traex-visible-goal-fixture"
+    project = tmp_path / "project"
+    state_file = project / ".codex" / "goals" / goal_id / "ACTIVE_GOAL_STATE.md"
+    registry = tmp_path / ".codex" / "loopx" / "registry.global.json"
+    state_file.parent.mkdir(parents=True)
+    registry.parent.mkdir(parents=True)
+    state_file.write_text("# Active Goal State\n", encoding="utf-8")
+    registry.write_text(
+        json.dumps(
+            {
+                "goals": [
+                    {
+                        "id": goal_id,
+                        "status": "active",
+                        "repo": str(project),
+                        "state_file": str(state_file.relative_to(project)),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    packet = build_host_loop_activation_packet(
+        agent_type="traex-cli",
+        goal_id=goal_id,
+        cli_bin=str(REPO_ROOT / "scripts" / "loopx"),
+    )
+
+    command = packet["commands"]["visible_goal_prompt_json"]
+    assert packet["activation_input_command"] == command
+    completed = subprocess.run(
+        shlex.split(command),
+        cwd=REPO_ROOT,
+        env={
+            "HOME": str(tmp_path),
+            "PATH": os.environ["PATH"],
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    payload = json.loads(completed.stdout)
+    task_body = payload["task_body"]
+    normalized_task_body = " ".join(task_body.split())
+    lower_task_body = task_body.lower()
+
+    assert payload["interface_budget"]["mode"] == "visible_goal"
+    assert payload["interface_budget"]["within_budget"] is True
+    assert "--runtime-profile generic_cli" in payload["quota_guard_command"]
+    assert "--source visible-goal" in payload["quota_spend_command"]
+    assert "visible TraeX `/goal` task" in normalized_task_body
+    for forbidden in (
+        "rrule",
+        "automation",
+        "heartbeat",
+        "receipt",
+        "--turn-instance-id",
+        "loopx_turn",
+    ):
+        assert forbidden not in lower_task_body
+    assert "`/loop`" not in str(packet)
+
+
+def test_generic_cli_prompt_does_not_imply_traex_visible_goal() -> None:
+    payload = build_heartbeat_prompt(
+        goal_id="generic-cli-fixture",
+        thin=True,
+        runtime_profile="generic_cli",
+    )
+
+    assert payload["interface_budget"]["mode"] == "thin"
+    assert "--turn-instance-id" in payload["quota_guard_command"]
+    assert "visible TraeX `/goal` task" not in payload["task_body"]
 
 
 def test_ambiguous_codex_requires_app_ide_or_cli_selection() -> None:

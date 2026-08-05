@@ -354,7 +354,12 @@ def _heartbeat_commands(
     }
     agent_scope = scope_by_type.get(agent_type, scope_by_type["other-agent"])
     scheduler_binding = scheduler_command_binding_for_agent_type(agent_type)
-    return {
+    renderer_binding = (
+        {"visible_goal_host": "traex-cli"}
+        if agent_type == "traex-cli"
+        else {}
+    )
+    commands = {
         "heartbeat_prompt_json": render_heartbeat_prompt_json_command(
             goal_id,
             cli_bin=cli_bin,
@@ -372,6 +377,30 @@ def _heartbeat_commands(
             **scheduler_binding,
         ),
     }
+    if renderer_binding:
+        commands.update(
+            {
+                "visible_goal_prompt_json": render_heartbeat_prompt_json_command(
+                    goal_id,
+                    cli_bin=cli_bin,
+                    agent_id=agent_id,
+                    agent_scope=agent_scope,
+                    available_capabilities=available_capabilities,
+                    **scheduler_binding,
+                    **renderer_binding,
+                ),
+                "visible_goal_prompt": render_heartbeat_prompt_command(
+                    goal_id,
+                    cli_bin=cli_bin,
+                    agent_id=agent_id,
+                    agent_scope=agent_scope,
+                    available_capabilities=available_capabilities,
+                    **scheduler_binding,
+                    **renderer_binding,
+                ),
+            }
+        )
+    return commands
 
 
 def _identity_state(
@@ -664,7 +693,7 @@ def _traex_activation(commands: dict[str, str]) -> dict[str, Any]:
         "host_surface": "traex_visible_goal_mode",
         "entry_command_hint": "$loopx <task> or the explicit LoopX skill from /skills",
         "activation_method": "set_visible_goal",
-        "activation_input_command": commands["heartbeat_prompt_json"],
+        "activation_input_command": commands["visible_goal_prompt_json"],
         "host_mutation": {
             "owner": "TraeX CLI TUI",
             "host_command": "/goal <task_body>",
@@ -673,18 +702,18 @@ def _traex_activation(commands: dict[str, str]) -> dict[str, Any]:
             "missing_host_tool_gate": (
                 "TraeX /goal is unavailable; if goal mode is disabled, show the exact "
                 "`/goal <task_body>` text for the user to paste after enabling "
-                "`[features] goals = true`, or fall back to a visible `/loop` gated by "
-                "LoopX quota should-run."
+                "`[features] goals = true`. Do not claim another host-loop surface "
+                "without a verified LoopX adapter."
             ),
         },
         "activation_steps": [
-            "Run the heartbeat-prompt JSON command after project state and todos are written.",
+            "Run the visible-goal prompt JSON command after project state and todos are written.",
             "Read task_body from the JSON payload.",
             "Set the visible TraeX goal to `/goal <task_body>`; enable `[features] goals = true` first if goal mode is off.",
             "Keep delivery in the visible TUI turn; gate each continuation through LoopX quota should-run and do not switch to hidden headless execution.",
         ],
         "success_criteria": [
-            "The visible TraeX TUI has `/goal <task_body>` active for this goal, or a LoopX-gated `/loop` is running when goal mode is unavailable.",
+            "The visible TraeX TUI has `/goal <task_body>` active for this goal.",
             "Future goal turns enter through LoopX quota/status/state before delivery work.",
         ],
     }
@@ -746,7 +775,12 @@ def build_host_loop_activation_packet(
             available_capabilities=normalized_available_capabilities,
         )
         if activation_allowed
-        else {"heartbeat_prompt_json": None, "heartbeat_prompt": None}
+        else {
+            "heartbeat_prompt_json": None,
+            "heartbeat_prompt": None,
+            "visible_goal_prompt_json": None,
+            "visible_goal_prompt": None,
+        }
     )
     if canonical == "ark-managed-agent":
         surface = _ark_managed_agent_activation(commands)
@@ -785,6 +819,17 @@ def build_host_loop_activation_packet(
                 "heartbeat_prompt_json": candidate_commands["heartbeat_prompt_json"],
                 "heartbeat_prompt": candidate_commands["heartbeat_prompt"],
             }
+            if canonical == "traex-cli":
+                choice.update(
+                    {
+                        "visible_goal_prompt_json": candidate_commands[
+                            "visible_goal_prompt_json"
+                        ],
+                        "visible_goal_prompt": candidate_commands[
+                            "visible_goal_prompt"
+                        ],
+                    }
+                )
             if fresh_agent_default:
                 choice.update(
                     {

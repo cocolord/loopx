@@ -368,13 +368,17 @@ def build_heartbeat_prompt(
     available_capabilities: list[str] | tuple[str, ...] | None = None,
     runtime_profile: str | None = None,
     scheduler_execution_context: dict[str, Any] | None = None,
+    visible_goal_host: str | None = None,
 ) -> dict[str, Any]:
     if not (full or compact or brief or thin):
         thin = True
+    if visible_goal_host not in {None, "traex-cli"}:
+        raise ValueError(f"unsupported visible goal host: {visible_goal_host}")
+    traex_visible_goal = visible_goal_host == "traex-cli"
     native_goal_host = uses_native_goal_host_loop(
         runtime_profile=runtime_profile,
         scheduler_execution_context=scheduler_execution_context,
-    )
+    ) or traex_visible_goal
     ark_managed_agent_goal = uses_ark_managed_agent_goal_host(
         runtime_profile=runtime_profile,
         scheduler_execution_context=scheduler_execution_context,
@@ -485,7 +489,9 @@ def build_heartbeat_prompt(
     compact_prompt_command = f"{cli_bin} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
     brief_prompt_command = f"{cli_bin} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
     thin_prompt_command = f"{cli_bin} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
-    if ark_managed_agent_goal:
+    if traex_visible_goal:
+        task_body_renderer = render_traex_visible_goal_task_body
+    elif ark_managed_agent_goal:
         task_body_renderer = render_ark_managed_agent_goal_task_body
     elif native_goal_host:
         task_body_renderer = render_visible_goal_task_body
@@ -519,6 +525,8 @@ def build_heartbeat_prompt(
         host_limit = (
             "Ark Managed Agent goal prompt"
             if ark_managed_agent_goal
+            else "visible TraeX /goal task body"
+            if traex_visible_goal
             else "visible Codex /goal task body"
         )
         raise ValueError(
@@ -545,6 +553,7 @@ def build_heartbeat_prompt(
         "registered_agents": normalized_registered_agents,
         "runtime_profile": runtime_profile,
         "scheduler_execution_context": scheduler_execution_context,
+        "visible_goal_host": visible_goal_host,
         **(
             {"host_contract": build_ark_managed_agent_host_contract()}
             if ark_managed_agent_goal
@@ -1099,6 +1108,53 @@ def render_visible_goal_task_body(
         permission_rule=permission_rule,
         agent_scope_instruction=agent_scope_instruction,
         host_wait_rule=CODEX_NATIVE_GOAL_UNCHANGED_WAIT_RULE,
+    )
+
+
+def render_traex_visible_goal_task_body(
+    *,
+    goal_id: str,
+    active_state: str,
+    cli_preflight: str,
+    pr_review_pre_quota_command: str,
+    quota_guard_command: str,
+    quota_spend_command: str,
+    refresh_state_command: str,
+    progress_refresh_state_command: str,
+    material_queue_rule: str,
+    permission_rule: str,
+    cli_bin: str,
+    agent_scope_instruction: str,
+    expanded_prompt_command: str,
+    compact_prompt_command: str,
+    brief_prompt_command: str,
+    thin_prompt_command: str,
+) -> str:
+    del (
+        cli_preflight,
+        refresh_state_command,
+        cli_bin,
+        expanded_prompt_command,
+        compact_prompt_command,
+        brief_prompt_command,
+        thin_prompt_command,
+    )
+    return _render_goal_task_body(
+        goal_id=goal_id,
+        active_state=active_state,
+        host_preamble=(
+            "in this visible\nTraeX `/goal` task. The visible TraeX Goal owns "
+            "interactive continuation."
+        ),
+        completion_subject="visible\nGoal",
+        pr_review_pre_quota_command=pr_review_pre_quota_command,
+        quota_guard_command=quota_guard_command,
+        quota_spend_command=quota_spend_command,
+        progress_refresh_state_command=progress_refresh_state_command,
+        material_queue_rule=material_queue_rule,
+        permission_rule=permission_rule,
+        agent_scope_instruction=agent_scope_instruction,
+        host_wait_rule="",
     )
 
 

@@ -40,12 +40,13 @@ When the user provides text after `/loopx`, the host should:
      bridge; the bridge gates idle continuation and timer wakes through
      `quota should-run` and completes only on validated terminal no-follow-up.
    - `traex-cli`: set the visible TraeX TUI to `/goal <task_body>` through the
-     generic `generic_cli` runtime profile. TraeX `/goal` requires
+     TraeX visible-goal renderer while quota remains bound to the generic
+     `generic_cli` runtime profile. TraeX `/goal` requires
      `[features] goals = true` in `~/.trae/traecli.toml`; if goal mode is off,
-     show the pasteable `/goal <task_body>` gate or run a visible `/loop` that
-     gates each continuation through `quota should-run`. LoopX ships no Codex App
-     automation and no slash-command installer for TraeX; it loads skills from
-     `~/.trae/skills`.
+     show the pasteable `/goal <task_body>` gate. Do not route to `/loop`
+     unless a verified LoopX adapter is installed. LoopX ships no Codex App
+     automation and no slash-command installer for TraeX; it loads skills
+     from `~/.trae/skills`.
    - `manual` / `other-agent`: wire the external loop driver described by
      `loopx agent-onboard`.
 7. If the host cannot mutate that surface, report the exact pasteable gate
