@@ -941,8 +941,8 @@ If the result says `should_run=true`:
    `heartbeat_recommendation`: `recommended_mode=run_first_read_only_map` means
    run its `command` as a real read-only map, then
    validate/save the `read_only_project_map` result, refresh accountable
-   progress, append exactly one heartbeat spend, sync state if needed, and
-   `NOTIFY`. If it says
+   progress, append exactly one heartbeat spend, sync state if needed; notify
+   only under `NOTIFY`. If it says
    `recommended_mode=mapped_noop_if_unchanged` with `stop_if_unchanged=true`,
    and you find no new user instruction, owner evidence, agent todo, stale
    source, or safe handoff, return quiet `DONT_NOTIFY`: do not run, edit, or
@@ -1019,8 +1019,9 @@ If the result says `should_run=true`:
 
    Never emit accountable progress after spend; it creates an unspent record.
 
-10. Return compactly. `NOTIFY` only for an artifact, gate, blocker, or self-stop;
-    otherwise use `DONT_NOTIFY`.
+10. Return compactly under `interaction_contract.user_channel.notify`:
+    `NOTIFY` only for concrete artifact/gate/blocker/self-stop when the
+    authority is `NOTIFY`; otherwise stay quiet `DONT_NOTIFY`.
 
 {material_queue_rule}
 {permission_rule}"""
@@ -1089,7 +1090,7 @@ Post-spend state:
 `{refresh_state_command}`
 
 No spend for quiet skips, preflight failures, blocker-push asks, dry-runs, or
-duplicate accounting. Compact return; `NOTIFY` only for artifact/gate/blocker/self-stop.
+duplicate accounting. Return only under `user_channel.notify=NOTIFY`; else quiet.
 
 {material_queue_rule}
 {permission_rule}"""
