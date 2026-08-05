@@ -29,6 +29,41 @@ from heartbeat_prompt_fixtures import (  # noqa: E402
 from loopx.heartbeat_prompt import build_heartbeat_prompt  # noqa: E402
 
 
+def compact_user_output_outcome(task_body: str, decision: dict[str, object]) -> dict[str, bool]:
+    compact_task = normalized(task_body)
+    policy_start = compact_task.index("Output policy:") + len("Output policy:")
+    policy_end = compact_task.index("If `should_run=false`:", policy_start)
+    policy = {}
+    for item in compact_task[policy_start:policy_end].strip(" .").split(";"):
+        key, value = item.strip().split("=", maxsplit=1)
+        policy[key] = value.strip("`")
+
+    interaction_contract = decision["interaction_contract"]
+    assert isinstance(interaction_contract, dict), decision
+    user_channel = interaction_contract["user_channel"]
+    assert isinstance(user_channel, dict), decision
+    assert policy["authority"] == "interaction_contract.user_channel.notify", policy
+    notify = user_channel.get(policy["authority"].rsplit(".", maxsplit=1)[-1])
+    action_required = user_channel.get("action_required") is True
+    actions = user_channel.get("actions")
+    missing_action = action_required and not isinstance(actions, list)
+    external_output = notify == policy["external"]
+    blocker_push = external_output and bool(
+        decision.get("state") == "operator_gate"
+        or decision.get("notify_user_on_open_todo") is True
+        or action_required
+    )
+    return {
+        "external_output": external_output,
+        "blocker_push": blocker_push,
+        "internal_projection_repair": bool(
+            notify == policy["quiet"]
+            and missing_action
+            and policy["quiet_missing_action"] == "internal_repair"
+        ),
+    }
+
+
 def main() -> int:
     default_payload = build_heartbeat_prompt(goal_id=GOAL_ID, active_state=ACTIVE_STATE)
     payload = build_heartbeat_prompt(goal_id=GOAL_ID, active_state=ACTIVE_STATE, full=True)
@@ -206,11 +241,90 @@ def main() -> int:
         len(str(payload["task_body"])),
     )
     compact_task = normalized(str(compact_payload["task_body"]))
+    notification_cases = (
+        (
+            "quiet operator gate",
+            {
+                "should_run": True,
+                "state": "operator_gate",
+                "interaction_contract": {
+                    "user_channel": {
+                        "action_required": False,
+                        "notify": "DONT_NOTIFY",
+                    }
+                },
+            },
+            {
+                "external_output": False,
+                "blocker_push": False,
+                "internal_projection_repair": False,
+            },
+        ),
+        (
+            "quiet open-todo flag",
+            {
+                "should_run": True,
+                "notify_user_on_open_todo": True,
+                "interaction_contract": {
+                    "user_channel": {
+                        "action_required": False,
+                        "notify": "DONT_NOTIFY",
+                    }
+                },
+            },
+            {
+                "external_output": False,
+                "blocker_push": False,
+                "internal_projection_repair": False,
+            },
+        ),
+        (
+            "quiet missing action repair",
+            {
+                "should_run": True,
+                "interaction_contract": {
+                    "user_channel": {
+                        "action_required": True,
+                        "notify": "DONT_NOTIFY",
+                    }
+                },
+            },
+            {
+                "external_output": False,
+                "blocker_push": False,
+                "internal_projection_repair": True,
+            },
+        ),
+        (
+            "notified blocker",
+            {
+                "should_run": True,
+                "state": "operator_gate",
+                "interaction_contract": {
+                    "user_channel": {
+                        "action_required": True,
+                        "notify": "NOTIFY",
+                        "actions": [{"text": "Approve the bounded action."}],
+                    }
+                },
+            },
+            {
+                "external_output": True,
+                "blocker_push": True,
+                "internal_projection_repair": False,
+            },
+        ),
+    )
+    for label, decision, expected in notification_cases:
+        assert compact_user_output_outcome(
+            str(compact_payload["task_body"]),
+            decision,
+        ) == expected, label
     assert "`state=operator_gate` / `notify_user_on_open_todo=true` /" not in compact_task
     assert (
-        "Only `user_channel.notify=NOTIFY`: "
-        "`state=operator_gate`/ `notify_user_on_open_todo=true` "
-        "may send a concrete blocker-push"
+        "Only under `NOTIFY`, `state=operator_gate`/"
+        "`notify_user_on_open_todo=true` permit concrete blocker-push; "
+        "else quiet."
     ) in compact_task
     for phrase in (
         "compact LoopX heartbeat body",
@@ -221,7 +335,7 @@ def main() -> int:
         "notify_user_on_open_todo=true",
         "`user_channel.notify=NOTIFY`",
         "concrete blocker-push",
-        "quiet for due/peer flags",
+        "else quiet",
         "safe_bypass_allowed=true",
         "safe_bypass_kind=outcome_floor_recovery",
         "receipts do not self-stop",

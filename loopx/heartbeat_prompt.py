@@ -1120,7 +1120,7 @@ def render_compact_heartbeat_task_body(
     )
     return f"""Advance `{goal_id}` using `{active_state}`.
 
-This compact LoopX heartbeat body stays generic; local policy:
+This compact LoopX heartbeat body; policy:
 registry/state/adapter/`goal_boundary`.
 Expanded lifecycle contract: `{expanded_prompt_command}`.
 {scope_block}
@@ -1139,12 +1139,14 @@ Preflight fail: quiet; no work/spend.
 
 `lark_event_inbox`: reply_due: drain_command -> effect/reply/readback/ACK.
 
-If `should_run=false`: `monitor_quiet_skip` -> receipt/stall done; quiet unless
-replan; write failure -> retry same id; no edits/spend; receipts do not self-stop.
-Only `user_channel.notify=NOTIFY`: `state=operator_gate`/
-`notify_user_on_open_todo=true` may send a concrete blocker-push; otherwise
-quiet for due/peer flags. Honor repeat/cooldown; no spend.
-`safe_bypass_allowed=true`: one validated independent step. External/wait
+Output policy: authority=`interaction_contract.user_channel.notify`;
+external=`NOTIFY`; quiet=`DONT_NOTIFY`; quiet_missing_action=`internal_repair`.
+
+If `should_run=false`: `monitor_quiet_skip` -> receipt/stall; quiet unless
+replan; failed write -> retry id; no edits/spend; receipts do not self-stop.
+Only under `NOTIFY`, `state=operator_gate`/`notify_user_on_open_todo=true`
+permit concrete blocker-push; else quiet.
+Honor repeat/cooldown. `safe_bypass_allowed=true`: one validated step. Wait
 monitor: one read-only poll; unchanged quiet, new evidence writeback/spend.
 
 If `should_run=true`:
@@ -1152,8 +1154,9 @@ If `should_run=true`:
    `attention_queue.items` / `project_asset`, and guard `user_todo_summary`.
    Legacy/raw fallback is not owner/gate/stop authority. Treat
    `run_history.latest_runs` as drill-down only.
-2. Stop only for this goal's own blocker todo: Chinese `NOTIFY`, no work/spend.
-   Dependency/sibling todos: surface; continue audit.
+2. Goal-owned blocker: stop its path. Under `NOTIFY`, send a concrete Chinese
+   blocker-push; under `DONT_NOTIFY`, repair internally and stay quiet.
+   Dependency/sibling todos: record; continue audit.
 3. If `effective_action=outcome_floor_recovery` or
    `recovery_delivery_allowed=true` or
    `safe_bypass_kind=outcome_floor_recovery`, run only ranker/cross-domain
@@ -1164,8 +1167,8 @@ If `should_run=true`:
    `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false` and no
    `notify_user_on_open_todo=true` blocker-push notification.
    Then follow `heartbeat_recommendation`:
-   `run_first_read_only_map` means run exact real-map command, then
-   validate/save/accountable-refresh/spend/`NOTIFY`;
+   `run_first_read_only_map`: exact real-map, validate/save/refresh/spend;
+   notify only under `NOTIFY`;
    `mapped_noop_if_unchanged` plus
    `stop_if_unchanged=true` means quiet no-op if no new instruction/evidence/
    todo/stale source/safe handoff.
@@ -1200,8 +1203,7 @@ If `should_run=true`:
 No spend for quiet skips, preflight failures, blocker-push asks, dry-runs,
 self-cancel turns, or duplicate accounting.
 
-Return compactly. Use heartbeat `NOTIFY` only for committed artifact, user gate,
-real blocker, or self-stop; otherwise use `DONT_NOTIFY`.
+Return only under `user_channel.notify=NOTIFY`; otherwise stay quiet.
 
 {material_queue_rule}
 {permission_rule}"""
