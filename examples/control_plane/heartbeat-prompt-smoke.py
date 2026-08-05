@@ -206,6 +206,12 @@ def main() -> int:
         len(str(payload["task_body"])),
     )
     compact_task = normalized(str(compact_payload["task_body"]))
+    assert "`state=operator_gate` / `notify_user_on_open_todo=true` /" not in compact_task
+    assert (
+        "Only `user_channel.notify=NOTIFY`: "
+        "`state=operator_gate`/ `notify_user_on_open_todo=true` "
+        "may send a concrete blocker-push"
+    ) in compact_task
     for phrase in (
         "compact LoopX heartbeat body",
         "Expanded lifecycle contract",
@@ -215,13 +221,12 @@ def main() -> int:
         "notify_user_on_open_todo=true",
         "`user_channel.notify=NOTIFY`",
         "concrete blocker-push",
-        "due monitor or `should_run` alone is never a notice",
-        "Other-agent scoped todos are not this prompt",
+        "quiet for due/peer flags",
         "safe_bypass_allowed=true",
         "safe_bypass_kind=outcome_floor_recovery",
         "receipts do not self-stop",
         "ranker/cross-domain evidence artifact",
-        "status/log/metric/marker poll",
+        "one read-only poll",
         "heartbeat_recommendation",
         "task_orchestration_contract",
         "activate/resume eligible peer lanes",
@@ -335,13 +340,13 @@ def main() -> int:
         "--goal-id loopx-meta --agent-id codex-product-capability --available-capability network "
         "--available-capability external_evidence_poll",
         "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet",
-        "Due/other-agent gate != prompt",
-        "具体 user todo 未投影，需修复 LoopX 状态投影",
+        "Due/peer gate != prompt",
+        "missing NOTIFY action -> projection repair",
         "Observed capabilities -> `--available-capability`; never user gates",
         "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend)",
         "else RRULE/ack/fail",
-        "monitor=no-change -> surface_only/no spend",
-        "unchanged vision->--vision-unchanged-reason",
+        "no-change=`surface_only`/no spend",
+        "unchanged vision=`--vision-unchanged-reason`",
         "guard receipt; 2 stalls->replan",
         "`lark_event_inbox`: reply_due",
         "drain_command/reply-readback/ACK",
@@ -391,8 +396,8 @@ def main() -> int:
         "Guard/retry; `LOOPX_TURN=<current_time_iso>`",
         'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id public-heartbeat-goal',
         "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet",
-        "Due/other-agent gate != prompt",
-        "具体 user todo 未投影，需修复 LoopX 状态投影",
+        "Due/peer gate != prompt",
+        "missing NOTIFY action -> projection repair",
         "follow user channel",
         "monitor_quiet_skip",
         "receipt/stall done",
@@ -400,16 +405,14 @@ def main() -> int:
         "one read-only poll",
         "safe_bypass_kind=outcome_floor_recovery",
         "ranker/cross-domain evidence recovery",
-        "state priority slice",
-        "guard payload",
         "status --limit 3",
         "review-packet --handoff-only",
         "heartbeat_recommendation",
         "goal_boundary",
         "bounded segment/batch",
         "validate/writeback/todos",
-        "Progress (actual values; no upgrade)",
-        "Optional state-only post-spend",
+        "Progress(actual,no upgrade)",
+        "Post-spend state",
         'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
         "No spend for quiet skips",
     ):
@@ -433,12 +436,12 @@ def main() -> int:
         "state/status/repo",
         "`quota should-run`",
         "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet",
-        "Due/other-agent gate != prompt",
-        "具体 user todo 未投影，需修复 LoopX 状态投影",
+        "Due/peer gate != prompt",
+        "missing NOTIFY action -> projection repair",
         "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend)",
         "else RRULE/ack/fail",
-        "monitor=no-change -> surface_only/no spend",
-        "unchanged vision->--vision-unchanged-reason",
+        "no-change=`surface_only`/no spend",
+        "unchanged vision=`--vision-unchanged-reason`",
         "guard receipt; 2 stalls->replan",
         "P0 blocked: safe P1/P2",
         "monitor quiet/no-spend",
@@ -447,6 +450,15 @@ def main() -> int:
         "Stop: private material, credentials, destructive git, unauthorized prod",
     ):
         assert phrase in thin_task, phrase
+    for label, task in (
+        ("full", normalized(str(payload["task_body"]))),
+        ("compact", compact_task),
+        ("brief", brief_task),
+        ("thin", thin_task),
+    ):
+        assert "no-change=`surface_only`/no spend" in task, label
+        assert "`--vision-unchanged-reason`" in task, label
+        assert "no status-check `outcome_progress`" in task, label
     assert "if absent say" not in thin_task, thin_task
     assert "If false/0: quiet/no-user-todo" not in thin_task, thin_task
 

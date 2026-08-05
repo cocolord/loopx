@@ -210,12 +210,12 @@ def main() -> int:
         assert "state=operator_gate" not in compact_prompt, prompt
         assert "Normal turns use CLI `interaction_contract`" in compact_prompt, prompt
         assert "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet" in compact_prompt, prompt
-        assert "Due/other-agent gate != prompt" in compact_prompt, prompt
-        assert "具体 user todo 未投影，需修复 LoopX 状态投影" in compact_prompt, prompt
+        assert "Due/peer gate != prompt" in compact_prompt, prompt
+        assert "missing NOTIFY action -> projection repair" in compact_prompt, prompt
         assert "`LOOPX_TURN=<current_time_iso>`; reuse." in compact_prompt, prompt
         assert "guard receipt; 2 stalls->replan" in compact_prompt, prompt
-        assert "monitor=no-change -> surface_only/no spend" in compact_prompt, prompt
-        assert "unchanged vision->--vision-unchanged-reason" in compact_prompt, prompt
+        assert "no-change=`surface_only`/no spend" in compact_prompt, prompt
+        assert "unchanged vision=`--vision-unchanged-reason`" in compact_prompt, prompt
 
     print("blocker-push-runtime-smoke ok")
     return 0

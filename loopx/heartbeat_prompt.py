@@ -42,17 +42,17 @@ DEFAULT_PERMISSION_RULE = "Do not ask for permissions when the current Codex ses
 USER_TODO_FINAL_MESSAGE_RULE = (
     "`interaction_contract.user_channel.notify` controls output: `NOTIFY` -> concrete "
     "action; otherwise quiet. `should_run`/due monitor and other-agent scoped todos "
-    "are not user prompts. `action_required` without an action -> "
-    '"具体 user todo 未投影，需修复 LoopX 状态投影".'
+    "are not user prompts. Only inside `NOTIFY`, `action_required` without an action -> "
+    '"具体 user todo 未投影，需修复 LoopX 状态投影"; with `DONT_NOTIFY`, repair '
+    "the projection internally and stay quiet."
 )
 HEARTBEAT_NOTIFICATION_RULE_SHORT = (
     "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet. "
-    "Due/other-agent gate != prompt; missing action -> "
-    "\"具体 user todo 未投影，需修复 LoopX 状态投影\"."
+    "Due/peer gate != prompt; missing NOTIFY action -> projection repair."
 )
 HEARTBEAT_VISION_WRITEBACK_RULE_SHORT = (
-    "Monitor status=`surface_only`/no spend; unchanged accountable vision -> "
-    "`--vision-unchanged-reason`, never status-check `outcome_progress`."
+    "writeback: no-change=`surface_only`/no spend; unchanged vision="
+    "`--vision-unchanged-reason`; no status-check `outcome_progress`."
 )
 SCHEDULER_HINT_APPLICATION_RULE = (
     "`scheduler_hint` no-spend. host_action=pause_or_delete_current_heartbeat -> "
@@ -711,27 +711,20 @@ If that preflight still fails: no work/spend; quiet `DONT_NOTIFY`.
 `lark_event_inbox`: `reply_due`: drain -> effect/reply/readback/ACK.
 
 {USER_TODO_FINAL_MESSAGE_RULE}
+{HEARTBEAT_VISION_WRITEBACK_RULE_SHORT}
 
 If the result says `should_run=false`:
 
-- If `state=operator_gate`, treat it as a user/controller interaction. Read
-  `gate_prompt`, `operator_question`, `recommended_action`,
-  `next_handoff_condition`, `missing_gates`, `user_todo_summary`, and
-  `agent_todo_summary`. If not surfaced recently, return heartbeat `NOTIFY`
-  with one concise Chinese question listing the gate and expected reply format.
-  If `user_todo_summary.open_count > 0`, list existing open user todos even
-  when nothing new was found; never say "no new user action".
-  Do not execute `agent_command`, adapter work, write-control, production
-  actions, or the gated path while asking.
-- If `notify_user_on_open_todo=true`, existing open `user_todo_summary` is a
-  blocker-push opportunity, not a silent skip. For focus/wait/evidence lanes,
-  a user/owner answer can unlock progress. If the payload explicitly includes
-  `open_todo_notification_policy=repeat_until_resolved`, repeat until resolved,
-  except `user_gate_notification_cooldown.notification_suppressed=true`: keep
-  the gate pending and `DONT_NOTIFY` until its reminder window/change.
-  Else `NOTIFY` in Chinese with up to three
-  `first_open_items`, `open_todo_notify_reason`, and reply format: `done`,
-  `defer/not now`, or evidence link/date/conclusion. No delivery/spend.
+- Only if `user_channel.notify=NOTIFY`, interpret `state=operator_gate` or
+  `notify_user_on_open_todo=true` as a user prompt. Read `gate_prompt`,
+  `operator_question`, `user_todo_summary`, and `open_todo_notify_reason`;
+  ask one concise Chinese action/question with reply format. If
+  `user_todo_summary.open_count > 0`, include up to three `first_open_items`;
+  never say "no new user action". Honor
+  `open_todo_notification_policy=repeat_until_resolved`; when
+  `user_gate_notification_cooldown.notification_suppressed=true`, keep the gate
+  pending and quiet until its reminder window/change. No gated delivery/spend.
+  No delivery/spend on the gated path.
 - If the payload also says `safe_bypass_allowed=true` and the same gate has
   already been surfaced, the gate blocks only the gated delivery path. You may
   do exactly one bounded safe-bypass step from the Priority Stack that does not
@@ -918,6 +911,7 @@ Guard/retry; `LOOPX_TURN=<current_time_iso>`:
 Fail: quiet.
 
 {HEARTBEAT_NOTIFICATION_RULE_SHORT}
+{HEARTBEAT_VISION_WRITEBACK_RULE_SHORT}
 
 If `should_run=false`: follow user channel. `monitor_quiet_skip`: receipt/stall
 done; quiet unless replan; write failure: retry same id. External/wait monitor:
@@ -925,21 +919,19 @@ one read-only poll; new evidence -> writeback/spend. Safe bypass if allowed.
 {SCHEDULER_HINT_THIN_RULE}
 `lark_event_inbox`: reply_due: drain_command -> effect/reply/readback/ACK.
 
-If `should_run=true`: fetch compact; read needed state priority slice + guard
-payload. Use `status --limit 3`; `review-packet --handoff-only`.
-Blocker-push first; obey
+If `should_run=true`: fetch compact; use `status --limit 3` and
+`review-packet --handoff-only`. Obey
 `execution_obligation`, `effective_action`, `recovery_delivery_allowed`,
 `heartbeat_recommendation`, `safe_bypass_kind=outcome_floor_recovery`,
 `goal_boundary`, `delivery_batch_scale`, `delivery_outcome`, outcome streaks,
 `handoff_delivery_contract`; do 1 bounded segment/batch when
 `execution_obligation.must_attempt_work=true`; if recovery, run
 ranker/cross-domain evidence recovery or blocker writeback;
-validate/writeback/todos; done->successor/rationale.
-Progress (actual values; no upgrade):
+validate/writeback/todos; done->successor/rationale. Progress(actual,no upgrade):
 `{progress_refresh_state_command}`
-Spend once:
+Spend:
 `{quota_spend_command}`
-Optional state-only post-spend:
+Post-spend state:
 `{refresh_state_command}`
 
 No spend for quiet skips, preflight failures, blocker-push asks, dry-runs, or
@@ -989,19 +981,17 @@ Preflight/guard; `LOOPX_TURN=<current_time_iso>`; reuse:
 Preflight fail: quiet; no work/spend.
 
 {SCHEDULER_HINT_COMPACT_RULE}
+{HEARTBEAT_VISION_WRITEBACK_RULE_SHORT}
 
 `lark_event_inbox`: reply_due: drain_command -> effect/reply/readback/ACK.
 
 If `should_run=false`: `monitor_quiet_skip` -> receipt/stall done; quiet unless
 replan; write failure -> retry same id; no edits/spend; receipts do not self-stop.
-`state=operator_gate` / `notify_user_on_open_todo=true` /
-`user_channel.notify=NOTIFY`: concrete blocker-push; otherwise quiet (a due
-monitor or `should_run` alone is never a notice). Other-agent scoped todos are
-not this prompt; repeat/cooldown as payload says; no delivery/spend.
-`safe_bypass_allowed=true`: one
-gate-independent safe-bypass, validate/writeback/spend. External/wait monitor:
-one read-only status/log/metric/marker poll; unchanged quiet, new evidence
-writeback/spend. Otherwise quiet `DONT_NOTIFY`.
+Only `user_channel.notify=NOTIFY`: `state=operator_gate`/
+`notify_user_on_open_todo=true` may send a concrete blocker-push; otherwise
+quiet for due/peer flags. Honor repeat/cooldown; no spend.
+`safe_bypass_allowed=true`: one validated independent step. External/wait
+monitor: one read-only poll; unchanged quiet, new evidence writeback/spend.
 
 If `should_run=true`:
 1. Read active state, Priority Stack, progress/critic, `goal_boundary`,
@@ -1271,7 +1261,7 @@ Inspect state/status/repo.
 {HEARTBEAT_NOTIFICATION_RULE_SHORT}
 {RUNTIME_CAPABILITY_PROJECTION_THIN_RULE}
 {SCHEDULER_HINT_THIN_RULE}
-writeback: monitor=no-change -> surface_only/no spend; unchanged vision->--vision-unchanged-reason.
+{HEARTBEAT_VISION_WRITEBACK_RULE_SHORT}
 Done->todo/rationale; guard receipt; 2 stalls->replan.
 `lark_event_inbox`: reply_due; drain_command/reply-readback/ACK.
 
