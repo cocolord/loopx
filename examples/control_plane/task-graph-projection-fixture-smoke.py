@@ -218,11 +218,12 @@ def assert_runtime_projection_builder() -> None:
     assert len(gate_nodes) == 2, projection
     assert len(summary_nodes) == 1, projection
     assert summary_nodes[0]["title"] == "3 more open user gates not expanded", summary_nodes
-    assert projection["limits"] == {
-        "user_gate_node_limit": 2,
-        "user_gate_open_count": 5,
-        "user_gate_truncated_count": 3,
-    }, projection["limits"]
+    limits = projection["limits"]
+    assert limits["user_gate_node_limit"] == 2, limits
+    assert limits["user_gate_open_count"] == 5, limits
+    assert limits["user_gate_truncated_count"] == 3, limits
+    assert "predecessor_node_limit" in limits, limits
+    assert "emitted_predecessor_count" in limits, limits
     relations = {edge["relation"] for edge in projection["edges"]}
     assert {"blocks", "depends_on", "validates", "repairs", "audits", "continues"} <= relations, projection
     forbidden_keys = {"write_command", "agent_command", "raw_log", "raw_transcript"}
