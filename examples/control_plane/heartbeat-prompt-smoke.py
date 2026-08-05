@@ -29,33 +29,69 @@ from heartbeat_prompt_fixtures import (  # noqa: E402
 from loopx.heartbeat_prompt import build_heartbeat_prompt  # noqa: E402
 
 
-def compact_user_output_outcome(task_body: str, decision: dict[str, object]) -> dict[str, bool]:
-    compact_task = normalized(task_body)
-    policy_start = compact_task.index("Output policy:") + len("Output policy:")
-    policy_end = compact_task.index("If `should_run=false`:", policy_start)
-    policy = {}
-    for item in compact_task[policy_start:policy_end].strip(" .").split(";"):
-        key, value = item.strip().split("=", maxsplit=1)
-        policy[key] = value.strip("`")
+def user_output_policy(task_body: str, *, mode: str) -> dict[str, str]:
+    body = normalized(task_body)
+    assert "sync state if needed, and `NOTIFY`." not in body, (
+        f"{mode}: bare unconditional NOTIFY after read-only map"
+    )
+    assert "`NOTIFY` only for an artifact, gate, blocker, or self-stop;" not in body, (
+        f"{mode}: artifact-gated return overrides user_channel.notify authority"
+    )
+    assert "`NOTIFY` only for artifact/gate/blocker/self-stop." not in body, (
+        f"{mode}: brief artifact-gated return overrides user_channel.notify authority"
+    )
+    if mode == "compact":
+        policy_start = body.index("Output policy:") + len("Output policy:")
+        policy_end = body.index("If `should_run=false`:", policy_start)
+        policy = {}
+        for item in body[policy_start:policy_end].strip(" .").split(";"):
+            key, value = item.strip().split("=", maxsplit=1)
+            policy[key] = value.strip("`")
+        return policy
+    if mode == "full":
+        assert "`interaction_contract.user_channel.notify` controls output" in body
+        assert "Only if `user_channel.notify=NOTIFY`" in body
+        assert "repair the projection internally and stay quiet" in body
+        assert "notify only under `NOTIFY`" in body
+        assert "Return compactly under `interaction_contract.user_channel.notify`" in body
+    else:
+        assert "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet" in body
+        assert "Due/peer gate != prompt" in body
+        assert "missing NOTIFY action -> projection repair" in body
+        if mode == "brief":
+            assert "Return only under `user_channel.notify=NOTIFY`; else quiet." in body
+    return {
+        "authority": "interaction_contract.user_channel.notify",
+        "external": "NOTIFY",
+        "quiet": "DONT_NOTIFY",
+        "quiet_missing_action": "internal_repair",
+    }
 
+
+def user_output_outcome(
+    task_body: str,
+    decision: dict[str, object],
+    *,
+    mode: str,
+) -> dict[str, bool]:
+    policy = user_output_policy(task_body, mode=mode)
+    assert policy["authority"] == "interaction_contract.user_channel.notify", policy
     interaction_contract = decision["interaction_contract"]
     assert isinstance(interaction_contract, dict), decision
     user_channel = interaction_contract["user_channel"]
     assert isinstance(user_channel, dict), decision
-    assert policy["authority"] == "interaction_contract.user_channel.notify", policy
     notify = user_channel.get(policy["authority"].rsplit(".", maxsplit=1)[-1])
     action_required = user_channel.get("action_required") is True
-    actions = user_channel.get("actions")
-    missing_action = action_required and not isinstance(actions, list)
+    missing_action = action_required and not isinstance(user_channel.get("actions"), list)
     external_output = notify == policy["external"]
-    blocker_push = external_output and bool(
-        decision.get("state") == "operator_gate"
-        or decision.get("notify_user_on_open_todo") is True
-        or action_required
-    )
     return {
         "external_output": external_output,
-        "blocker_push": blocker_push,
+        "blocker_push": external_output
+        and bool(
+            decision.get("state") == "operator_gate"
+            or decision.get("notify_user_on_open_todo") is True
+            or action_required
+        ),
         "internal_projection_repair": bool(
             notify == policy["quiet"]
             and missing_action
@@ -315,11 +351,21 @@ def main() -> int:
             },
         ),
     )
-    for label, decision, expected in notification_cases:
-        assert compact_user_output_outcome(
-            str(compact_payload["task_body"]),
-            decision,
-        ) == expected, label
+    mode_payloads = (
+        ("full", payload),
+        ("compact", compact_payload),
+        ("brief", brief_payload),
+        ("thin", thin_payload),
+    )
+    for mode_label, mode_payload in mode_payloads:
+        mode_body = str(mode_payload["task_body"])
+        for label, decision, expected in notification_cases:
+            assert user_output_outcome(
+                mode_body,
+                decision,
+                mode=mode_label,
+            ) == expected, f"{mode_label}: {label}"
+
     assert "`state=operator_gate` / `notify_user_on_open_todo=true` /" not in compact_task
     assert (
         "Only under `NOTIFY`, `state=operator_gate`/"
