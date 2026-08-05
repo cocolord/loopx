@@ -16,6 +16,7 @@ TASK_GRAPH_SOURCE_OF_TRUTH = [
     "run_history",
 ]
 TASK_GRAPH_MAX_USER_GATE_NODES = 2
+TASK_GRAPH_MAX_PREDECESSOR_NODES = 4
 TASK_GRAPH_AUDIT_MARKERS = ("audit", "audited")
 TASK_GRAPH_CONTINUATION_MARKERS = ("continuation", "continue", "continuing", "continued")
 
@@ -249,6 +250,67 @@ def _task_graph_visible_user_gate_items(
     return visible_gate_items[:limit], gate_open_count
 
 
+def _task_graph_collect_todo_items(
+    todos_summary: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    if not isinstance(todos_summary, dict):
+        return {}
+    items = todos_summary.get("items")
+    if not isinstance(items, list):
+        return {}
+    by_id: dict[str, dict[str, Any]] = {}
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        tid = raw.get("todo_id")
+        if isinstance(tid, str) and tid:
+            by_id[tid] = raw
+    return by_id
+
+
+def _task_graph_deliverable_node(
+    *,
+    todo: dict[str, Any],
+    public_safe_compact_text: Callable[..., str | None],
+    normalize_todo_status: Callable[[Any], str | None],
+    todo_done_for_status: Callable[[str], bool],
+    todo_status_open: str,
+    waiting_default: bool = False,
+) -> dict[str, Any] | None:
+    todo_id = public_safe_compact_text(todo.get("todo_id"), limit=120)
+    title = public_safe_compact_text(todo.get("title") or todo.get("text"), limit=160)
+    if not todo_id or not title:
+        return None
+    node: dict[str, Any] = {
+        "node_id": _task_graph_safe_id(
+            "node_todo",
+            todo_id,
+            public_safe_compact_text=public_safe_compact_text,
+        ),
+        "kind": "deliverable",
+        "title": title,
+        "state": _task_graph_todo_state(
+            todo,
+            normalize_todo_status=normalize_todo_status,
+            todo_done_for_status=todo_done_for_status,
+            todo_status_open=todo_status_open,
+            waiting_default=waiting_default,
+        ),
+        "refs": _task_graph_refs(
+            "todo_ids",
+            todo_id,
+            public_safe_compact_text=public_safe_compact_text,
+        ),
+    }
+    owner = public_safe_compact_text(todo.get("claimed_by"), limit=80)
+    if owner:
+        node["owner_agent"] = owner
+    actor = public_safe_compact_text(todo.get("last_actor_agent_id") or todo.get("created_by"), limit=80)
+    if actor:
+        node["actor_agent"] = actor
+    return node
+
+
 class _TaskGraphProjectionBuilder:
     def __init__(
         self,
@@ -340,6 +402,13 @@ def build_task_graph_projection(
     latest_runs = [run for run in goal_latest_runs or [] if isinstance(run, dict)]
     builder = _TaskGraphProjectionBuilder(public_safe_compact_text=public_safe_compact_text)
 
+    agent_todos_by_id = _task_graph_collect_todo_items(
+        item.get("agent_todos") if isinstance(item.get("agent_todos"), dict) else None
+    )
+    user_todos_by_id = _task_graph_collect_todo_items(
+        item.get("user_todos") if isinstance(item.get("user_todos"), dict) else None
+    )
+
     agent_items = open_todo_items(
         item.get("agent_todos") if isinstance(item.get("agent_todos"), dict) else None,
         limit=1,
@@ -353,31 +422,13 @@ def build_task_graph_projection(
     selected_node_id: str | None = None
     if isinstance(selected_todo, dict):
         selected_node_id = builder.add_node(
-            {
-                "node_id": _task_graph_safe_id(
-                    "node_todo",
-                    selected_todo_id or selected_todo.get("text"),
-                    public_safe_compact_text=public_safe_compact_text,
-                ),
-                "kind": "deliverable",
-                "title": selected_todo.get("title") or selected_todo.get("text"),
-                "state": _task_graph_todo_state(
-                    selected_todo,
-                    normalize_todo_status=normalize_todo_status,
-                    todo_done_for_status=todo_done_for_status,
-                    todo_status_open=todo_status_open,
-                ),
-                "refs": _task_graph_refs(
-                    "todo_ids",
-                    selected_todo_id,
-                    public_safe_compact_text=public_safe_compact_text,
-                ),
-                **(
-                    {"owner_agent": selected_todo.get("claimed_by")}
-                    if public_safe_compact_text(selected_todo.get("claimed_by"), limit=80)
-                    else {}
-                ),
-            }
+            _task_graph_deliverable_node(
+                todo=selected_todo,
+                public_safe_compact_text=public_safe_compact_text,
+                normalize_todo_status=normalize_todo_status,
+                todo_done_for_status=todo_done_for_status,
+                todo_status_open=todo_status_open,
+            )
         )
         claimed_by = public_safe_compact_text(selected_todo.get("claimed_by"), limit=80)
         if claimed_by and selected_node_id:
@@ -416,6 +467,187 @@ def build_task_graph_projection(
                     public_safe_compact_text=public_safe_compact_text,
                 ),
             )
+
+    all_todos_by_id = {**agent_todos_by_id, **user_todos_by_id}
+    predecessors_by_unblocks: dict[str, list[str]] = {}
+    predecessors_by_supersedes: dict[str, list[str]] = {}
+    for tid, todo_item in all_todos_by_id.items():
+        if not isinstance(todo_item, dict):
+            continue
+        unblocks_target = public_safe_compact_text(todo_item.get("unblocks_todo_id"), limit=120)
+        if unblocks_target:
+            predecessors_by_unblocks.setdefault(unblocks_target, []).append(tid)
+        superseded_by_target = public_safe_compact_text(todo_item.get("superseded_by"), limit=120)
+        if superseded_by_target:
+            predecessors_by_supersedes.setdefault(superseded_by_target, []).append(tid)
+
+    if selected_todo_id and selected_node_id:
+        visited: set[str] = set()
+        queue: list[tuple[str, str | None, int, str | None]] = [(selected_todo_id, None, 0, None)]
+        first_iter = True
+        while queue:
+            current_tid, successor_nid, depth, edge_rel_hint = queue.pop(0)
+            if current_tid in visited:
+                continue
+            visited.add(current_tid)
+            current_todo = all_todos_by_id.get(current_tid)
+            if not isinstance(current_todo, dict):
+                continue
+            is_done = bool(current_todo.get("done")) or todo_done_for_status(
+                str(normalize_todo_status(current_todo.get("status")) or todo_status_open)
+            )
+            current_nid: str | None
+            if first_iter:
+                current_nid = selected_node_id
+                first_iter = False
+            else:
+                current_nid = builder.add_node(
+                    _task_graph_deliverable_node(
+                        todo=current_todo,
+                        public_safe_compact_text=public_safe_compact_text,
+                        normalize_todo_status=normalize_todo_status,
+                        todo_done_for_status=todo_done_for_status,
+                        todo_status_open=todo_status_open,
+                        waiting_default=True,
+                    )
+                )
+                if current_nid and successor_nid:
+                    if edge_rel_hint == "supersedes":
+                        edge_rel = "supersedes"
+                        edge_reason = f"Successor supersedes completed todo {current_tid}."
+                    else:
+                        edge_rel = "depends_on"
+                        edge_reason = f"Work depends on predecessor todo {current_tid}."
+                    builder.add_edge(
+                        edge_id=_task_graph_safe_id(
+                            f"edge_{edge_rel}",
+                            f"{successor_nid}:{current_nid}:{depth}",
+                            public_safe_compact_text=public_safe_compact_text,
+                        ),
+                        from_node_id=successor_nid,
+                        to_node_id=current_nid,
+                        relation=edge_rel,
+                        reason=edge_reason,
+                        refs=_task_graph_refs(
+                            "todo_ids",
+                            current_tid,
+                            public_safe_compact_text=public_safe_compact_text,
+                        ),
+                    )
+            if not is_done or not current_nid or depth >= TASK_GRAPH_MAX_PREDECESSOR_NODES:
+                if not is_done and current_nid and successor_nid and not first_iter:
+                    handoff_note = current_todo.get("handoff_note") if isinstance(current_todo.get("handoff_note"), dict) else None
+                    if handoff_note:
+                        handoff_from = public_safe_compact_text(handoff_note.get("from_agent"), limit=80)
+                        handoff_to = public_safe_compact_text(handoff_note.get("to_agent"), limit=80)
+                        if handoff_from and handoff_to and handoff_from != handoff_to:
+                            handoff_id = f"handoff:{current_tid}:{handoff_from}:{handoff_to}"
+                            handoff_node_id = builder.add_node(
+                                {
+                                    "node_id": _task_graph_safe_id(
+                                        "node_handoff",
+                                        handoff_id,
+                                        public_safe_compact_text=public_safe_compact_text,
+                                    ),
+                                    "kind": "handoff",
+                                    "title": f"Handoff from {handoff_from} to {handoff_to}",
+                                    "state": "done",
+                                    "refs": _task_graph_refs(
+                                        "todo_ids",
+                                        current_tid,
+                                        public_safe_compact_text=public_safe_compact_text,
+                                    ),
+                                    "from_agent": handoff_from,
+                                    "to_agent": handoff_to,
+                                }
+                            )
+                            if handoff_node_id:
+                                builder.add_edge(
+                                    edge_id=_task_graph_safe_id(
+                                        "edge_hands_off_to",
+                                        f"{current_nid}:{handoff_node_id}",
+                                        public_safe_compact_text=public_safe_compact_text,
+                                    ),
+                                    from_node_id=current_nid,
+                                    to_node_id=handoff_node_id,
+                                    relation="hands_off_to",
+                                    reason=f"Agent {handoff_from} handed off to {handoff_to}.",
+                                    refs=_task_graph_refs(
+                                        "todo_ids",
+                                        current_tid,
+                                        public_safe_compact_text=public_safe_compact_text,
+                                    ),
+                                )
+                                builder.add_edge(
+                                    edge_id=_task_graph_safe_id(
+                                        "edge_continues_handoff",
+                                        f"{handoff_node_id}:{successor_nid}",
+                                        public_safe_compact_text=public_safe_compact_text,
+                                    ),
+                                    from_node_id=handoff_node_id,
+                                    to_node_id=successor_nid,
+                                    relation="continues",
+                                    reason=f"Successor continues after handoff from {handoff_from} to {handoff_to}.",
+                                    refs=_task_graph_refs(
+                                        "todo_ids",
+                                        current_tid,
+                                        public_safe_compact_text=public_safe_compact_text,
+                                    ),
+                                )
+                continue
+            pred_ids: list[tuple[str, str | None]] = []
+            for pred_tid in predecessors_by_unblocks.get(current_tid, []):
+                pred_ids.append((pred_tid, None))
+            for pred_tid in predecessors_by_supersedes.get(current_tid, []):
+                pred_ids.append((pred_tid, "supersedes"))
+            resume_when = str(current_todo.get("resume_when") or "")
+            if resume_when.startswith("todo_done:"):
+                resume_tid = public_safe_compact_text(resume_when.split(":", 1)[1], limit=120)
+                if resume_tid and not any(p[0] == resume_tid for p in pred_ids):
+                    pred_ids.append((resume_tid, None))
+            for pred_id, rel_hint in pred_ids:
+                if pred_id not in visited:
+                    queue.append((pred_id, current_nid, depth + 1, rel_hint))
+
+            evidence_text = public_safe_compact_text(current_todo.get("evidence"), limit=180)
+            note_text = public_safe_compact_text(current_todo.get("note"), limit=180)
+            if (evidence_text or note_text) and current_nid:
+                ev_id = f"evidence:{current_tid}"
+                ev_title = evidence_text or note_text or f"Evidence for {current_tid}"
+                ev_node_id = builder.add_node(
+                    {
+                        "node_id": _task_graph_safe_id(
+                            "node_evidence",
+                            ev_id,
+                            public_safe_compact_text=public_safe_compact_text,
+                        ),
+                        "kind": "evidence",
+                        "title": ev_title[:120],
+                        "state": "done",
+                        "refs": _task_graph_refs(
+                            "todo_ids",
+                            current_tid,
+                            public_safe_compact_text=public_safe_compact_text,
+                        ),
+                    }
+                )
+                if ev_node_id:
+                    builder.add_edge(
+                        edge_id=_task_graph_safe_id(
+                            "edge_evidences",
+                            f"{ev_node_id}:{current_nid}",
+                            public_safe_compact_text=public_safe_compact_text,
+                        ),
+                        from_node_id=ev_node_id,
+                        to_node_id=current_nid,
+                        relation="validates",
+                        reason="Completion evidence supports the delivered predecessor.",
+                        refs=_task_graph_refs(
+                            "todo_ids",
+                            current_tid,
+                            public_safe_compact_text=public_safe_compact_text,
+                        ),
+                    )
 
     user_todo_summary = item.get("user_todos") if isinstance(item.get("user_todos"), dict) else None
     user_items, user_gate_open_count = _task_graph_visible_user_gate_items(
