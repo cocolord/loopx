@@ -1,6 +1,7 @@
 import {
   exampleStatusPayload,
   parseStatusPayload,
+  parsePresentationSurfaceCollectionResponse,
   presentationSurfaceCollectionSchema,
   presentationSurfaceSchema,
 } from "../src/data/status.js";
@@ -102,6 +103,13 @@ const collection = presentationSurfaceCollectionSchema.parse({
   ],
 });
 assert(collection.items.length === 2, "ready and review-due surfaces must parse");
+assert(
+  parsePresentationSurfaceCollectionResponse({
+    ok: true,
+    presentation_surfaces: collection,
+  }).ready_count === 1,
+  "cold-path presentation surface response must parse",
+);
 
 const legacyPayload = structuredClone(exampleStatusPayload) as Record<string, unknown>;
 delete legacyPayload.presentation_surfaces;

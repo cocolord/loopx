@@ -56,6 +56,7 @@ import {
   ProjectAssetLatestValidation,
   ProjectAssetHandoffReadiness,
   ProjectAssetTodoSummary,
+  PresentationSurfaceCollection,
   TodoItem,
   TodoGroup,
   TodoIndexSummary,
@@ -69,6 +70,7 @@ import {
   AgentManagementStaleClaimHint,
   AgentManagementWorkspaceRef,
   formatStatusError,
+  parsePresentationSurfaceCollectionResponse,
   parseRewardDryRunResponse,
   parseStatusPayload,
 } from "../data/status";
@@ -6626,6 +6628,8 @@ export function DashboardPage() {
   const [statusUrl, setStatusUrl] = useState(search.statusUrl);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [presentationSurfaceCollection, setPresentationSurfaceCollection] =
+    useState<PresentationSurfaceCollection>(exampleStatusPayload.presentation_surfaces);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const queue = payload.attention_queue;
   const runHistory = payload.run_history;
@@ -6635,7 +6639,7 @@ export function DashboardPage() {
   );
   const rewardApiUrls = useMemo(() => buildRewardApiUrls(source), [source]);
   const controlPlaneApiUrls = useMemo(() => buildControlPlaneApiUrls(source, payload), [payload, source]);
-  const presentationSurfaces = payload.presentation_surfaces.items;
+  const presentationSurfaces = presentationSurfaceCollection.items;
   const selectedPresentationSurface = presentationSurfaces.find(
     (surface) =>
       surface.extension_id === search.extensionId
@@ -6704,8 +6708,34 @@ export function DashboardPage() {
         throw new Error(`HTTP ${response.status} while loading ${trimmed}`);
       }
       const nextPayload = parseStatusPayload(await response.json());
+      const nextSource: DataSource = { kind: "url", label: trimmed };
+      const presentationSurfacesUrl = localApiUrl(
+        nextSource,
+        nextPayload.local_dashboard_api?.presentation_surfaces_url,
+      );
+      let nextPresentationSurfaces = nextPayload.presentation_surfaces;
+      if (presentationSurfacesUrl) {
+        try {
+          const surfaceResponse = await fetch(presentationSurfacesUrl, {
+            cache: "no-store",
+          });
+          if (!surfaceResponse.ok) {
+            throw new Error(
+              `HTTP ${surfaceResponse.status} while loading ${presentationSurfacesUrl}`,
+            );
+          }
+          nextPresentationSurfaces = parsePresentationSurfaceCollectionResponse(
+            await surfaceResponse.json(),
+          );
+        } catch (error) {
+          setLoadError(
+            `Presentation surfaces unavailable: ${formatStatusError(error)}`,
+          );
+        }
+      }
       setPayload(nextPayload);
-      setSource({ kind: "url", label: trimmed });
+      setPresentationSurfaceCollection(nextPresentationSurfaces);
+      setSource(nextSource);
       setStatusUrl(trimmed);
       await navigate({
         search: (current) => ({
@@ -6727,6 +6757,7 @@ export function DashboardPage() {
     try {
       const nextPayload = parseStatusPayload(JSON.parse(await file.text()));
       setPayload(nextPayload);
+      setPresentationSurfaceCollection(nextPayload.presentation_surfaces);
       setSource({ kind: "file", label: file.name });
     } catch (error) {
       setLoadError(formatStatusError(error));
@@ -6740,6 +6771,7 @@ export function DashboardPage() {
 
   function resetToExample() {
     setPayload(exampleStatusPayload);
+    setPresentationSurfaceCollection(exampleStatusPayload.presentation_surfaces);
     setSource({ kind: "example", label: "bundled example" });
     setStatusUrl("");
     setLoadError(null);

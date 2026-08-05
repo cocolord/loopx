@@ -137,13 +137,12 @@ def _presentation_surface_manifest(
     *,
     entrypoint: Path,
     declaration: str = "",
+    include_view_validator: bool = True,
 ) -> Path:
     manifest = _standalone_manifest(path, entrypoint=entrypoint)
-    manifest.write_text(
-        manifest.read_text(encoding="utf-8")
-        + (
-            declaration
-            or """
+    presentation_declaration = (
+        declaration
+        or """
 [[presentation_surfaces]]
 id = "investment-research"
 kind = "decision_research_dashboard"
@@ -153,7 +152,16 @@ visibility = "owner-only"
 empty_state_title = "No validated research yet"
 empty_state_detail = "Publish a validated projection."
 """
-        ),
+    )
+    if include_view_validator:
+        presentation_declaration = presentation_declaration.replace(
+            '\nvisibility = "',
+            "\nview_validator = "
+            '"loopx.extensions.presentation:validate_opaque_presentation_view"\n'
+            'visibility = "',
+        )
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + presentation_declaration,
         encoding="utf-8",
     )
     return manifest
@@ -174,11 +182,67 @@ def test_presentation_surface_manifest_is_normalized(tmp_path: Path) -> None:
             "kind": "decision_research_dashboard",
             "title": "Investment Research",
             "view_schema": "decision_research_dashboard_v0",
+            "view_validator": (
+                "loopx.extensions.presentation:validate_opaque_presentation_view"
+            ),
             "visibility": "owner-only",
             "empty_state_title": "No validated research yet",
             "empty_state_detail": "Publish a validated projection.",
         }
     ]
+
+
+@pytest.mark.parametrize(
+    "extension_id",
+    [
+        "../escaped",
+        "nested/extension",
+        "Uppercase",
+        "contains_underscore",
+        "trailing-",
+        f"a{'b' * 48}",
+    ],
+)
+def test_manifest_rejects_extension_ids_outside_strict_path_segment_grammar(
+    tmp_path: Path,
+    extension_id: str,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest = _standalone_manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+        extension_id=extension_id,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="extension id must be a lower-kebab path segment up to 48 characters",
+    ):
+        load_extension_manifest(manifest)
+
+
+def test_presentation_surface_manifest_requires_explicit_view_validator(
+    tmp_path: Path,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest = _presentation_surface_manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+        declaration="""
+[[presentation_surfaces]]
+id = "investment-research"
+kind = "decision_research_dashboard"
+title = "Investment Research"
+view_schema = "decision_research_dashboard_v0"
+visibility = "owner-only"
+empty_state_title = "No validated research yet"
+empty_state_detail = "Publish a validated projection."
+""",
+        include_view_validator=False,
+    )
+
+    with pytest.raises(ValueError, match="requires non-empty string `view_validator`"):
+        load_extension_manifest(manifest)
 
 
 def test_manifest_without_presentation_surface_keeps_empty_collection(
@@ -1237,6 +1301,33 @@ def test_semantic_preference_resolves_enabled_extension(tmp_path: Path) -> None:
             },
         }
     ]
+
+
+def test_semantic_preference_config_reuses_strict_extension_id_grammar(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    config = tmp_path / "semantic-preference.json"
+    config.write_text(
+        json.dumps(
+            {
+                "schema_version": "semantic_preference_hook_config_v0",
+                "enabled": True,
+                "provider": {
+                    "id": "configured_provider",
+                    "extension_id": "bad--extension",
+                    "extension_state_file": str(tmp_path / "extensions.json"),
+                    "args": [],
+                },
+                "surfaces": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="lower-kebab path segment"):
+        provider_doctor(config, project=project)
 
 
 def test_capability_resolution_ignores_disabled_implementations(

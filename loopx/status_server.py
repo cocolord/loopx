@@ -10,7 +10,10 @@ from urllib.parse import parse_qs, urlparse
 from .control_plane.goals.configure_goal_service import (
     configure_goal_with_global_sync,
 )
-from .extensions.presentation import read_extension_projection
+from .extensions.presentation import (
+    collect_active_extension_presentation_surfaces,
+    read_extension_projection,
+)
 from .extensions.runtime import default_extension_state_file
 from .feedback import append_human_reward, compact_reward
 from .history import load_registry
@@ -27,6 +30,7 @@ DEFAULT_REWARD_APPEND_PATH = "/reward/append"
 DEFAULT_CONFIGURE_GOAL_DRY_RUN_PATH = "/control-plane/configure-goal/dry-run"
 DEFAULT_CONFIGURE_GOAL_APPLY_PATH = "/control-plane/configure-goal/apply"
 DEFAULT_REVIEW_MATERIAL_PATH = "/review-material"
+DEFAULT_EXTENSION_PRESENTATION_SURFACES_PATH = "/extension-presentation-surfaces"
 DEFAULT_EXTENSION_PROJECTION_PATH = "/extension-projection"
 
 REWARD_REQUEST_FIELDS = {
@@ -693,12 +697,61 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_json({"ok": True, "projection": envelope})
 
+    def _handle_extension_presentation_surfaces(self) -> None:
+        if not is_loopback_host(str(self.server.server_address[0])):
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": (
+                        "extension presentation surfaces require a loopback "
+                        "status server"
+                    ),
+                },
+                status=403,
+            )
+            return
+        if not is_loopback_origin(self.headers.get("Origin")):
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": (
+                        "extension presentation surfaces only accept loopback "
+                        "browser origins"
+                    ),
+                },
+                status=403,
+            )
+            return
+        try:
+            registry = load_registry(self.server.registry_path)
+            runtime_root = resolve_runtime_root(
+                registry,
+                self.server.runtime_root_override,
+                registry_path=self.server.registry_path,
+            )
+            surfaces = collect_active_extension_presentation_surfaces(
+                state_file=default_extension_state_file(runtime_root),
+            )
+        except Exception as exc:  # noqa: BLE001 - local UI needs the read failure.
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                },
+                status=400,
+            )
+            return
+        self._send_json({"ok": True, "presentation_surfaces": surfaces})
+
     def _local_dashboard_api_payload(self) -> dict[str, Any]:
         return {
             "source": "serve-status",
             "status_url": self.server.status_path,
             "health_url": "/healthz",
             "review_material_url": DEFAULT_REVIEW_MATERIAL_PATH,
+            "presentation_surfaces_url": (
+                DEFAULT_EXTENSION_PRESENTATION_SURFACES_PATH
+            ),
             "presentation_detail_url": DEFAULT_EXTENSION_PROJECTION_PATH,
             "reward_dry_run_url": self.server.reward_dry_run_path,
             "reward_append_url": self.server.reward_append_path if self.server.reward_write_enabled else None,
@@ -718,6 +771,9 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             return
         if path == DEFAULT_REVIEW_MATERIAL_PATH:
             self._handle_review_material(parse_qs(parsed_url.query))
+            return
+        if path == DEFAULT_EXTENSION_PRESENTATION_SURFACES_PATH:
+            self._handle_extension_presentation_surfaces()
             return
         if path == DEFAULT_EXTENSION_PROJECTION_PATH:
             self._handle_extension_projection(parse_qs(parsed_url.query))

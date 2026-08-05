@@ -120,6 +120,7 @@ id = "investment-research"
 kind = "synthetic_dashboard"
 title = "Investment Research"
 view_schema = "synthetic_dashboard_v0"
+view_validator = "loopx.extensions.presentation:validate_opaque_presentation_view"
 visibility = "{visibility}"
 empty_state_title = "No validated research yet"
 empty_state_detail = "Publish a validated projection."
@@ -258,6 +259,31 @@ def test_failed_projection_publication_preserves_previous_file(
     assert json.loads(previous_bytes)["payload_sha256"] == first["payload_sha256"]
 
 
+def test_projection_publication_rejects_canonical_root_escape(
+    tmp_path: Path,
+) -> None:
+    state_file, _ = _installed_projection_extension(tmp_path)
+    projection_root = default_extension_projection_root(state_file)
+    projection_root.mkdir(parents=True)
+    escaped_root = tmp_path / "escaped-projections"
+    escaped_root.mkdir()
+    (projection_root / "test-research-extension").symlink_to(
+        escaped_root,
+        target_is_directory=True,
+    )
+
+    with pytest.raises(ValueError, match="canonical projection root"):
+        publish_extension_projection(
+            "test-research-extension",
+            "investment-research",
+            state_file=state_file,
+            request={"schema_version": "synthetic_request_v0"},
+            execute=True,
+        )
+
+    assert not (escaped_root / "investment-research.json").exists()
+
+
 def test_projection_publication_rejects_undeclared_surface(
     tmp_path: Path,
 ) -> None:
@@ -271,6 +297,35 @@ def test_projection_publication_rejects_undeclared_surface(
             request={"schema_version": "synthetic_request_v0"},
             execute=True,
         )
+
+
+@pytest.mark.parametrize("execute", [False, True])
+def test_projection_publication_fails_before_provider_when_validator_unavailable(
+    tmp_path: Path,
+    execute: bool,
+) -> None:
+    marker = tmp_path / "provider-called"
+    state_file, _ = _installed_projection_extension(
+        tmp_path,
+        invocation_marker=marker,
+    )
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    surface = state["extensions"]["test-research-extension"]["revisions"][0][
+        "manifest"
+    ]["presentation_surfaces"][0]
+    surface["view_validator"] = "missing_validator_module:validate_view"
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="view_validator .* is unavailable"):
+        publish_extension_projection(
+            "test-research-extension",
+            "investment-research",
+            state_file=state_file,
+            request={"schema_version": "synthetic_request_v0"},
+            execute=execute,
+        )
+
+    assert not marker.exists()
 
 
 def test_active_presentation_surfaces_project_empty_ready_and_review_due(
@@ -586,7 +641,7 @@ def test_read_extension_projection_rejects_missing_projection(
 def test_read_extension_projection_rejects_path_escaping_ids(tmp_path: Path) -> None:
     state_file, installed, receipt = _publish_for_read(tmp_path)
 
-    with pytest.raises(ValueError, match="stable identifier"):
+    with pytest.raises(ValueError, match="lower-kebab path segment"):
         read_extension_projection(
             state_file=state_file,
             extension_id="../../etc",

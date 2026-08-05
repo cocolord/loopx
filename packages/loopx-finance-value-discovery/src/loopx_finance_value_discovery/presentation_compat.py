@@ -7,7 +7,7 @@ from types import ModuleType
 
 _PRESENTATION_MODULE = "loopx.extensions.presentation"
 _PRESENTATION_ATTRIBUTES = (
-    "register_presentation_view_validator",
+    "load_presentation_view_validator",
 )
 
 

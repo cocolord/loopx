@@ -15,6 +15,7 @@ from loopx.extensions.runtime import default_extension_state_file, install_exten
 from loopx.status_server import (
     DEFAULT_CONFIGURE_GOAL_APPLY_PATH,
     DEFAULT_CONFIGURE_GOAL_DRY_RUN_PATH,
+    DEFAULT_EXTENSION_PRESENTATION_SURFACES_PATH,
     DEFAULT_EXTENSION_PROJECTION_PATH,
     DEFAULT_REWARD_APPEND_PATH,
     DEFAULT_REWARD_DRY_RUN_PATH,
@@ -32,7 +33,7 @@ def _provider(path: Path) -> Path:
             "surface_id": "investment-research",
             "goal_id": "synthetic-research-goal",
             "generated_at": "2026-01-15T12:00:00+00:00",
-            "review_due_at": "2026-02-15T12:00:00+00:00",
+            "review_due_at": "2099-02-15T12:00:00+00:00",
             "lineage": {
                 "source_id": "synthetic-research-2026-01-15",
                 "version": 1,
@@ -89,6 +90,7 @@ id = "investment-research"
 kind = "synthetic_dashboard"
 title = "Investment Research"
 view_schema = "synthetic_dashboard_v0"
+view_validator = "loopx.extensions.presentation:validate_opaque_presentation_view"
 visibility = "{visibility}"
 empty_state_title = "No validated research yet"
 empty_state_detail = "Publish a validated projection."
@@ -173,7 +175,25 @@ def test_status_server_advertises_and_serves_projection_by_exact_ref(
         status, capabilities = _request_json(f"{base_url}/")
 
         assert status == 200
+        assert capabilities["presentation_surfaces_url"] == (
+            DEFAULT_EXTENSION_PRESENTATION_SURFACES_PATH
+        )
         assert capabilities["presentation_detail_url"] == DEFAULT_EXTENSION_PROJECTION_PATH
+        status, surfaces_payload = _request_json(
+            f"{base_url}{DEFAULT_EXTENSION_PRESENTATION_SURFACES_PATH}",
+            origin="http://127.0.0.1:5173",
+        )
+        assert status == 200
+        surfaces = surfaces_payload["presentation_surfaces"]
+        assert isinstance(surfaces, dict)
+        assert surfaces["ready_count"] == 1
+        assert surfaces["items"][0]["state"] == "ready"
+        status, status_payload = _request_json(
+            f"{base_url}{DEFAULT_STATUS_PATH}",
+            origin="http://127.0.0.1:5173",
+        )
+        assert status == 200
+        assert "presentation_surfaces" not in status_payload
         query = urllib.parse.urlencode(
             {
                 "extension_id": "test-research-extension",

@@ -14,6 +14,7 @@ import pytest
 from loopx.capabilities.catalog import build_capability_catalog_packet
 from loopx.cli import main
 from loopx.extensions.manifest import load_extension_manifest
+from loopx.extensions.presentation import publish_extension_projection
 from loopx.extensions.runtime import (
     default_extension_state_file,
     install_extension,
@@ -614,6 +615,10 @@ def test_finance_presentation_surface_and_example_are_public_safe() -> None:
             "kind": "decision_research_dashboard",
             "title": "Investment Research",
             "view_schema": "decision_research_dashboard_v0",
+            "view_validator": (
+                "loopx_finance_value_discovery.presentation_view:"
+                "validate_decision_research_view"
+            ),
             "visibility": "public-safe",
             "empty_state_title": "No validated research yet",
             "empty_state_detail": "Publish a validated projection.",
@@ -636,6 +641,61 @@ def test_finance_presentation_surface_and_example_are_public_safe() -> None:
         "position_size",
     ):
         assert forbidden not in serialized
+
+
+def test_projection_publisher_loads_finance_validator_from_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid_packet = build_finance_research_dashboard_packet(
+        _research_dashboard_input()
+    )
+    invalid_packet["presentation_projection"]["view"]["unsupported"] = (
+        "must fail in the publisher process"
+    )
+    provider = tmp_path / "finance-provider"
+    provider.write_text(
+        f"""#!{sys.executable}
+import json
+import sys
+
+if "--doctor" in sys.argv:
+    raise SystemExit(0)
+
+json.load(sys.stdin)
+json.dump({invalid_packet!r}, sys.stdout)
+""",
+        encoding="utf-8",
+    )
+    provider.chmod(0o755)
+    manifest = tmp_path / "extension.toml"
+    manifest.write_text(
+        MANIFEST.read_text(encoding="utf-8").replace(
+            'entrypoint = "loopx-finance-value-discovery"',
+            f"entrypoint = {json.dumps(str(provider))}",
+        ),
+        encoding="utf-8",
+    )
+    existing = os.environ.get("PYTHONPATH")
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        os.pathsep.join(
+            part for part in [str(EXTENSION_SRC), str(ROOT), existing] if part
+        ),
+    )
+    monkeypatch.syspath_prepend(str(EXTENSION_SRC))
+    sys.modules.pop("loopx_finance_value_discovery.presentation_view", None)
+    state_file = default_extension_state_file(tmp_path / "runtime")
+    install_extension(manifest, state_file=state_file, execute=True)
+
+    with pytest.raises(ValueError, match="unsupported keys"):
+        publish_extension_projection(
+            "loopx-finance-value-discovery",
+            "investment-research",
+            state_file=state_file,
+            request=_research_dashboard_input(),
+            execute=True,
+        )
 
 
 @pytest.mark.parametrize("legacy_command", ["source-map", "install-check"])
@@ -808,17 +868,17 @@ def test_declared_minimum_core_without_presentation_api_can_import_and_doctor(
     )["error"]
 
 
-def test_dashboard_requires_only_public_presentation_registration_api(
+def test_dashboard_requires_only_public_presentation_validator_api(
     tmp_path: Path,
 ) -> None:
-    """A Core with the public hook need not preserve Core-private helpers."""
+    """A Core with the public resolver need not preserve Core-private helpers."""
 
     core_package = tmp_path / "minimal-core" / "loopx" / "extensions"
     core_package.mkdir(parents=True)
     (core_package.parent / "__init__.py").write_text('__version__ = "0.4.0"\n')
     (core_package / "__init__.py").write_text("")
     (core_package / "presentation.py").write_text(
-        "def register_presentation_view_validator(_schema, _validator):\n    return None\n"
+        "def load_presentation_view_validator(_surface):\n    return lambda value: value\n"
     )
     environment = dict(os.environ)
     environment["PYTHONPATH"] = os.pathsep.join(

@@ -2,17 +2,14 @@
 
 This is the finance extension's OWN view contract. It is not a generic LoopX
 Core presentation schema: Core keeps only the provider-neutral presentation
-lifecycle envelope and looks up a view validator by ``view_schema``. On import
-this module registers its validator for ``decision_research_dashboard_v0`` so
-publishing a finance surface validates the finance view here, in the extension,
-rather than in Core.
+lifecycle envelope and explicitly loads the manifest-declared validator for
+``decision_research_dashboard_v0``. Publishing a finance surface therefore
+validates the finance view here, in the extension, rather than in Core.
 """
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
-
-from loopx.extensions.presentation import register_presentation_view_validator
 
 from .presentation_validation import (
     ANCHOR_RE,
@@ -848,9 +845,3 @@ def validate_decision_research_view(
         "method_state": _method_state(record.get("method_state")),
         "boundary": _boundary(record.get("boundary")),
     }
-
-
-register_presentation_view_validator(
-    DECISION_RESEARCH_VIEW_SCHEMA_VERSION,
-    validate_decision_research_view,
-)

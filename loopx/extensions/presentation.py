@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timezone
 import hashlib
+from importlib import import_module
 import json
 import math
 import os
@@ -18,6 +19,7 @@ from .runtime import (
     extension_catalog_entries,
     run_standalone_extension,
 )
+from .manifest import validate_extension_id
 
 
 EXTENSION_PRESENTATION_PROJECTION_SCHEMA_VERSION = (
@@ -276,41 +278,42 @@ def _sha256(value: Any, *, context: str) -> str:
     return text
 
 
-# Provider-neutral view-validator registry. Core owns the presentation
-# lifecycle envelope only; the schema of a surface's `view` is owned by the
-# extension that declares it. An extension registers a validator for its
-# `view_schema`; Core looks it up by the declared view_schema at publish time.
-# When no validator is registered, Core keeps the view opaque (structure-only
-# passthrough) rather than freezing any one domain's schema into Core.
-_VIEW_VALIDATORS: dict[str, Callable[[Any], Any]] = {}
-
-
-def register_presentation_view_validator(
-    view_schema: str,
-    validator: Callable[[Any], Any],
-) -> None:
-    """Register an extension-owned validator for a presentation view_schema."""
-    key = _plain_text(view_schema, context="view_schema", max_length=80)
-    _VIEW_VALIDATORS[key] = validator
-
-
-def _opaque_view(value: Any) -> Any:
-    """Structure-only passthrough for a view with no registered validator."""
+def validate_opaque_presentation_view(value: Any) -> Any:
+    """Validate a provider-neutral object view with public-safe structure only."""
     if not isinstance(value, Mapping):
         raise ValueError("presentation_projection.view must be an object")
     _assert_allowed_keys_recursively(value, context="presentation_projection.view")
     return dict(value)
 
 
-def _validate_view(view_schema: str, value: Any) -> Any:
-    validator = _VIEW_VALIDATORS.get(view_schema, _opaque_view)
-    return validator(value)
+def load_presentation_view_validator(
+    declared_surface: Mapping[str, Any],
+) -> Callable[[Any], Any]:
+    """Load the exact validator declared by one active presentation surface."""
+
+    reference = declared_surface.get("view_validator")
+    if not isinstance(reference, str) or ":" not in reference:
+        raise ValueError("presentation surface has no declared view_validator")
+    module_name, attribute_name = reference.split(":", 1)
+    try:
+        module = import_module(module_name)
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise ValueError(
+            f"presentation surface view_validator `{reference}` is unavailable"
+        ) from exc
+    validator = getattr(module, attribute_name, None)
+    if not callable(validator):
+        raise ValueError(
+            f"presentation surface view_validator `{reference}` is not callable"
+        )
+    return validator
 
 
 def validate_provider_presentation_projection(
     value: Mapping[str, Any],
     *,
     declared_surface: Mapping[str, Any],
+    view_validator: Callable[[Any], Any] | None = None,
 ) -> dict[str, Any]:
     """Validate provider-owned fields before Core binds lifecycle identity."""
 
@@ -423,7 +426,9 @@ def validate_provider_presentation_projection(
             "superseded_by": superseded_by,
         },
         "view_schema": view_schema,
-        "view": _validate_view(view_schema, record.get("view")),
+        "view": (view_validator or load_presentation_view_validator(declared_surface))(
+            record.get("view")
+        ),
     }
 
 
@@ -433,6 +438,23 @@ def validate_projection_hash(value: Any, *, context: str) -> str:
 
 def default_extension_projection_root(state_file: str | Path) -> Path:
     return Path(state_file).expanduser().parent / "projections"
+
+
+def _extension_projection_path(
+    state_file: str | Path,
+    *,
+    extension_id: str,
+    surface_id: str,
+) -> Path:
+    root = default_extension_projection_root(state_file).resolve()
+    candidate = (root / extension_id / f"{surface_id}.json").resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(
+            "extension projection path must remain within the canonical projection root"
+        ) from exc
+    return candidate
 
 
 def _declared_surface(
@@ -589,20 +611,22 @@ def publish_extension_projection(
     """Run one ready standalone provider and atomically publish its declared view."""
 
     state_path = Path(state_file).expanduser()
+    safe_extension_id = validate_extension_id(extension_id)
     active_revision, verified_entrypoint, manifest = _resolved_active_extension(
-        extension_id,
+        safe_extension_id,
         state_file=state_path,
     )
     surface = _declared_surface(
         manifest,
-        extension_id=extension_id,
+        extension_id=safe_extension_id,
         surface_id=surface_id,
     )
+    view_validator = load_presentation_view_validator(surface)
     receipt: dict[str, Any] = {
         "ok": True,
         "schema_version": EXTENSION_PROJECTION_PUBLISH_RECEIPT_SCHEMA_VERSION,
         "operation": "publish_projection",
-        "extension_id": extension_id,
+        "extension_id": safe_extension_id,
         "surface_id": surface_id,
         "revision": active_revision,
         "dry_run": not execute,
@@ -613,14 +637,14 @@ def publish_extension_projection(
         return receipt
 
     runtime_receipt = run_standalone_extension(
-        extension_id,
+        safe_extension_id,
         state_file=state_path,
         request=request,
         execute=True,
     )
     if not runtime_receipt.get("ok") or runtime_receipt.get("status") != "succeeded":
         raise ValueError(
-            f"extension `{extension_id}` provider did not produce a successful result"
+            f"extension `{safe_extension_id}` provider did not produce a successful result"
         )
     provider_result = runtime_receipt.get("provider_result")
     if not isinstance(provider_result, Mapping):
@@ -628,31 +652,32 @@ def publish_extension_projection(
     provider_projection = validate_provider_presentation_projection(
         provider_result.get("presentation_projection"),
         declared_surface=surface,
+        view_validator=view_validator,
     )
 
     confirmed_revision, confirmed_entrypoint, confirmed_manifest = (
-        _resolved_active_extension(extension_id, state_file=state_path)
+        _resolved_active_extension(safe_extension_id, state_file=state_path)
     )
     if (
         confirmed_revision != active_revision
         or confirmed_entrypoint.identity != verified_entrypoint.identity
     ):
         raise ValueError(
-            f"extension `{extension_id}` lifecycle changed during projection publication"
+            f"extension `{safe_extension_id}` lifecycle changed during projection publication"
         )
     confirmed_surface = _declared_surface(
         confirmed_manifest,
-        extension_id=extension_id,
+        extension_id=safe_extension_id,
         surface_id=surface_id,
     )
     if dict(confirmed_surface) != dict(surface):
         raise ValueError(
-            f"extension `{extension_id}` surface changed during projection publication"
+            f"extension `{safe_extension_id}` surface changed during projection publication"
         )
 
     envelope: dict[str, Any] = {
         "schema_version": EXTENSION_PROJECTION_SURFACE_SCHEMA_VERSION,
-        "extension_id": extension_id,
+        "extension_id": safe_extension_id,
         "extension_revision": active_revision,
         "surface_id": surface_id,
         "surface_kind": surface["kind"],
@@ -665,14 +690,14 @@ def publish_extension_projection(
         "view": provider_projection["view"],
     }
     envelope["payload_sha256"] = _envelope_hash(envelope)
-    projection_path = (
-        default_extension_projection_root(state_path)
-        / extension_id
-        / f"{surface_id}.json"
+    projection_path = _extension_projection_path(
+        state_path,
+        extension_id=safe_extension_id,
+        surface_id=surface_id,
     )
     with exclusive_file_lock(projection_path):
         final_revision, final_entrypoint, final_manifest = _resolved_active_extension(
-            extension_id,
+            safe_extension_id,
             state_file=state_path,
         )
         if (
@@ -681,14 +706,14 @@ def publish_extension_projection(
             or dict(
                 _declared_surface(
                     final_manifest,
-                    extension_id=extension_id,
+                    extension_id=safe_extension_id,
                     surface_id=surface_id,
                 )
             )
             != dict(surface)
         ):
             raise ValueError(
-                f"extension `{extension_id}` lifecycle changed before projection write"
+                f"extension `{safe_extension_id}` lifecycle changed before projection write"
             )
         _atomic_write_projection(projection_path, envelope)
         try:
@@ -697,7 +722,7 @@ def publish_extension_projection(
             raise ValueError("published projection readback is unreadable") from exc
         readback = _validate_persisted_envelope(
             readback_raw,
-            extension_id=extension_id,
+            extension_id=safe_extension_id,
             revision=active_revision,
             declared_surface=surface,
         )
@@ -803,10 +828,10 @@ def collect_active_extension_presentation_surfaces(
         for surface in surfaces:
             if not isinstance(surface, Mapping):
                 continue
-            projection_path = (
-                default_extension_projection_root(state_path)
-                / extension_id
-                / f"{surface['id']}.json"
+            projection_path = _extension_projection_path(
+                state_path,
+                extension_id=extension_id,
+                surface_id=str(surface["id"]),
             )
             if not projection_path.exists():
                 items.append(
@@ -903,7 +928,7 @@ def read_extension_projection(
     """Resolve one published projection by its compact status detail reference."""
 
     state_path = Path(state_file).expanduser()
-    safe_extension_id = _identifier(extension_id, context="extension_id")
+    safe_extension_id = validate_extension_id(extension_id)
     safe_surface_id = _identifier(surface_id, context="surface_id")
     requested_revision = _identifier(
         extension_revision,
@@ -930,10 +955,10 @@ def read_extension_projection(
         raise ValueError(
             "owner-only projection reads require an authenticated audience"
         )
-    projection_path = (
-        default_extension_projection_root(state_path)
-        / safe_extension_id
-        / f"{safe_surface_id}.json"
+    projection_path = _extension_projection_path(
+        state_path,
+        extension_id=safe_extension_id,
+        surface_id=safe_surface_id,
     )
     if not projection_path.exists():
         raise ValueError("no published projection for the requested surface")

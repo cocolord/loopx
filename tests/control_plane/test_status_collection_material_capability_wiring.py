@@ -18,24 +18,9 @@ GOAL_ID = "material-capability-fixture"
 AGENT_ID = "agent-reviewer"
 
 
-def _context(
-    tmp_path: Path,
-    *,
-    collect_extension_presentation_surfaces=None,
-) -> status_collection.StatusCollectionContext:
+def _context(tmp_path: Path) -> status_collection.StatusCollectionContext:
     runtime_root = tmp_path / "runtime"
     runtime_root.mkdir()
-    presentation_collector = collect_extension_presentation_surfaces or (
-        lambda **_kwargs: {
-            "schema_version": "extension_presentation_surfaces_v0",
-            "count": 0,
-            "ready_count": 0,
-            "review_due_count": 0,
-            "empty_count": 0,
-            "invalid_count": 0,
-            "items": [],
-        }
-    )
     return status_collection.StatusCollectionContext(
         load_registry=lambda _path: {"common_runtime_root": str(runtime_root)},
         resolve_runtime_root=lambda _registry, _override, **_kwargs: runtime_root,
@@ -108,7 +93,6 @@ def _context(
         build_status_contract=lambda: {"schema_version": "fixture"},
         build_contract_health_projection=lambda _contract: {},
         build_agent_management_projection=build_agent_management_projection,
-        collect_extension_presentation_surfaces=presentation_collector,
         status_control_plane_context_limit=5,
         max_todo_index_items=5,
     )
@@ -165,55 +149,6 @@ def test_status_collection_forwards_material_capability_to_projection(
     )
     assert row["handoff_note"]["schema_version"] == "handoff_note_v1"
     assert projection["source_summary"]["material_frontier_count"] == 1
-
-
-def test_status_collection_includes_extension_presentation_surfaces(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    observed: dict[str, object] = {}
-
-    def collect_extension_presentation_surfaces(*, state_file: Path):
-        observed["state_file"] = state_file
-        return {
-            "schema_version": "extension_presentation_surfaces_v0",
-            "count": 1,
-            "ready_count": 0,
-            "review_due_count": 0,
-            "empty_count": 1,
-            "invalid_count": 0,
-            "items": [
-                {
-                    "extension_id": "synthetic-extension",
-                    "extension_revision": "0123456789abcdef",
-                    "surface_id": "research",
-                    "state": "empty",
-                }
-            ],
-        }
-
-    monkeypatch.setattr(
-        status_collection,
-        "collect_runtime_projection_route_diagnostics",
-        lambda **_kwargs: {"available": False},
-    )
-    payload = status_collection.collect_status(
-        registry_path=tmp_path / "registry.json",
-        runtime_root_override=None,
-        scan_roots=[tmp_path],
-        limit=5,
-        context=_context(
-            tmp_path,
-            collect_extension_presentation_surfaces=(
-                collect_extension_presentation_surfaces
-            ),
-        ),
-        goal_id=GOAL_ID,
-    )
-
-    assert observed["state_file"] == tmp_path / "runtime" / "extensions" / "state.json"
-    assert payload["presentation_surfaces"]["count"] == 1
-    assert payload["presentation_surfaces"]["items"][0]["state"] == "empty"
 
 
 def test_status_projection_cache_separates_capability_envelopes(

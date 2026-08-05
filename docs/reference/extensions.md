@@ -274,14 +274,15 @@ An independently delivered extension can declare an operator-facing
 presentation surface without shipping browser code or making Core understand
 the provider's domain. The provider owns source validation, the `view_schema`
 contract, and the mapping into it. Core owns lifecycle resolution, revision
-binding, persistence, and the public-safe status projection. Core keeps the
-`view` opaque unless the owning extension registers a validator for its
-`view_schema`; it does not freeze any one domain's view into core. Dashboard's
-generic status parser consumes only that compact contract. A built-in renderer
-may separately own a provider view schema, as the Finance renderer does for
-`decision_research_dashboard_v0`.
+binding, persistence, and the public-safe surface catalog. Every declared
+surface names its validator with a `module:callable` reference. The publisher
+process loads that exact callable before accepting the provider view; missing or
+unloadable validators fail closed. Core does not freeze any one domain's view
+into core. Dashboard's generic status parser consumes only that compact
+contract. A built-in renderer may separately own a provider view schema, as the
+Finance renderer does for `decision_research_dashboard_v0`.
 
-The finance value-discovery extension registers the first such view,
+The finance value-discovery extension declares the first such view,
 `decision_research_dashboard_v0`, a read-only decision-research view:
 
 ```toml
@@ -290,6 +291,7 @@ id = "investment-research"
 kind = "decision_research_dashboard"
 title = "Investment Research"
 view_schema = "decision_research_dashboard_v0"
+view_validator = "loopx_finance_value_discovery.presentation_view:validate_decision_research_view"
 visibility = "public-safe"
 empty_state_title = "No validated research yet"
 empty_state_detail = "Publish a validated projection."
@@ -327,19 +329,21 @@ writes an `extension_projection_surface_v0` envelope. The receipt includes the
 canonical payload SHA-256 and confirms exact readback. If lifecycle identity or
 the declaration changes while publishing, the write fails closed.
 
-Status collection never executes the provider and never reads its owner input.
-It reads only the active manifest snapshot and the persisted, bounded envelope.
-Status stays a compact index: a `ready` or `review_due` item carries a
-content-addressed `detail_ref` (extension id, surface id, revision, and payload
-SHA-256) rather than inlining the full provider view. Consumers that need the
-view use the loopback status server's advertised cold-path endpoint. That read
-revalidates the active extension revision, declared surface, persisted envelope,
-and payload hash before returning a `public-safe` projection. Because the
-endpoint has no authenticated audience contract, it rejects `owner-only`
-surfaces rather than treating loopback access as owner authentication.
+Status collection never executes the provider, reads its owner input, or grows
+the Dashboard status hot path with extension rows. The loopback status server
+advertises a cold-path surface-catalog endpoint that reads only the active
+manifest snapshot and persisted, bounded envelope. A `ready` or `review_due`
+catalog item carries a content-addressed `detail_ref` (extension id, surface id,
+revision, and payload SHA-256) rather than inlining the full provider view.
+Consumers that need the view use the separately advertised projection endpoint.
+That read revalidates the active extension revision, declared surface, persisted
+envelope, and payload hash before returning a `public-safe` projection. Because
+the endpoints have no authenticated audience contract, projection reads reject
+`owner-only` surfaces rather than treating loopback access as owner
+authentication.
 Visibility follows this matrix:
 
-| Lifecycle or projection state | Status projection | Dashboard |
+| Lifecycle or projection state | Cold-path surface catalog | Dashboard |
 | --- | --- | --- |
 | Not installed, disabled, or doctor-stale | No item | Tab and home summary hidden |
 | Ready declaration, no matching active-revision file | `empty` | Declarative empty state |

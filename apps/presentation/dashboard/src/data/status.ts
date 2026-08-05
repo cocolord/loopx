@@ -689,6 +689,7 @@ export const localDashboardApiSchema = z.object({
   status_url: z.string().optional().nullable(),
   health_url: z.string().optional().nullable(),
   review_material_url: z.string().optional().nullable(),
+  presentation_surfaces_url: z.string().optional().nullable(),
   presentation_detail_url: z.string().optional().nullable(),
   reward_dry_run_url: z.string().optional().nullable(),
   reward_append_url: z.string().optional().nullable(),
@@ -769,6 +770,11 @@ const emptyPresentationSurfaceCollection = {
   invalid_count: 0,
   items: [],
 };
+
+export const presentationSurfaceCollectionResponseSchema = z.object({
+  ok: z.literal(true),
+  presentation_surfaces: presentationSurfaceCollectionSchema,
+}).strict();
 
 export const statusPayloadSchema = z.object({
   ok: z.boolean(),
@@ -896,6 +902,12 @@ export type DecisionFreshnessItem = z.infer<typeof decisionFreshnessItemSchema>;
 export type UsageSummary = NonNullable<z.infer<typeof usageSummarySchema>>;
 export type PresentationSurface = z.infer<typeof presentationSurfaceSchema>;
 export type PresentationSurfaceCollection = z.infer<typeof presentationSurfaceCollectionSchema>;
+
+export function parsePresentationSurfaceCollectionResponse(
+  payload: unknown,
+): PresentationSurfaceCollection {
+  return presentationSurfaceCollectionResponseSchema.parse(payload).presentation_surfaces;
+}
 export type RunGoal = z.infer<typeof runGoalSchema>;
 export type RunRecord = z.infer<typeof runRecordSchema>;
 export type RewardDryRunResponse = z.infer<typeof rewardDryRunResponseSchema>;

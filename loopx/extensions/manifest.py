@@ -9,9 +9,14 @@ from typing import Any
 
 EXTENSION_MANIFEST_SCHEMA_VERSION = "loopx_extension_manifest_v0"
 LOOPX_EXTENSION_API_VERSION = 1
+MAX_EXTENSION_ID_LENGTH = 48
 _API_CLAUSE = re.compile(r"^(>=|<=|==|>|<)?\s*(\d+)$")
+_EXTENSION_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _PROTOCOL_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}_v\d+$")
 _PYTHON_MODULE_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$")
+_PYTHON_CALLABLE_RE = re.compile(
+    r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*$"
+)
 _SURFACE_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _SURFACE_KIND_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 _PRESENTATION_SURFACE_KEYS = {
@@ -19,6 +24,7 @@ _PRESENTATION_SURFACE_KEYS = {
     "kind",
     "title",
     "view_schema",
+    "view_validator",
     "visibility",
     "empty_state_title",
     "empty_state_detail",
@@ -28,6 +34,19 @@ _UNSAFE_PRESENTATION_TEXT_RE = re.compile(
     r"(?:https?://|www\.|<[^>]*>|(?:^|\s)(?:~?/|[A-Za-z]:[\\/]))",
     re.IGNORECASE,
 )
+
+
+def validate_extension_id(value: str) -> str:
+    extension_id = value.strip()
+    if (
+        not extension_id
+        or len(extension_id) > MAX_EXTENSION_ID_LENGTH
+        or _EXTENSION_ID_RE.fullmatch(extension_id) is None
+    ):
+        raise ValueError(
+            "extension id must be a lower-kebab path segment up to 48 characters"
+        )
+    return extension_id
 
 
 def _required_string(record: Mapping[str, Any], key: str, *, context: str) -> str:
@@ -111,6 +130,16 @@ def _presentation_surfaces(
             raise ValueError(
                 f"{item_context} view_schema must be a `<name>_v<n>` token"
             )
+        view_validator = _required_string(
+            item,
+            "view_validator",
+            context=item_context,
+        )
+        if not _PYTHON_CALLABLE_RE.fullmatch(view_validator):
+            raise ValueError(
+                f"{item_context} view_validator must be a "
+                "`<python.module>:<callable>` reference"
+            )
         visibility = _required_string(item, "visibility", context=item_context)
         if visibility not in _PRESENTATION_SURFACE_VISIBILITIES:
             raise ValueError(
@@ -127,6 +156,7 @@ def _presentation_surfaces(
                     max_length=80,
                 ),
                 "view_schema": view_schema,
+                "view_validator": view_validator,
                 "visibility": visibility,
                 "empty_state_title": _presentation_text(
                     item,
@@ -263,7 +293,9 @@ def load_extension_manifest(path: str | Path) -> dict[str, Any]:
             f"{context} has unsupported schema_version `{schema_version}`; "
             f"expected `{EXTENSION_MANIFEST_SCHEMA_VERSION}`"
         )
-    extension_id = _required_string(raw, "id", context=context)
+    extension_id = validate_extension_id(
+        _required_string(raw, "id", context=context)
+    )
     version = _required_string(raw, "version", context=context)
     requires_loopx_api = _required_string(raw, "requires_loopx_api", context=context)
     _require_compatible_loopx_api(requires_loopx_api, context=context)
