@@ -493,6 +493,9 @@ def build_heartbeat_prompt(
     explicit_agent_scopes = normalize_agent_scopes(agent_scopes)
     profile_agent_scopes = agent_profile_scopes(agent_profile)
     normalized_agent_scopes = explicit_agent_scopes or profile_agent_scopes
+    if traex_visible_goal:
+        for scope in normalized_agent_scopes:
+            validate_visible_goal_policy_rule(field="agent_scope", value=scope)
     agent_scope_source = "argument" if explicit_agent_scopes else "agent_profile_v1" if profile_agent_scopes else None
     if normalized_agent_scopes and not normalized_agent_id:
         raise ValueError("--agent-scope requires --agent-id so claimed_by uses a registered agent")

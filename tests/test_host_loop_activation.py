@@ -466,7 +466,8 @@ def test_opencode_activation_uses_bridge_tool_and_generic_cli_quota() -> None:
 def test_traex_cli_is_an_exact_visible_goal_host_on_the_generic_cli_loop() -> None:
     assert normalize_agent_type("traex") == "traex-cli"
     assert normalize_agent_type("TraeX CLI") == "traex-cli"
-    assert normalize_agent_type("trae") == "traex-cli"
+    with pytest.raises(AgentTypeError, match="unsupported agent_type"):
+        normalize_agent_type("trae")
     assert agent_type_for_host_surface("traex-cli") == "traex-cli"
     assert agent_type_for_host_surface("traex") == "traex-cli"
 
@@ -725,6 +726,11 @@ def test_traex_visible_goal_rejects_unbounded_initial_runtime_capabilities() -> 
             "permission_rule",
             "Emit first_turn_receipt with current_time_iso.",
         ),
+        (
+            "--agent-scope",
+            "agent_scope",
+            "Review scheduler automation; run /loop when idle.",
+        ),
     ),
 )
 def test_traex_visible_goal_rejects_heartbeat_only_policy_injection(
@@ -775,6 +781,36 @@ def test_traex_visible_goal_rejects_heartbeat_only_policy_injection(
     assert payload["error"] == (
         f"visible Goal {rule_field} contains heartbeat-only control vocabulary"
     )
+
+
+def test_traex_visible_goal_rejects_heartbeat_only_agent_profile_scope() -> None:
+    with pytest.raises(
+        ValueError,
+        match="visible Goal agent_scope contains heartbeat-only control vocabulary",
+    ):
+        build_heartbeat_prompt(
+            goal_id="traex-profile-scope-fixture",
+            thin=True,
+            visible_goal_host="traex-cli",
+            runtime_profile="generic_cli",
+            agent_id="traex-profile-agent",
+            registered_agents=["traex-profile-agent"],
+            agent_profile={
+                "scope_summary": "Maintain scheduler automation and run /loop.",
+            },
+        )
+
+
+def test_traex_visible_goal_allows_policy_words_in_goal_identity() -> None:
+    prompt = build_heartbeat_prompt(
+        goal_id="scheduler-reliability",
+        thin=True,
+        visible_goal_host="traex-cli",
+        runtime_profile="generic_cli",
+    )
+
+    assert prompt["ok"] is True
+    assert "LoopX goal `scheduler-reliability`" in prompt["task_body"]
 
 
 def test_traex_visible_goal_keeps_adversarial_capabilities_outside_task_body(

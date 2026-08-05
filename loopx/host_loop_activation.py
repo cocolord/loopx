@@ -154,7 +154,6 @@ AGENT_TYPE_CATALOG: dict[str, dict[str, Any]] = {
             "trae-cli",
             "trae_cli",
             "trae cli",
-            "trae",
         ],
     },
     "manual": {
