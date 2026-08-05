@@ -1,0 +1,25 @@
+examples/blocker-push-runtime-smoke.py
+  s_8cda0372ccd938::t_ff6aee32b59ed1 212-213,217-218
+examples/control_plane/heartbeat-prompt-smoke.py
+  s_8cda0372ccd938::t_fa905b84882a92 217-219,337-338,343-344,393-395,435-436,440-441,608-611
+loopx/heartbeat_prompt.py
+  s_8cda0372ccd938::t_0bb93349c0d9b4 43-55,920,998-1001,1271,1274
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7e65228e80b0e5a0745f006905bc60ae82d01962",
+  "prompts": {},
+  "sessions": {
+    "s_8cda0372ccd938": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fcfeb-b235-7632-b013-d4721a20eae6",
+        "model": "unknown"
+      },
+      "human_author": "lusendong.6789 <lusendong.6789@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
