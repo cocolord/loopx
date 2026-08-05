@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -80,6 +81,54 @@ def _run_activation_command(command: str, *, home: Path) -> dict[str, object]:
         capture_output=True,
     )
     return json.loads(completed.stdout)
+
+
+def _assert_traex_visible_goal_body_contract(task_body: str) -> None:
+    lower_task_body = task_body.lower()
+    assert re.search(
+        r"(?<![a-z0-9_/])/loop(?![a-z0-9_-])",
+        lower_task_body,
+    ) is None, f"forbidden /loop command in TraeX task body: {task_body}"
+    normalized_words = " ".join(re.findall(r"[a-z0-9]+", lower_task_body))
+    for forbidden in (
+        "heartbeat",
+        "heartbeat prequota",
+        "automation",
+        "automation update",
+        "rrule",
+        "receipt",
+        "current time",
+        "first turn",
+        "first turn receipt",
+        "scheduler",
+        "scheduler execution context",
+        "turn instance id",
+        "loopx turn",
+    ):
+        assert re.search(rf"\b{re.escape(forbidden)}\b", normalized_words) is None, (
+            f"forbidden {forbidden} content in TraeX task body: {task_body}"
+        )
+
+
+@pytest.mark.parametrize(
+    "forbidden_body",
+    (
+        "Run /loop now.",
+        "Run `/loop` now.",
+        "capability heartbeat_prequota",
+        "set current_time",
+        "call automation-update",
+        "apply RRULE",
+        "emit first_turn_receipt",
+        "emit first-turn receipt",
+        "use scheduler_execution_context",
+    ),
+)
+def test_traex_visible_goal_body_contract_rejects_forbidden_variants(
+    forbidden_body: str,
+) -> None:
+    with pytest.raises(AssertionError):
+        _assert_traex_visible_goal_body_contract(forbidden_body)
 
 
 def test_codex_ide_plugin_is_an_exact_host_type_with_visible_goal_activation() -> None:
@@ -322,6 +371,35 @@ def test_new_agent_onboarding_defaults_to_fresh_identity() -> None:
     assert takeover["requires_explicit_takeover_intent"] is True
 
 
+@pytest.mark.parametrize(
+    "agent_type",
+    (
+        "ark-managed-agent",
+        "codex-app",
+        "codex-app-ssh",
+        "codex-ide-plugin",
+        "codex-cli",
+        "claude-code",
+        "opencode",
+        "manual",
+        "other-agent",
+    ),
+)
+def test_non_traex_identity_selection_preserves_v0_prompt_fields(
+    agent_type: str,
+) -> None:
+    packet = build_host_loop_activation_packet(
+        agent_type=agent_type,
+        goal_id="v0-identity-selection-fixture",
+        registered_agents=["agent-main", "agent-reviewer"],
+    )
+
+    choice = packet["identity_selection_gate"]["choices"][0]
+    assert choice["heartbeat_prompt_json"]
+    assert choice["heartbeat_prompt"]
+    assert choice["activation_input_command"] == choice["heartbeat_prompt_json"]
+
+
 def test_new_agent_onboarding_gates_an_empty_agent_registry() -> None:
     packet = build_host_loop_activation_packet(
         agent_type="codex-app",
@@ -458,23 +536,17 @@ def test_traex_activation_command_renders_visible_goal_task_body(tmp_path: Path)
     payload = json.loads(completed.stdout)
     task_body = payload["task_body"]
     normalized_task_body = " ".join(task_body.split())
-    lower_task_body = task_body.lower()
 
     assert payload["interface_budget"]["mode"] == "visible_goal"
     assert payload["interface_budget"]["within_budget"] is True
     assert "--runtime-profile generic_cli" in payload["quota_guard_command"]
     assert "--source visible-goal" in payload["quota_spend_command"]
     assert "visible TraeX `/goal` task" in normalized_task_body
-    for forbidden in (
-        "rrule",
-        "automation",
-        "heartbeat",
-        "receipt",
-        "--turn-instance-id",
-        "loopx_turn",
-    ):
-        assert forbidden not in lower_task_body
-    assert "`/loop`" not in str(packet)
+    _assert_traex_visible_goal_body_contract(task_body)
+    assert re.search(
+        r"(?<![a-z0-9_/])/loop(?![a-z0-9_-])",
+        str(packet).lower(),
+    ) is None
 
 
 def test_traex_multi_agent_onboarding_choice_executes_visible_goal_command(
@@ -515,7 +587,7 @@ def test_traex_multi_agent_onboarding_choice_executes_visible_goal_command(
     assert payload["agent_id"] == "traex-reviewer"
     assert payload["visible_goal_host"] == "traex-cli"
     assert "visible\nTraeX `/goal` task" in task_body
-    assert "heartbeat" not in task_body.lower()
+    _assert_traex_visible_goal_body_contract(task_body)
 
 
 def test_traex_visible_goal_capabilities_keep_prequota_outside_task_body(
@@ -542,8 +614,58 @@ def test_traex_visible_goal_capabilities_keep_prequota_outside_task_body(
     assert "--available-capability external_evidence_poll" in str(
         payload["quota_guard_command"]
     )
-    for forbidden in ("heartbeat", "automation", "receipt", "rrule"):
-        assert forbidden not in task_body.lower()
+    assert "--available-capability" not in task_body
+    _assert_traex_visible_goal_body_contract(task_body)
+
+
+def test_traex_visible_goal_keeps_adversarial_capabilities_outside_task_body(
+    tmp_path: Path,
+) -> None:
+    goal_id = "traex-adversarial-capability-fixture"
+    _, home = _write_onboarding_goal(
+        tmp_path,
+        goal_id=goal_id,
+        registered_agents=["traex-adversarial-agent"],
+    )
+    capabilities = [
+        "heartbeat_prequota",
+        "current-time",
+        "automation update",
+        "rrule",
+        "first_turn_receipt",
+        "scheduler_execution_context",
+    ]
+    packet = build_host_loop_activation_packet(
+        agent_type="traex-cli",
+        goal_id=goal_id,
+        agent_id="traex-adversarial-agent",
+        registered_agents=["traex-adversarial-agent"],
+        available_capabilities=capabilities,
+        cli_bin=str(REPO_ROOT / "scripts" / "loopx"),
+    )
+
+    payload = _run_activation_command(packet["activation_input_command"], home=home)
+    normalized_capabilities = [
+        "heartbeat_prequota",
+        "current_time",
+        "automation_update",
+        "rrule",
+        "first_turn_receipt",
+        "scheduler_execution_context",
+    ]
+    assert packet["available_capabilities"] == normalized_capabilities
+    for capability in normalized_capabilities:
+        assert (
+            f"--available-capability {capability}"
+            in str(packet["activation_input_command"])
+        )
+        assert (
+            f"--available-capability {capability}"
+            in str(payload["quota_guard_command"])
+        )
+        assert capability not in str(payload["task_body"]).lower()
+    assert "--available-capability" not in str(payload["task_body"])
+    _assert_traex_visible_goal_body_contract(str(payload["task_body"]))
 
 
 @pytest.mark.parametrize(

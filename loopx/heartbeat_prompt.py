@@ -471,6 +471,22 @@ def build_heartbeat_prompt(
         agent_id=normalized_agent_id,
         available_capabilities=normalized_available_capabilities,
     )
+    task_body_quota_guard_command = quota_guard_command
+    task_body_quota_spend_command = quota_spend_command
+    if traex_visible_goal and normalized_available_capabilities:
+        task_body_quota_guard_command = render_quota_guard_command(
+            goal_id,
+            cli_bin=cli_bin,
+            agent_id=normalized_agent_id,
+            runtime_profile=runtime_profile,
+            scheduler_execution_context=scheduler_execution_context,
+        )
+        task_body_quota_spend_command = render_quota_spend_command(
+            goal_id,
+            source=VISIBLE_GOAL_SLOT_SPEND_SOURCE,
+            cli_bin=cli_bin,
+            agent_id=normalized_agent_id,
+        )
     refresh_state_command = render_refresh_state_command(
         goal_id,
         cli_bin=cli_bin,
@@ -518,8 +534,8 @@ def build_heartbeat_prompt(
         pr_review_pre_quota_command=(
             "" if traex_visible_goal else pr_review_pre_quota_command
         ),
-        quota_guard_command=quota_guard_command,
-        quota_spend_command=quota_spend_command,
+        quota_guard_command=task_body_quota_guard_command,
+        quota_spend_command=task_body_quota_spend_command,
         refresh_state_command=refresh_state_command,
         progress_refresh_state_command=progress_refresh_state_command,
         material_queue_rule=resolved_material_rule,

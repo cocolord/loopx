@@ -812,6 +812,15 @@ def build_host_loop_activation_packet(
                     else candidate_commands["heartbeat_prompt_json"]
                 ),
             }
+            if canonical != "traex-cli":
+                choice.update(
+                    {
+                        "heartbeat_prompt_json": candidate_commands[
+                            "heartbeat_prompt_json"
+                        ],
+                        "heartbeat_prompt": candidate_commands["heartbeat_prompt"],
+                    }
+                )
             if fresh_agent_default:
                 choice.update(
                     {

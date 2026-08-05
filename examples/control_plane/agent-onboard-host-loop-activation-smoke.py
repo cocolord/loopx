@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -135,7 +136,10 @@ def main() -> int:
         traex_cli["commands"]["visible_goal_prompt_json"]
     ), traex_cli
     assert "automation_update" not in str(traex_cli), traex_cli
-    assert "`/loop`" not in str(traex_cli), traex_cli
+    assert re.search(
+        r"(?<![a-z0-9_/])/loop(?![a-z0-9_-])",
+        str(traex_cli).lower(),
+    ) is None, traex_cli
     gated_activation = build_host_loop_activation_packet(
         agent_type="codex-app",
         goal_id="multi-agent-demo",
@@ -274,6 +278,10 @@ def main() -> int:
             selected_choice["activation_input_command"]
         )
         assert "--agent-scope" in selected_choice["activation_input_command"]
+        assert selected_choice["heartbeat_prompt_json"] == (
+            selected_choice["activation_input_command"]
+        )
+        assert selected_choice["heartbeat_prompt"]
 
         choice_run = subprocess.run(
             shlex.split(selected_choice["activation_input_command"]),
