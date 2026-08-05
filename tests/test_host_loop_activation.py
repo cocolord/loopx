@@ -13,6 +13,7 @@ from loopx.agent_onboarding import (
     build_agent_onboarding_packet,
     render_agent_onboarding_markdown,
 )
+from loopx.bootstrap_command_pack import build_loopx_bootstrap_command_pack
 from loopx.heartbeat_prompt import (
     build_heartbeat_prompt,
     render_heartbeat_prompt_markdown,
@@ -549,6 +550,58 @@ def test_traex_activation_command_renders_visible_goal_task_body(tmp_path: Path)
     ) is None
 
 
+def test_connected_traex_commands_all_render_the_canonical_visible_goal(
+    tmp_path: Path,
+) -> None:
+    goal_id = "traex-connected-project-fixture"
+    project, home = _write_onboarding_goal(
+        tmp_path,
+        goal_id=goal_id,
+        registered_agents=["traex-connected-agent"],
+    )
+    packet = build_loopx_bootstrap_command_pack(
+        project=project,
+        goal_id=goal_id,
+        agent_id="traex-connected-agent",
+        cli_bin=str(REPO_ROOT / "scripts" / "loopx"),
+        host_surface="traex-cli",
+    )
+
+    commands = packet["commands"]
+    activation = packet["host_loop_activation"]
+    public_activation_commands = {
+        commands["heartbeat_prompt"],
+        commands["heartbeat_prompt_json"],
+        commands["goal_start_host_loop_activation"],
+        activation["activation_input_command"],
+        activation["commands"]["heartbeat_prompt"],
+        activation["commands"]["heartbeat_prompt_json"],
+        activation["commands"]["visible_goal_prompt_json"],
+    }
+    assert all(
+        "--visible-goal-host traex-cli" in command
+        for command in public_activation_commands
+    )
+    message_command = str(commands["heartbeat_prompt"])
+    assert message_command in packet["message"]
+
+    completed = subprocess.run(
+        shlex.split(message_command),
+        cwd=REPO_ROOT,
+        env={
+            "HOME": str(home),
+            "PATH": os.environ["PATH"],
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    task_body = completed.stdout.split("````text\n", 1)[1].split("\n````", 1)[0]
+    assert "visible TraeX `/goal` task" in " ".join(task_body.split())
+    _assert_traex_visible_goal_body_contract(task_body)
+
+
 def test_traex_multi_agent_onboarding_choice_executes_visible_goal_command(
     tmp_path: Path,
 ) -> None:
@@ -590,7 +643,7 @@ def test_traex_multi_agent_onboarding_choice_executes_visible_goal_command(
     _assert_traex_visible_goal_body_contract(task_body)
 
 
-def test_traex_visible_goal_capabilities_keep_prequota_outside_task_body(
+def test_traex_visible_goal_projects_initial_runtime_capabilities_without_user_gate(
     tmp_path: Path,
 ) -> None:
     goal_id = "traex-capability-fixture"
@@ -610,12 +663,118 @@ def test_traex_visible_goal_capabilities_keep_prequota_outside_task_body(
 
     payload = _run_activation_command(packet["activation_input_command"], home=home)
     task_body = str(payload["task_body"])
+    projection = payload["initial_runtime_capability_projection"]
     assert "heartbeat-prequota" in str(payload["pr_review_pre_quota_command"])
-    assert "--available-capability external_evidence_poll" in str(
-        payload["quota_guard_command"]
-    )
-    assert "--available-capability" not in task_body
+    assert projection == {
+        "schema_version": "visible_goal_initial_runtime_capability_projection_v0",
+        "source": "activation_available_capabilities",
+        "scope": "visible_goal_session",
+        "capabilities": ["network", "external_evidence_poll"],
+        "capability_count": 2,
+        "max_capabilities": 8,
+        "first_quota_path": "task_body.quota_guard_command",
+        "user_gate": False,
+        "durable_grant_written": False,
+        "dynamic_reentry_schema_version": "runtime_capability_reentry_v0",
+    }
+    for capability in projection["capabilities"]:
+        assert f"--available-capability {capability}" in str(
+            payload["quota_guard_command"]
+        )
+        assert f"--available-capability {capability}" in task_body
+    assert "user gate" not in task_body.lower()
     _assert_traex_visible_goal_body_contract(task_body)
+
+
+def test_traex_visible_goal_rejects_unbounded_initial_runtime_capabilities() -> None:
+    with pytest.raises(
+        ValueError,
+        match="visible Goal initial runtime capabilities exceed the limit of 8",
+    ):
+        build_heartbeat_prompt(
+            goal_id="traex-capability-limit-fixture",
+            thin=True,
+            visible_goal_host="traex-cli",
+            runtime_profile="generic_cli",
+            available_capabilities=[
+                f"runtime_capability_{index}" for index in range(9)
+            ],
+        )
+
+
+@pytest.mark.parametrize(
+    ("rule_flag", "rule_field", "rule_value"),
+    (
+        (
+            "--material-rule",
+            "material_queue_rule",
+            "Apply RRULE every three minutes.",
+        ),
+        (
+            "--permission-rule",
+            "permission_rule",
+            "Call automation_update before continuing.",
+        ),
+        (
+            "--material-rule",
+            "material_queue_rule",
+            "Run /loop after reading the queue.",
+        ),
+        (
+            "--permission-rule",
+            "permission_rule",
+            "Emit first_turn_receipt with current_time_iso.",
+        ),
+    ),
+)
+def test_traex_visible_goal_rejects_heartbeat_only_policy_injection(
+    tmp_path: Path,
+    rule_flag: str,
+    rule_field: str,
+    rule_value: str,
+) -> None:
+    goal_id = "traex-policy-injection-fixture"
+    _, home = _write_onboarding_goal(
+        tmp_path,
+        goal_id=goal_id,
+        registered_agents=["traex-policy-agent"],
+    )
+    completed = subprocess.run(
+        [
+            str(REPO_ROOT / "scripts" / "loopx"),
+            "--format",
+            "json",
+            "heartbeat-prompt",
+            "--thin",
+            "--goal-id",
+            goal_id,
+            "--agent-id",
+            "traex-policy-agent",
+            "--runtime-profile",
+            "generic_cli",
+            "--visible-goal-host",
+            "traex-cli",
+            rule_flag,
+            rule_value,
+        ],
+        cwd=REPO_ROOT,
+        env={
+            "HOME": str(home),
+            "PATH": os.environ["PATH"],
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    payload = json.loads(completed.stdout)
+    assert completed.returncode == 1
+    assert payload["ok"] is False
+    assert payload["task_body"] is None
+    assert payload["error"] == (
+        f"visible Goal {rule_field} contains heartbeat-only control vocabulary"
+    )
 
 
 def test_traex_visible_goal_keeps_adversarial_capabilities_outside_task_body(

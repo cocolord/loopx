@@ -128,8 +128,15 @@ def main() -> int:
         "[features] goals = true in ~/.trae/traecli.toml"
     ), traex_cli
     assert "--runtime-profile generic_cli" in traex_cli["commands"]["heartbeat_prompt"], traex_cli
-    assert "--visible-goal-host" not in traex_cli["commands"]["heartbeat_prompt"], traex_cli
-    assert "--visible-goal-host traex-cli" in (
+    assert all(
+        "--visible-goal-host traex-cli" in traex_cli["commands"][key]
+        for key in (
+            "heartbeat_prompt",
+            "heartbeat_prompt_json",
+            "visible_goal_prompt_json",
+        )
+    ), traex_cli
+    assert traex_cli["commands"]["heartbeat_prompt_json"] == (
         traex_cli["commands"]["visible_goal_prompt_json"]
     ), traex_cli
     assert traex_cli["activation_input_command"] == (

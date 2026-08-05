@@ -367,6 +367,7 @@ def _heartbeat_commands(
             agent_scope=agent_scope,
             available_capabilities=available_capabilities,
             **scheduler_binding,
+            **renderer_binding,
         ),
         "heartbeat_prompt": render_heartbeat_prompt_command(
             goal_id,
@@ -375,22 +376,11 @@ def _heartbeat_commands(
             agent_scope=agent_scope,
             available_capabilities=available_capabilities,
             **scheduler_binding,
+            **renderer_binding,
         ),
     }
     if renderer_binding:
-        commands.update(
-            {
-                "visible_goal_prompt_json": render_heartbeat_prompt_json_command(
-                    goal_id,
-                    cli_bin=cli_bin,
-                    agent_id=agent_id,
-                    agent_scope=agent_scope,
-                    available_capabilities=available_capabilities,
-                    **scheduler_binding,
-                    **renderer_binding,
-                ),
-            }
-        )
+        commands["visible_goal_prompt_json"] = commands["heartbeat_prompt_json"]
     return commands
 
 
