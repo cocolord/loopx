@@ -102,6 +102,19 @@ const homepageHtml = await readFile(resolve(siteDir, "index.html"), "utf8");
 if (!homepageHtml.includes("Your agents keep") || !homepageHtml.includes('class="button button-secondary" href="#showcases"')) {
   throw new Error("homepage root is missing the LoopX hero or curated evidence CTA");
 }
+for (const learnContract of [
+  'id="learn"',
+  'data-i18n="nav.learn"',
+  'data-devbook-path="/"',
+  'data-devbook-path="/chapters/01-from-session-to-loop"',
+  'data-devbook-path="/chapters/05-connect-existing-project"',
+  'data-devbook-path="/chapters/source-protocol-map"',
+  "Official developer book",
+]) {
+  if (!homepageHtml.includes(learnContract)) {
+    throw new Error(`homepage is missing the official developer-book path: ${learnContract}`);
+  }
+}
 if (!homepageHtml.includes('data-hero-wave="progress"') || !homepageHtml.includes('data-hero-wave="judgment"')) {
   throw new Error("homepage hero must retain the finite semantic keyword wave");
 }
@@ -152,6 +165,12 @@ for (const assetName of [
 const homepageScript = await readFile(resolve(siteDir, "site-assets/home.js"), "utf8");
 if (!homepageScript.includes('"hero.eyebrow": "长程目标控制面"') || !homepageScript.includes('requestedLanguage === "zh" ? "zh" : "en"')) {
   throw new Error("homepage language switch must include the public-safe Chinese locale and default to English");
+}
+if (
+  !homepageScript.includes('const developerBookOrigin = "https://cocolord.github.io/loopx-book"')
+  || !homepageScript.includes('language === "zh" ? "" : "/en"')
+) {
+  throw new Error("homepage Learn links must route English and Chinese readers to matching developer-book locales");
 }
 for (const promptContract of [
   "Connect the current project to LoopX",
@@ -214,6 +233,9 @@ if (!homepageCss.includes("@keyframes terminal-line-in") || !homepageCss.include
 if (!homepageCss.includes("@keyframes hero-word-wave") || !homepageCss.includes("var(--char-delay, 0ms)") || !homepageCss.includes("animation: none !important; color: inherit")) {
   throw new Error("homepage hero keyword wave must be staggered, finite, and reduced-motion safe");
 }
+if (!homepageCss.includes(".learn-section") || !homepageCss.includes(".learn-grid") || !homepageCss.includes(".learn-card")) {
+  throw new Error("homepage must provide a responsive visual path into the official developer book");
+}
 if (!homepageHtml.includes('href="/loopx/site-assets/home.css"') || homepageHtml.includes("__LOOPX_BASE__")) {
   throw new Error("homepage assets did not resolve against the GitHub Pages base");
 }
@@ -242,6 +264,14 @@ if (
 }
 if (manifest.content_sources?.public_homepage !== "apps/presentation/site") {
   throw new Error(`manifest homepage source mismatch: ${JSON.stringify(manifest.content_sources)}`);
+}
+const readme = await readFile(resolve(repoRoot, "README.md"), "utf8");
+const chineseReadme = await readFile(resolve(repoRoot, "README.zh-CN.md"), "utf8");
+if (!readme.includes("[Developer Book](https://cocolord.github.io/loopx-book/en/)")) {
+  throw new Error("English README must expose the official Developer Book entry");
+}
+if (!chineseReadme.includes("[开发者手册](https://cocolord.github.io/loopx-book/)")) {
+  throw new Error("Chinese README must expose the official developer-book entry");
 }
 const homepageEvidenceAssets = manifest.content_sources?.homepage_evidence_assets ?? [];
 for (const assetPath of [
