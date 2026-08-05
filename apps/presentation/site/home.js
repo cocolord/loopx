@@ -24,6 +24,7 @@ P0/P1/P2 todos，让我能看到当前要做什么、什么被 gate 卡住、
 const zh = {
   "nav.product": "产品",
   "nav.workflow": "工作方式",
+  "nav.learn": "学习",
   "nav.showcases": "案例",
   "nav.docs": "文档",
   "nav.github": "GitHub",
@@ -90,6 +91,19 @@ const zh = {
   "capabilities.gateBody": "P0 等待决策时保持可见，独立的 P1、P2 线路可以安全继续。",
   "capabilities.evidence": "结果驱动",
   "capabilities.evidenceBody": "每轮运行都把验证、归属、审查和交接证据写入下一轮闭环。",
+  "learn.eyebrow": "官方开发者手册",
+  "learn.title": "选择你的 LoopX 学习路径。",
+  "learn.body": "这本中英双语、协议优先的 Dev Book 面向希望理解控制面、接入真实项目或沿正确 owner 边界参与贡献的开发者。",
+  "learn.openBook": "打开开发者手册 →",
+  "learn.foundations": "理解控制面",
+  "learn.foundationsBody": "从 Session 与 Goal 出发，建立持久状态、权限、受治理 Turn 和恢复机制的完整模型。",
+  "learn.readFoundations": "从基础开始 ↗",
+  "learn.onboarding": "接入现有项目",
+  "learn.onboardingBody": "让 Agent 建立 Goal、identity、Host 与 Git 边界，再用可观察结果验收接入。",
+  "learn.readOnboarding": "查看项目接入 ↗",
+  "learn.contribute": "参与 LoopX 贡献",
+  "learn.contributeBody": "沿协议定位源码 owner，选择正确的贡献表面，完成验证并准备聚焦 PR。",
+  "learn.readContribute": "打开贡献地图 ↗",
   "showcase.eyebrow": "来自真实闭环的证据",
   "showcase.title": "跨越 200+ 小时，依然清晰可读。",
   "showcase.body": "两条公开安全的真实轨迹，保留了多轮 Agent 推进中的交付、决策、证据分支与恢复过程。",
@@ -159,6 +173,8 @@ const zh = {
 const textTargets = document.querySelectorAll("[data-i18n]");
 const htmlTargets = document.querySelectorAll("[data-i18n-html]");
 const ariaTargets = document.querySelectorAll("[data-i18n-aria]");
+const developerBookTargets = document.querySelectorAll("[data-devbook-path]");
+const developerBookOrigin = "https://cocolord.github.io/loopx-book";
 textTargets.forEach((target) => { target.dataset.english = target.textContent; });
 htmlTargets.forEach((target) => { target.dataset.englishHtml = target.innerHTML; });
 ariaTargets.forEach((target) => { target.dataset.englishAria = target.getAttribute("aria-label") ?? ""; });
@@ -175,6 +191,10 @@ function applyLanguage(nextLanguage, updateUrl = false) {
   });
   ariaTargets.forEach((target) => {
     target.setAttribute("aria-label", language === "zh" ? (zh[target.dataset.i18nAria] ?? target.dataset.englishAria) : target.dataset.englishAria);
+  });
+  developerBookTargets.forEach((target) => {
+    const localePrefix = language === "zh" ? "" : "/en";
+    target.setAttribute("href", `${developerBookOrigin}${localePrefix}${target.dataset.devbookPath}`);
   });
   prepareHeroWaves();
   document.querySelectorAll("[data-language-toggle]").forEach((toggle) => {

@@ -262,8 +262,8 @@ body[data-language="zh"] .hero h1 { font-size: clamp(3.2rem, 4.2vw, 4.5rem); let
 .shield-icon::before { width: 0.8rem; height: 0.92rem; border: 1px solid #b7d5ff; border-radius: 0.55rem 0.55rem 0.7rem 0.7rem; content: ""; transform: scaleX(0.82); }
 .paper-icon::before { width: 0.72rem; height: 0.94rem; border: 1px solid #8f89ff; border-radius: 0.08rem; background: linear-gradient(#8f89ff, #8f89ff) 50% 45% / 54% 1px no-repeat; content: ""; }
 
-.product-section, .capability-section, .evidence-section, .quickstart-section, footer { width: min(100% - 3rem, 1320px); margin-inline: auto; }
-.product-section, .capability-section, .evidence-section, .quickstart-section { padding: clamp(6rem, 10vw, 9rem) 0; }
+.product-section, .capability-section, .learn-section, .evidence-section, .quickstart-section, footer { width: min(100% - 3rem, 1320px); margin-inline: auto; }
+.product-section, .capability-section, .learn-section, .evidence-section, .quickstart-section { padding: clamp(6rem, 10vw, 9rem) 0; }
 .product-section { border-top: 1px solid rgba(131, 165, 219, 0.12); }
 .section-heading { max-width: 52rem; }
 .section-heading h2, .evidence-heading h2, .quickstart-section h2 { margin: 0; color: #f4f1ec; font-family: var(--serif); font-size: clamp(2.6rem, 4.5vw, 4.4rem); font-weight: 500; letter-spacing: -0.045em; line-height: 1.06; }
@@ -283,6 +283,19 @@ body[data-language="zh"] .hero h1 { font-size: clamp(3.2rem, 4.2vw, 4.5rem); let
 .capability-number { color: var(--blue); font-family: var(--mono); font-size: 0.72rem; }
 .capability-grid h3 { margin: 6rem 0 0.8rem; font-size: 1.18rem; }
 .capability-grid p { margin: 0; color: #7d8ca3; font-size: 0.88rem; line-height: 1.65; }
+.learn-section { border-top: 1px solid rgba(131, 165, 219, 0.12); }
+.learn-heading { align-items: start; }
+.learn-intro { display: grid; gap: 1.25rem; }
+.learn-intro p { margin: 0; color: var(--muted); font-size: 1rem; line-height: 1.75; }
+.learn-intro a { width: max-content; color: var(--blue-soft); font-size: 0.9rem; font-weight: 650; transition: color 180ms ease; }
+.learn-intro a:hover, .learn-intro a:focus-visible { color: #fff; }
+.learn-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 4rem; }
+.learn-card { display: grid; min-height: 19rem; padding: 1.6rem; border: 1px solid rgba(126, 163, 219, 0.2); border-radius: 0.75rem; background: linear-gradient(145deg, rgba(10, 21, 41, 0.84), rgba(5, 12, 25, 0.9)); transition: border-color 180ms ease, background 180ms ease, transform 180ms ease; }
+.learn-card:hover, .learn-card:focus-visible { border-color: rgba(110, 171, 255, 0.72); background: linear-gradient(145deg, rgba(18, 37, 69, 0.9), rgba(6, 14, 29, 0.94)); transform: translateY(-3px); }
+.learn-card > span { color: var(--blue); font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.08em; }
+.learn-card h3 { align-self: end; margin: 4.2rem 0 0.85rem; color: #edf2f8; font-size: 1.2rem; font-weight: 600; }
+.learn-card p { margin: 0; color: #7f8da2; font-size: 0.86rem; line-height: 1.7; }
+.learn-card b { align-self: end; margin-top: 1.5rem; color: #9bc8ff; font-size: 0.78rem; font-weight: 650; }
 .evidence-section { border-top: 1px solid rgba(131, 165, 219, 0.12); }
 .evidence-heading { display: grid; grid-template-columns: 1.1fr 0.9fr; align-items: end; gap: 5rem; }
 .evidence-heading > p { margin: 0; }
@@ -409,9 +422,12 @@ footer p { text-align: center; } footer > div { justify-self: end; display: flex
   .hero-copy { max-width: 38rem; }.hero h1 { font-size: clamp(3rem, 11vw, 4.8rem); }.hero-actions { max-width: 34rem; }
   .control-visual { width: 100%; max-width: 44rem; margin: 2.4rem auto 0; padding-inline: 2rem; }
   .proof-strip { grid-template-columns: 1fr; gap: 0.8rem; }.proof-item, .proof-item:first-child { padding: 0.8rem 0; }.proof-item + .proof-item { border-top: 1px solid rgba(125, 156, 203, 0.18); border-left: 0; }
-  .product-section, .capability-section, .evidence-section, .quickstart-section, footer { width: min(100% - 2rem, 720px); }
+  .product-section, .capability-section, .learn-section, .evidence-section, .quickstart-section, footer { width: min(100% - 2rem, 720px); }
   .split-heading, .quickstart-section, .evidence-heading { grid-template-columns: 1fr; gap: 3rem; }
   .split-heading > p { margin-top: 1rem; }.state-flow { grid-template-columns: repeat(2, 1fr); }
+  .learn-grid { grid-template-columns: 1fr; }
+  .learn-card { min-height: 15rem; }
+  .learn-card h3 { margin-top: 2.8rem; }
   .evidence-heading > p { margin-top: 0; }
   .terminal-demo-line { grid-template-columns: 0.7rem 4.4rem minmax(0, 1fr); }
   .terminal-demo-line > b { grid-column: 3; }
