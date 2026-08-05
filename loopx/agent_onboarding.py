@@ -603,7 +603,7 @@ def render_agent_onboarding_markdown(payload: dict[str, Any]) -> str:
             if isinstance(choice, dict):
                 lines.append(
                     f"- takeover `{choice.get('agent_id')}`: "
-                    f"`{choice.get('heartbeat_prompt_json')}`"
+                    f"`{choice.get('activation_input_command')}`"
                 )
     lines.extend(
         [

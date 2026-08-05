@@ -389,15 +389,6 @@ def _heartbeat_commands(
                     **scheduler_binding,
                     **renderer_binding,
                 ),
-                "visible_goal_prompt": render_heartbeat_prompt_command(
-                    goal_id,
-                    cli_bin=cli_bin,
-                    agent_id=agent_id,
-                    agent_scope=agent_scope,
-                    available_capabilities=available_capabilities,
-                    **scheduler_binding,
-                    **renderer_binding,
-                ),
             }
         )
     return commands
@@ -779,7 +770,6 @@ def build_host_loop_activation_packet(
             "heartbeat_prompt_json": None,
             "heartbeat_prompt": None,
             "visible_goal_prompt_json": None,
-            "visible_goal_prompt": None,
         }
     )
     if canonical == "ark-managed-agent":
@@ -814,22 +804,14 @@ def build_host_loop_activation_packet(
                 agent_id=candidate,
                 available_capabilities=normalized_available_capabilities,
             )
-            choice = {
+            choice: dict[str, Any] = {
                 "agent_id": candidate,
-                "heartbeat_prompt_json": candidate_commands["heartbeat_prompt_json"],
-                "heartbeat_prompt": candidate_commands["heartbeat_prompt"],
+                "activation_input_command": (
+                    candidate_commands["visible_goal_prompt_json"]
+                    if canonical == "traex-cli"
+                    else candidate_commands["heartbeat_prompt_json"]
+                ),
             }
-            if canonical == "traex-cli":
-                choice.update(
-                    {
-                        "visible_goal_prompt_json": candidate_commands[
-                            "visible_goal_prompt_json"
-                        ],
-                        "visible_goal_prompt": candidate_commands[
-                            "visible_goal_prompt"
-                        ],
-                    }
-                )
             if fresh_agent_default:
                 choice.update(
                     {
@@ -904,7 +886,7 @@ def build_host_loop_activation_packet(
         else:
             gate_steps = [
                 "Select one registered agent lane from identity_selection_gate.",
-                "Run that choice's identity-aware heartbeat-prompt JSON command.",
+                "Run that choice's host-specific activation_input_command.",
             ]
             gate_criterion = "One registered agent identity is explicitly selected."
         surface["activation_steps"] = [

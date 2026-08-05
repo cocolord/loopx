@@ -374,6 +374,14 @@ def build_heartbeat_prompt(
         thin = True
     if visible_goal_host not in {None, "traex-cli"}:
         raise ValueError(f"unsupported visible goal host: {visible_goal_host}")
+    if visible_goal_host == "traex-cli" and (
+        runtime_profile != SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP.value
+        or scheduler_execution_context is not None
+    ):
+        raise ValueError(
+            "visible_goal_host='traex-cli' requires runtime_profile='generic_cli' "
+            "without scheduler_execution_context"
+        )
     traex_visible_goal = visible_goal_host == "traex-cli"
     native_goal_host = uses_native_goal_host_loop(
         runtime_profile=runtime_profile,
@@ -507,7 +515,9 @@ def build_heartbeat_prompt(
         goal_id=goal_id,
         active_state=active_state_text,
         cli_preflight=cli_preflight,
-        pr_review_pre_quota_command=pr_review_pre_quota_command,
+        pr_review_pre_quota_command=(
+            "" if traex_visible_goal else pr_review_pre_quota_command
+        ),
         quota_guard_command=quota_guard_command,
         quota_spend_command=quota_spend_command,
         refresh_state_command=refresh_state_command,
@@ -1389,6 +1399,16 @@ No heartbeat task body was generated.
 def render_heartbeat_prompt_markdown(payload: dict[str, Any]) -> str:
     if payload.get("ok") is False:
         return render_heartbeat_prompt_error_markdown(payload)
+    if payload.get("visible_goal_host") == "traex-cli":
+        return f"""# Visible TraeX Goal Prompt
+
+Paste this task body into the visible TraeX `/goal` task.
+
+````text
+{payload.get("task_body", "")}
+````
+
+{render_heartbeat_generator_inputs_markdown(payload)}"""
     if payload.get("thin"):
         style = "thin "
     elif payload.get("brief"):

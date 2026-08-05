@@ -8,8 +8,13 @@ from pathlib import Path
 
 import pytest
 
+from loopx.agent_onboarding import (
+    build_agent_onboarding_packet,
+    render_agent_onboarding_markdown,
+)
 from loopx.heartbeat_prompt import (
     build_heartbeat_prompt,
+    render_heartbeat_prompt_markdown,
     uses_native_goal_host_loop,
 )
 from loopx.host_loop_activation import (
@@ -24,6 +29,57 @@ from loopx.project_prompt import render_accountable_progress_refresh_command
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _write_onboarding_goal(
+    tmp_path: Path,
+    *,
+    goal_id: str,
+    registered_agents: list[str],
+) -> tuple[Path, Path]:
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    state_file = project / ".codex" / "goals" / goal_id / "ACTIVE_GOAL_STATE.md"
+    project_registry = project / ".loopx" / "registry.json"
+    global_registry = home / ".codex" / "loopx" / "registry.global.json"
+    state_file.parent.mkdir(parents=True)
+    project_registry.parent.mkdir(parents=True)
+    global_registry.parent.mkdir(parents=True)
+    state_file.write_text("# Active Goal State\n", encoding="utf-8")
+    registry = {
+        "goals": [
+            {
+                "id": goal_id,
+                "status": "active",
+                "repo": str(project),
+                "state_file": str(state_file.relative_to(project)),
+                "coordination": {
+                    "agent_model": "peer_v1",
+                    "registered_agents": registered_agents,
+                },
+            }
+        ]
+    }
+    serialized_registry = json.dumps(registry)
+    project_registry.write_text(serialized_registry, encoding="utf-8")
+    global_registry.write_text(serialized_registry, encoding="utf-8")
+    return project, home
+
+
+def _run_activation_command(command: str, *, home: Path) -> dict[str, object]:
+    completed = subprocess.run(
+        shlex.split(command),
+        cwd=REPO_ROOT,
+        env={
+            "HOME": str(home),
+            "PATH": os.environ["PATH"],
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return json.loads(completed.stdout)
 
 
 def test_codex_ide_plugin_is_an_exact_host_type_with_visible_goal_activation() -> None:
@@ -419,6 +475,134 @@ def test_traex_activation_command_renders_visible_goal_task_body(tmp_path: Path)
     ):
         assert forbidden not in lower_task_body
     assert "`/loop`" not in str(packet)
+
+
+def test_traex_multi_agent_onboarding_choice_executes_visible_goal_command(
+    tmp_path: Path,
+) -> None:
+    goal_id = "traex-multi-agent-fixture"
+    project, home = _write_onboarding_goal(
+        tmp_path,
+        goal_id=goal_id,
+        registered_agents=["traex-main", "traex-reviewer"],
+    )
+    packet = build_agent_onboarding_packet(
+        project=project,
+        agent_type="traex-cli",
+        goal_id=goal_id,
+        cli_bin=str(REPO_ROOT / "scripts" / "loopx"),
+    )
+
+    choice = next(
+        item
+        for item in packet["identity_selection_gate"]["choices"]
+        if item["agent_id"] == "traex-reviewer"
+    )
+    assert set(choice) == {
+        "agent_id",
+        "activation_input_command",
+        "mode",
+        "requires_explicit_takeover_intent",
+    }
+    command = choice["activation_input_command"]
+    assert "--runtime-profile generic_cli" in command
+    assert "--visible-goal-host traex-cli" in command
+    assert "--agent-id traex-reviewer" in command
+    assert command in render_agent_onboarding_markdown(packet)
+
+    payload = _run_activation_command(command, home=home)
+    task_body = str(payload["task_body"])
+    assert payload["agent_id"] == "traex-reviewer"
+    assert payload["visible_goal_host"] == "traex-cli"
+    assert "visible\nTraeX `/goal` task" in task_body
+    assert "heartbeat" not in task_body.lower()
+
+
+def test_traex_visible_goal_capabilities_keep_prequota_outside_task_body(
+    tmp_path: Path,
+) -> None:
+    goal_id = "traex-capability-fixture"
+    _, home = _write_onboarding_goal(
+        tmp_path,
+        goal_id=goal_id,
+        registered_agents=["traex-capability-agent"],
+    )
+    packet = build_host_loop_activation_packet(
+        agent_type="traex-cli",
+        goal_id=goal_id,
+        agent_id="traex-capability-agent",
+        registered_agents=["traex-capability-agent"],
+        available_capabilities=["network", "external_evidence_poll"],
+        cli_bin=str(REPO_ROOT / "scripts" / "loopx"),
+    )
+
+    payload = _run_activation_command(packet["activation_input_command"], home=home)
+    task_body = str(payload["task_body"])
+    assert "heartbeat-prequota" in str(payload["pr_review_pre_quota_command"])
+    assert "--available-capability external_evidence_poll" in str(
+        payload["quota_guard_command"]
+    )
+    for forbidden in ("heartbeat", "automation", "receipt", "rrule"):
+        assert forbidden not in task_body.lower()
+
+
+@pytest.mark.parametrize(
+    ("runtime_profile", "scheduler_execution_context"),
+    (
+        (None, None),
+        ("codex_app_heartbeat", None),
+        ("claude_code", None),
+        ("codex_cli", None),
+        (
+            "generic_cli",
+            {
+                "host_surface": "codex_cli",
+                "scheduler_owner": "agent_cli_loop",
+                "execution_mode": "interactive",
+            },
+        ),
+    ),
+)
+def test_traex_visible_goal_requires_exact_generic_cli_runtime_profile(
+    runtime_profile: str | None,
+    scheduler_execution_context: dict[str, str] | None,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="visible_goal_host='traex-cli' requires runtime_profile='generic_cli'",
+    ):
+        build_heartbeat_prompt(
+            goal_id="traex-runtime-binding-fixture",
+            thin=True,
+            visible_goal_host="traex-cli",
+            runtime_profile=runtime_profile,
+            scheduler_execution_context=scheduler_execution_context,
+        )
+
+
+def test_traex_visible_goal_markdown_is_not_a_codex_heartbeat_wrapper() -> None:
+    payload = build_heartbeat_prompt(
+        goal_id="traex-markdown-fixture",
+        thin=True,
+        visible_goal_host="traex-cli",
+        runtime_profile="generic_cli",
+    )
+
+    markdown = render_heartbeat_prompt_markdown(payload)
+    assert "# Visible TraeX Goal Prompt" in markdown
+    assert "Paste this task body into the visible TraeX `/goal` task." in markdown
+    assert "Heartbeat Automation Prompt" not in markdown
+    assert "Codex App heartbeat automation" not in markdown
+
+
+def test_traex_activation_omits_unused_plaintext_visible_goal_command() -> None:
+    packet = build_host_loop_activation_packet(
+        agent_type="traex-cli",
+        goal_id="traex-json-only-fixture",
+    )
+
+    assert "visible_goal_prompt_json" in packet["commands"]
+    assert "visible_goal_prompt" not in packet["commands"]
 
 
 def test_generic_cli_prompt_does_not_imply_traex_visible_goal() -> None:

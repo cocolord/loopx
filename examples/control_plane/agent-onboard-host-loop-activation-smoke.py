@@ -129,7 +129,7 @@ def main() -> int:
     assert "--runtime-profile generic_cli" in traex_cli["commands"]["heartbeat_prompt"], traex_cli
     assert "--visible-goal-host" not in traex_cli["commands"]["heartbeat_prompt"], traex_cli
     assert "--visible-goal-host traex-cli" in (
-        traex_cli["commands"]["visible_goal_prompt"]
+        traex_cli["commands"]["visible_goal_prompt_json"]
     ), traex_cli
     assert traex_cli["activation_input_command"] == (
         traex_cli["commands"]["visible_goal_prompt_json"]
@@ -270,11 +270,13 @@ def main() -> int:
             for choice in gate["choices"]
             if choice["agent_id"] == "codex-product-capability"
         )
-        assert "--agent-id codex-product-capability" in selected_choice["heartbeat_prompt_json"]
-        assert "--agent-scope" in selected_choice["heartbeat_prompt_json"]
+        assert "--agent-id codex-product-capability" in (
+            selected_choice["activation_input_command"]
+        )
+        assert "--agent-scope" in selected_choice["activation_input_command"]
 
         choice_run = subprocess.run(
-            shlex.split(selected_choice["heartbeat_prompt_json"]),
+            shlex.split(selected_choice["activation_input_command"]),
             cwd=REPO_ROOT,
             env={**os.environ, "HOME": str(home)},
             check=True,
