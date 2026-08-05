@@ -40,10 +40,19 @@ from .control_plane.agents.runtime_model import (
 DEFAULT_MATERIAL_QUEUE_RULE = "Do not consume the learning material queue unless the user explicitly asks."
 DEFAULT_PERMISSION_RULE = "Do not ask for permissions when the current Codex session is already trusted."
 USER_TODO_FINAL_MESSAGE_RULE = (
-    "notify=NOTIFY: concrete actions/todos, including non_blocking at false/0; "
-    "never only \"owner gate\"; required missing -> "
-    '"具体 user todo 未投影，需修复 LoopX 状态投影". '
-    "Only notify=DONT_NOTIFY + false/0: quiet."
+    "`interaction_contract.user_channel.notify` controls output: `NOTIFY` -> concrete "
+    "action; otherwise quiet. `should_run`/due monitor and other-agent scoped todos "
+    "are not user prompts. `action_required` without an action -> "
+    '"具体 user todo 未投影，需修复 LoopX 状态投影".'
+)
+HEARTBEAT_NOTIFICATION_RULE_SHORT = (
+    "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet. "
+    "Due/other-agent gate != prompt; missing action -> "
+    "\"具体 user todo 未投影，需修复 LoopX 状态投影\"."
+)
+HEARTBEAT_VISION_WRITEBACK_RULE_SHORT = (
+    "Monitor status=`surface_only`/no spend; unchanged accountable vision -> "
+    "`--vision-unchanged-reason`, never status-check `outcome_progress`."
 )
 SCHEDULER_HINT_APPLICATION_RULE = (
     "`scheduler_hint` no-spend. host_action=pause_or_delete_current_heartbeat -> "
@@ -908,9 +917,7 @@ Guard/retry; `LOOPX_TURN=<current_time_iso>`:
 
 Fail: quiet.
 
-User NOTIFY: Chinese actions incl. non_blocking at false/0; never only "owner
-gate"; required missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
-Only DONT_NOTIFY+false/0: quiet.
+{HEARTBEAT_NOTIFICATION_RULE_SHORT}
 
 If `should_run=false`: follow user channel. `monitor_quiet_skip`: receipt/stall
 done; quiet unless replan; write failure: retry same id. External/wait monitor:
@@ -988,10 +995,10 @@ Preflight fail: quiet; no work/spend.
 If `should_run=false`: `monitor_quiet_skip` -> receipt/stall done; quiet unless
 replan; write failure -> retry same id; no edits/spend; receipts do not self-stop.
 `state=operator_gate` / `notify_user_on_open_todo=true` /
-`user_channel.notify=NOTIFY`: blocker-push including
-non_blocking; `open_todo_notification_policy=repeat_until_resolved`: repeat;
-cooldown:quiet;
-never only "owner gate"; no delivery/spend. `safe_bypass_allowed=true`: one
+`user_channel.notify=NOTIFY`: concrete blocker-push; otherwise quiet (a due
+monitor or `should_run` alone is never a notice). Other-agent scoped todos are
+not this prompt; repeat/cooldown as payload says; no delivery/spend.
+`safe_bypass_allowed=true`: one
 gate-independent safe-bypass, validate/writeback/spend. External/wait monitor:
 one read-only status/log/metric/marker poll; unchanged quiet, new evidence
 writeback/spend. Otherwise quiet `DONT_NOTIFY`.
@@ -1261,12 +1268,10 @@ def render_thin_heartbeat_task_body(
 Inspect state/status/repo.
 `LOOPX_TURN=<current_time_iso>`; reuse.
 {pr_review_pre_quota_instruction}{quota_guard_instruction}.
-NOTIFY Chinese actions incl. non_blocking false/0; not only "owner gate";
-missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
-DONT_NOTIFY+false/0 only: quiet.
+{HEARTBEAT_NOTIFICATION_RULE_SHORT}
 {RUNTIME_CAPABILITY_PROJECTION_THIN_RULE}
 {SCHEDULER_HINT_THIN_RULE}
-writeback: actual class/scale/outcome accountable refresh->spend; no upgrade.
+writeback: monitor=no-change -> surface_only/no spend; unchanged vision->--vision-unchanged-reason.
 Done->todo/rationale; guard receipt; 2 stalls->replan.
 `lark_event_inbox`: reply_due; drain_command/reply-readback/ACK.
 
