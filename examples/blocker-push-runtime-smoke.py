@@ -186,6 +186,7 @@ def main() -> int:
         assert decision["heartbeat_recommendation"]["notify"] == "NOTIFY", decision
         assert decision["interaction_contract"]["mode"] == "user_gate", decision
         assert decision["interaction_contract"]["user_channel"]["action_required"] is True, decision
+        assert decision["interaction_contract"]["user_channel"]["notify"] == "NOTIFY", decision
         assert decision["interaction_contract"]["agent_channel"]["must_attempt"] is False, decision
         assert decision["interaction_contract"]["agent_channel"]["delivery_allowed"] is False, decision
         assert decision["interaction_contract"]["cli_channel"]["spend_policy"] == (
