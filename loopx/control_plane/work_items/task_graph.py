@@ -310,7 +310,7 @@ def _task_graph_deliverable_node(
     owner = public_safe_compact_text(todo.get("claimed_by"), limit=80)
     if owner:
         node["owner_agent"] = owner
-    actor = public_safe_compact_text(todo.get("last_actor_agent_id") or todo.get("created_by"), limit=80)
+    actor = public_safe_compact_text(todo.get("last_actor_agent_id"), limit=80)
     if actor:
         node["actor_agent"] = actor
     return node
@@ -590,6 +590,24 @@ def _task_graph_build_predecessor_chain(
         is_done = bool(current_todo.get("done")) or todo_done_for_status(
             str(normalize_todo_status(current_todo.get("status")) or todo_status_open)
         )
+
+        if not is_root and is_done and emitted_count >= max_predecessor_nodes:
+            pred_list = _task_graph_resolve_direct_predecessors(
+                current_tid,
+                current_todo,
+                predecessors_by_successor=predecessors_by_successor,
+                predecessors_by_supersedes=predecessors_by_supersedes,
+                public_safe_compact_text=public_safe_compact_text,
+            )
+            if pred_list:
+                truncation_candidates.extend(p[0] for p in pred_list)
+            for remaining_tid, _, _ in queue:
+                if remaining_tid not in visited:
+                    truncation_candidates.append(remaining_tid)
+            queue.clear()
+            truncated = True
+            continue
+
         current_nid: str | None
         if is_root:
             current_nid = selected_node_id
@@ -631,6 +649,9 @@ def _task_graph_build_predecessor_chain(
         if not current_nid:
             continue
 
+        if not is_root:
+            emitted_count += 1
+
         _task_graph_attach_evidence(
             current_todo=current_todo,
             current_tid=current_tid,
@@ -661,22 +682,6 @@ def _task_graph_build_predecessor_chain(
             for pred_id, rel_hint in pred_list:
                 if pred_id not in visited:
                     queue.append((pred_id, current_nid, rel_hint))
-            continue
-
-        if not is_root:
-            emitted_count += 1
-
-        if not is_root and emitted_count >= max_predecessor_nodes:
-            pred_list = _task_graph_resolve_direct_predecessors(
-                current_tid,
-                current_todo,
-                predecessors_by_successor=predecessors_by_successor,
-                predecessors_by_supersedes=predecessors_by_supersedes,
-                public_safe_compact_text=public_safe_compact_text,
-            )
-            if pred_list:
-                truncation_candidates.extend(p[0] for p in pred_list)
-            truncated = True
             continue
 
         pred_list = _task_graph_resolve_direct_predecessors(
