@@ -621,7 +621,6 @@ def publish_extension_projection(
         extension_id=safe_extension_id,
         surface_id=surface_id,
     )
-    view_validator = load_presentation_view_validator(surface)
     receipt: dict[str, Any] = {
         "ok": True,
         "schema_version": EXTENSION_PROJECTION_PUBLISH_RECEIPT_SCHEMA_VERSION,
@@ -636,6 +635,7 @@ def publish_extension_projection(
     if not execute:
         return receipt
 
+    view_validator = load_presentation_view_validator(surface)
     runtime_receipt = run_standalone_extension(
         safe_extension_id,
         state_file=state_path,

@@ -649,3 +649,31 @@ def test_read_extension_projection_rejects_path_escaping_ids(tmp_path: Path) -> 
             extension_revision=str(installed["revision"]),
             payload_sha256=str(receipt["payload_sha256"]),
         )
+
+
+def test_publish_projection_dry_run_does_not_load_validator(
+    tmp_path: Path,
+) -> None:
+    """Regression: dry-run must not import extension-owned validator module."""
+    provider_marker = tmp_path / "provider_marker"
+    state_file, installed = _installed_projection_extension(
+        tmp_path,
+        invocation_marker=provider_marker,
+    )
+
+    receipt = publish_extension_projection(
+        "test-research-extension",
+        surface_id="investment-research",
+        state_file=state_file,
+        request={"schema_version": "synthetic_request_v0"},
+        execute=False,
+    )
+    assert receipt["ok"] is True
+    assert receipt["dry_run"] is True
+    assert receipt["executed"] is False
+    assert not provider_marker.exists(), (
+        "dry-run must not invoke provider"
+    )
+    assert not default_extension_projection_root(state_file).exists(), (
+        "dry-run must not write projection"
+    )
