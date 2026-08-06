@@ -10,7 +10,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20early-orange.svg)](docs/product/release-readiness.md)
 
-[产品首页](https://huangruiteng.github.io/loopx/) · [文档](https://huangruiteng.github.io/loopx/docs/) · [试用 LoopX](#试用-loopx) · [查看真实 Loop](#证据) · [理解工作原理](#为什么需要-loopx) · [用户手册](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [English](README.md)
+[试用 LoopX](#试用-loopx) · [开发者手册](https://cocolord.github.io/loopx-book/) · [查看真实 Loop](#证据) · [理解工作原理](#为什么需要-loopx) · [Hosted Frontstage](https://huangruiteng.github.io/loopx/frontstage/) · [用户手册](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [English](README.md)
 
 **把会干活的 Agent，接成可管理、可复盘、可持续改进的数字员工。**
 
@@ -120,7 +120,8 @@ targeted wake 同屏可见。**
 
 更多可检查入口：
 
-- [产品首页](https://huangruiteng.github.io/loopx/)：查看产品叙事、快速开始和长程证据；
+- [Hosted Frontstage](https://huangruiteng.github.io/loopx/frontstage/) 与
+  [公开演示脚本](docs/outreach/frontstage-demo-script.md)；
 - [Showcase 目录](docs/showcases/README.md)，包括
   [Blocked P0 安全侧路](docs/showcases/cases/0617-blocked-p0-safe-rotation.md)、
   [LoopX 自迭代](docs/showcases/cases/0619-loopx-self-iteration.md)和
@@ -225,7 +226,7 @@ LoopX 把控制面归结为五个用户可以直接行动的问题：
 | Goal state 与 status | 跟踪 active state、todo、claim、gate、evidence、run history 和首屏关注点。 | `loopx status`、`loopx diagnose`、`loopx review-packet` |
 | Quota 与 interaction contract | 决定一轮应该执行、提问、等待、自修复还是静默。 | `loopx quota should-run`、[Quota Allocation](docs/quota-allocation.md) |
 | Agent runtime bridge | 让 Codex App、Codex CLI、Claude Code 和 generic worker 服从同一 guard。 | `loopx heartbeat-prompt`、`loopx codex-cli-bootstrap-message`、`loopx worker-bridge` |
-| Operator surface | 呈现紧凑状态，但不让浏览器成为状态事实源。 | `loopx serve-status`、[Dashboard](apps/presentation/dashboard/README.md) |
+| Operator surface | 呈现紧凑状态，但不让浏览器成为状态事实源。 | `loopx serve-status`、[Dashboard](apps/presentation/dashboard/README.md)、[Frontstage](https://huangruiteng.github.io/loopx/frontstage/) |
 | External projection | 把 todo / gate 投影到协作表面，同时保持 LoopX 权威。 | `loopx lark-kanban`、[Lark Kanban adapter](docs/integrations/lark-kanban-control-plane-adapter.md) |
 | Domain capability | 打包 Issue Fix、内容运营、value connector、ML 实验、benchmark 与 Explore 等可重复泳道。 | `loopx issue-fix`、`loopx content-ops`、`loopx value-connectors`、`loopx ml-experiment`、`loopx benchmark`、[Explore](docs/capabilities/explore/README.md) |
 | 实验性上下文学习 | 通过 ignored、默认关闭的项目配置，为明确注册的 agent 试用 provider-neutral Reward Memory；OpenViking 是 provider 之一，不是全局依赖。 | `loopx reward-memory experiment-status`、[Reward Memory 中文架构](docs/reference/protocols/reward-memory-architecture-v0.zh-CN.md) |
@@ -303,8 +304,7 @@ treatment 和 guardrail 的任务，不替代生产审批。先读
 ### App 与 Projection
 
 - 本地 read-first UI：[Dashboard Guide](apps/presentation/dashboard/README.md)
-- 公开产品概览：[产品首页](https://huangruiteng.github.io/loopx/)
-- 文档门户：[线上文档](https://huangruiteng.github.io/loopx/docs/)
+- Public-safe 产品视图：[Hosted Frontstage](https://huangruiteng.github.io/loopx/frontstage/)
 - 飞书投影：[Lark Kanban Adapter](docs/integrations/lark-kanban-control-plane-adapter.md)
 - 通用 host 集成：[Integration Guide](docs/integration.md)
 - 自有 multi-agent runner：
@@ -347,8 +347,7 @@ loopx check \
 
 ## 进阶文档
 
-按你的角色选择入口；[线上文档](https://huangruiteng.github.io/loopx/docs/)
-提供发布后的浏览入口，[完整文档索引](docs/README.md)仍是权威地图。
+按你的角色选择入口；[完整文档索引](docs/README.md)仍是权威地图。
 
 ### 使用与运维
 
