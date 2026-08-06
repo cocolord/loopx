@@ -14,6 +14,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.cli_commands.status import review_packet_handoff_only_payload  # noqa: E402
+from loopx.event_sourced_state import (  # noqa: E402
+    TODO_ADDED,
+    TODO_UPDATED,
+    build_state_projection,
+    make_state_event,
+)
 from loopx.review_packet import build_review_packet  # noqa: E402
 from loopx.status import build_task_graph_projection  # noqa: E402
 
@@ -255,6 +261,163 @@ def assert_runtime_projection_builder() -> None:
     assert_public_safe(json.dumps(packet, sort_keys=True), "runtime review packet")
 
 
+def _predecessor_todo(
+    todo_id: str,
+    *,
+    status: str,
+    successor_todo_ids: list[str] | None = None,
+) -> dict[str, object]:
+    todo: dict[str, object] = {
+        "todo_id": todo_id,
+        "title": f"Task {todo_id}",
+        "text": f"Task {todo_id}",
+        "status": status,
+        "done": status == "done",
+    }
+    if successor_todo_ids:
+        todo["successor_todo_ids"] = successor_todo_ids
+    return todo
+
+
+def _predecessor_projection(
+    *,
+    predecessor_count: int,
+    predecessor_status: str = "done",
+    reverse_input: bool = False,
+    total_count: int | None = None,
+) -> dict[str, object]:
+    root = _predecessor_todo("todo_graph_root", status="open")
+    predecessors = [
+        _predecessor_todo(
+            f"todo_graph_parent_{index:02d}",
+            status=predecessor_status,
+            successor_todo_ids=["todo_graph_root"],
+        )
+        for index in range(predecessor_count)
+    ]
+    if reverse_input:
+        predecessors.reverse()
+    items = [root, *predecessors]
+    return build_task_graph_projection(
+        {
+            "goal_id": "task-graph-predecessor-budget",
+            "agent_todos": {
+                "total_count": total_count if total_count is not None else len(items),
+                "open_count": 1,
+                "items": items,
+            },
+            "user_todos": {
+                "total_count": 0,
+                "open_count": 0,
+                "items": [],
+            },
+        },
+        goal={"id": "task-graph-predecessor-budget"},
+    )
+
+
+def _predecessor_todo_ids(projection: dict[str, object]) -> list[str]:
+    return [
+        node["refs"]["todo_ids"][0]
+        for node in projection["nodes"]
+        if node["kind"] == "deliverable"
+        and node["refs"]["todo_ids"][0] != "todo_graph_root"
+    ]
+
+
+def assert_predecessor_budget_and_actor_contract() -> None:
+    expected_predecessors = [
+        f"todo_graph_parent_{index:02d}" for index in range(4)
+    ]
+    for count, expected_truncated in ((0, False), (4, False), (8, True)):
+        projection = _predecessor_projection(predecessor_count=count)
+        limits = projection["limits"]
+        assert limits["emitted_predecessor_count"] == min(count, 4), limits
+        assert limits["predecessor_truncated"] is expected_truncated, limits
+        assert limits["source_truncated"] is False, limits
+        assert _predecessor_todo_ids(projection) == expected_predecessors[:count], projection
+
+    forward = _predecessor_projection(predecessor_count=8)
+    reversed_input = _predecessor_projection(
+        predecessor_count=8,
+        reverse_input=True,
+    )
+    assert _predecessor_todo_ids(forward) == expected_predecessors, forward
+    assert _predecessor_todo_ids(reversed_input) == expected_predecessors, reversed_input
+
+    open_predecessors = _predecessor_projection(
+        predecessor_count=8,
+        predecessor_status="open",
+    )
+    open_limits = open_predecessors["limits"]
+    assert open_limits["emitted_predecessor_count"] == 4, open_limits
+    assert open_limits["predecessor_truncated"] is True, open_limits
+    assert _predecessor_todo_ids(open_predecessors) == expected_predecessors, open_predecessors
+
+    source_truncated = _predecessor_projection(
+        predecessor_count=0,
+        total_count=9,
+    )
+    source_limits = source_truncated["limits"]
+    assert source_limits["predecessor_truncated"] is False, source_limits
+    assert source_limits["source_truncated"] is True, source_limits
+
+    def state_event(
+        event_id: str,
+        event_type: str,
+        payload: dict[str, object],
+        *,
+        actor_agent_id: str | None = None,
+    ) -> dict[str, object]:
+        return make_state_event(
+            event_id=event_id,
+            goal_id="task-graph-actor-clearing",
+            event_type=event_type,
+            refs={"todo_id": "todo_actor_audit"},
+            payload=payload,
+            actor_agent_id=actor_agent_id,
+            recorded_at=f"2026-08-06T00:00:{len(event_id):02d}Z",
+        )
+
+    actor_projection = build_state_projection(
+        [
+            state_event(
+                "evt-add-actor",
+                TODO_ADDED,
+                {"role": "agent", "text": "Audit actor projection"},
+                actor_agent_id="creator-agent",
+            ),
+            state_event(
+                "evt-update-actor",
+                TODO_UPDATED,
+                {"title": "Audit actor projection after mutation"},
+                actor_agent_id="mutator-agent",
+            ),
+            state_event(
+                "evt-update-no-actor",
+                TODO_UPDATED,
+                {"title": "Audit actor projection after cleared actor"},
+            ),
+        ],
+        goal_id="task-graph-actor-clearing",
+    )
+    actor_todo = actor_projection["agent_todos"]["items"][0]
+    assert actor_todo["created_by"] == "creator-agent", actor_todo
+    assert "last_actor_agent_id" not in actor_todo, actor_todo
+    actor_graph = build_task_graph_projection(
+        {
+            "goal_id": "task-graph-actor-clearing",
+            "agent_todos": actor_projection["agent_todos"],
+            "user_todos": actor_projection["user_todos"],
+        },
+        goal={"id": "task-graph-actor-clearing"},
+    )
+    actor_node = next(
+        node for node in actor_graph["nodes"] if node["kind"] == "deliverable"
+    )
+    assert "actor_agent" not in actor_node, actor_node
+
+
 def main() -> int:
     fixture_text = read(FIXTURE_PATH)
     contract = read(CONTRACT_PATH)
@@ -300,6 +463,7 @@ def main() -> int:
     fixture_keys = set(json.dumps(payload, sort_keys=True).split('"'))
     assert not (fixture_keys & forbidden_keys), fixture_keys & forbidden_keys
     assert_runtime_projection_builder()
+    assert_predecessor_budget_and_actor_contract()
 
     print("task-graph-projection-fixture-smoke ok")
     return 0

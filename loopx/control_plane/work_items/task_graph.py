@@ -272,6 +272,21 @@ def _task_graph_collect_todo_items(
     return by_id
 
 
+def _task_graph_source_items_truncated(
+    todos_summary: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(todos_summary, dict):
+        return False
+    items = todos_summary.get("items")
+    if not isinstance(items, list):
+        return False
+    try:
+        total_count = int(todos_summary.get("total_count") or 0)
+    except (TypeError, ValueError):
+        return False
+    return total_count > len(items)
+
+
 def _task_graph_deliverable_node(
     *,
     todo: dict[str, Any],
@@ -428,7 +443,7 @@ def _task_graph_resolve_direct_predecessors(
         resume_tid = public_safe_compact_text(resume_when.split(":", 1)[1], limit=120)
         if resume_tid and resume_tid != current_tid and not any(p[0] == resume_tid for p in pred_ids):
             pred_ids.append((resume_tid, None))
-    return pred_ids
+    return sorted(pred_ids, key=lambda item: (item[0], item[1] or ""))
 
 
 def _task_graph_attach_handoff(
@@ -566,6 +581,7 @@ def _task_graph_build_predecessor_chain(
     todo_done_for_status: Callable[[str], bool],
     todo_status_open: str,
     max_predecessor_nodes: int,
+    source_truncated: bool,
 ) -> dict[str, Any]:
     predecessors_by_successor, predecessors_by_supersedes = _task_graph_build_predecessor_indexes(
         all_todos_by_id,
@@ -574,9 +590,7 @@ def _task_graph_build_predecessor_chain(
     visited: set[str] = set()
     queue: list[tuple[str, str | None, str | None]] = [(selected_todo_id, None, None)]
     emitted_count = 0
-    truncation_candidates: list[str] = []
     truncated = False
-    source_truncated = False
 
     while queue:
         current_tid, successor_nid, edge_rel_hint = queue.pop(0)
@@ -591,22 +605,9 @@ def _task_graph_build_predecessor_chain(
             str(normalize_todo_status(current_todo.get("status")) or todo_status_open)
         )
 
-        if not is_root and is_done and emitted_count >= max_predecessor_nodes:
-            pred_list = _task_graph_resolve_direct_predecessors(
-                current_tid,
-                current_todo,
-                predecessors_by_successor=predecessors_by_successor,
-                predecessors_by_supersedes=predecessors_by_supersedes,
-                public_safe_compact_text=public_safe_compact_text,
-            )
-            if pred_list:
-                truncation_candidates.extend(p[0] for p in pred_list)
-            for remaining_tid, _, _ in queue:
-                if remaining_tid not in visited:
-                    truncation_candidates.append(remaining_tid)
-            queue.clear()
+        if not is_root and emitted_count >= max_predecessor_nodes:
             truncated = True
-            continue
+            break
 
         current_nid: str | None
         if is_root:
@@ -695,11 +696,6 @@ def _task_graph_build_predecessor_chain(
             if pred_id not in visited:
                 queue.append((pred_id, current_nid, rel_hint))
 
-    for tid in truncation_candidates:
-        if tid in all_todos_by_id and tid not in visited:
-            source_truncated = True
-            break
-
     return {
         "emitted_predecessor_count": emitted_count,
         "predecessor_limit": max_predecessor_nodes,
@@ -732,15 +728,21 @@ def build_task_graph_projection(
     latest_runs = [run for run in goal_latest_runs or [] if isinstance(run, dict)]
     builder = _TaskGraphProjectionBuilder(public_safe_compact_text=public_safe_compact_text)
 
-    agent_todos_by_id = _task_graph_collect_todo_items(
+    agent_todo_summary = (
         item.get("agent_todos") if isinstance(item.get("agent_todos"), dict) else None
     )
-    user_todos_by_id = _task_graph_collect_todo_items(
+    user_todo_summary = (
         item.get("user_todos") if isinstance(item.get("user_todos"), dict) else None
+    )
+    agent_todos_by_id = _task_graph_collect_todo_items(agent_todo_summary)
+    user_todos_by_id = _task_graph_collect_todo_items(user_todo_summary)
+    source_truncated = (
+        _task_graph_source_items_truncated(agent_todo_summary)
+        or _task_graph_source_items_truncated(user_todo_summary)
     )
 
     agent_items = open_todo_items(
-        item.get("agent_todos") if isinstance(item.get("agent_todos"), dict) else None,
+        agent_todo_summary,
         limit=1,
         text_limit=180,
     )
@@ -812,9 +814,9 @@ def build_task_graph_projection(
             todo_done_for_status=todo_done_for_status,
             todo_status_open=todo_status_open,
             max_predecessor_nodes=TASK_GRAPH_MAX_PREDECESSOR_NODES,
+            source_truncated=source_truncated,
         )
 
-    user_todo_summary = item.get("user_todos") if isinstance(item.get("user_todos"), dict) else None
     user_items, user_gate_open_count = _task_graph_visible_user_gate_items(
         user_todo_summary,
         limit=TASK_GRAPH_MAX_USER_GATE_NODES,
