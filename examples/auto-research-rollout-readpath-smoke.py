@@ -370,6 +370,34 @@ def main() -> None:
         assert missing_lineage_resolution["unresolved"] is True, missing_lineage_resolution
         assert_public_safe(missing_lineage_resolution)
 
+        selected_todo_fallback_resolution = build_research_failure_continuation_resolution(
+            {
+                "retirement_candidates": [
+                    {
+                        "hypothesis_id": "hyp_selected_summary_failure",
+                        "todo_id": "todo_selected_summary",
+                        "failure_kind": "mechanism_contradicted",
+                        "measurement_scope": None,
+                        "remediation_attempt_count": 0,
+                        "remediation_attempt_limit": 1,
+                        "next_outcome": "propose_failure_successor",
+                    }
+                ]
+            },
+            selected_todo_id="todo_selected_summary",
+            require_selected_failure_match=True,
+        )
+        assert selected_todo_fallback_resolution["failure_continuation"] is None, (
+            selected_todo_fallback_resolution
+        )
+        assert selected_todo_fallback_resolution["matched_candidate_count"] == 0, (
+            selected_todo_fallback_resolution
+        )
+        assert selected_todo_fallback_resolution["unresolved"] is True, (
+            selected_todo_fallback_resolution
+        )
+        assert_public_safe(selected_todo_fallback_resolution)
+
         data_gap_graph = build_research_evidence_graph_from_records(
             goal_id=GOAL_ID,
             hypotheses=[

@@ -781,6 +781,62 @@ def main() -> int:
         runtime_root = temp / "runtime"
         write_summary_state(state_file)
         write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
+        self_referential_summary = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Summarize a self-referential retired branch.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            dry_run=False,
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_summary_id_failure",
+            todo_id=self_referential_summary["todo_id"],
+        )
+        workspace = project / "visible-workspace"
+        workspace.mkdir()
+
+        self_referential_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        assert (
+            self_referential_turn["frontier"]["frontier"]["completion"]["status"]
+            == "failure_successor_required"
+        ), self_referential_turn
+        assert self_referential_turn["evaluation_summary"]["failure_continuation"] is None, (
+            self_referential_turn
+        )
+        assert self_referential_turn["successor_todos"]["successors"] == [], self_referential_turn
+        assert self_referential_turn["completion"] == {
+            "requested": True,
+            "executed": False,
+            "reason": "failure_successor_lineage_unresolved",
+        }, self_referential_turn
+        state_text = state_file.read_text(encoding="utf-8")
+        assert (
+            f"todo_id={self_referential_summary['todo_id']} status=done" not in state_text
+        ), state_text
+        assert_public_safe(self_referential_turn)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        project = temp / "project"
+        project.mkdir()
+        state_file = project / "ACTIVE_GOAL_STATE.md"
+        registry = temp / "registry.json"
+        runtime_root = temp / "runtime"
+        write_summary_state(state_file)
+        write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
         positive_evidence = add_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,

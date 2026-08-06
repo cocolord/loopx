@@ -713,8 +713,14 @@ def build_research_failure_continuation_resolution(
     ]
     lineage_todo_id = str(selected_lineage_todo_id or "").strip()
     selected_id = str(selected_todo_id or "").strip()
-    selection_bound = bool(lineage_todo_id or selected_id)
-    selected_parent_todo_id = lineage_todo_id or selected_id
+    selection_bound = bool(lineage_todo_id) if require_selected_failure_match else bool(
+        lineage_todo_id or selected_id
+    )
+    selected_parent_todo_id = (
+        lineage_todo_id
+        if require_selected_failure_match
+        else lineage_todo_id or selected_id
+    )
     matched = (
         [
             candidate
@@ -753,9 +759,8 @@ def build_research_failure_continuation_resolution(
         "selection_bound": selection_bound,
         "ambiguous": not selection_bound and len(candidates) > 1,
         "unresolved": require_selected_failure_match
-        and selection_bound
         and bool(candidates)
-        and len(matched) != 1,
+        and (not lineage_todo_id or len(matched) != 1),
     }
 
 
