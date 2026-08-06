@@ -264,6 +264,49 @@ def append_fixture_evidence(
     assert_public_safe(appended)
 
 
+def append_negative_fixture_evidence(
+    *,
+    registry: Path,
+    runtime_root: Path,
+    temp: Path,
+    hypothesis_id: str,
+    todo_id: str,
+    failure_kind: str | None = None,
+    measurement_scope: str | None = None,
+    remediation_attempt: bool = False,
+) -> None:
+    result = eval_result("dev", value=0.75)
+    result["primary_metric_status"] = "regressed"
+    if failure_kind:
+        result["failure_kind"] = failure_kind
+    if measurement_scope:
+        result["measurement_scope"] = measurement_scope
+    if remediation_attempt:
+        result["remediation_attempt"] = True
+    packet = build_auto_research_evidence_packet(
+        contract=research_contract(goal_id=GOAL_ID),
+        eval_results=[result],
+        hypothesis_id=hypothesis_id,
+        todo_id=todo_id,
+        agent_id=EVIDENCE_AGENT_ID,
+        claimed_by=EVIDENCE_AGENT_ID,
+        mechanism_family=MECHANISM_FAMILY,
+        hypothesis=f"{HYPOTHESIS_TEXT} Failure {hypothesis_id}.",
+        grounding_refs=[GROUNDING_REF],
+        branch_ref="codex/auto-research-worker-turn-smoke",
+    )
+    packet_path = temp / f"{hypothesis_id}.public.json"
+    packet_path.write_text(json.dumps(packet, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    appended = append_auto_research_rollout_events(
+        packet_path=str(packet_path),
+        registry_path=registry,
+        runtime_root_arg=str(runtime_root),
+        dry_run=False,
+    )
+    assert appended["appended_count"] == 2, appended
+    assert_public_safe(appended)
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         temp = Path(temp_dir)
@@ -490,6 +533,119 @@ def main() -> int:
         for successor_id in curator_successor_ids:
             assert successor_id in state_text, state_text
         assert_public_safe(curator_handoff)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        project = temp / "project"
+        project.mkdir()
+        state_file = project / "ACTIVE_GOAL_STATE.md"
+        registry = temp / "registry.json"
+        runtime_root = temp / "runtime"
+        write_summary_state(state_file)
+        write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
+        failure_review = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Summarize retired evidence.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            dry_run=False,
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_failure_successor",
+            todo_id="todo_failure_successor",
+        )
+        workspace = project / "visible-workspace"
+        workspace.mkdir()
+
+        failure_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        successors = failure_turn["successor_todos"]["successors"]
+        assert len(successors) == 1, failure_turn
+        assert successors[0]["claimed_by"] == HYPOTHESIS_AGENT_ID, failure_turn
+        assert successors[0]["action_kind"] == "propose_failure_successor", failure_turn
+        assert failure_turn["evaluation_summary"]["failure_continuation"]["monitor_allowed"] is False, failure_turn
+        assert failure_turn["completion"]["successor_todo_ids"] == [successors[0]["todo_id"]], failure_turn
+        state_text = state_file.read_text(encoding="utf-8")
+        assert f"todo_id={failure_review['todo_id']} status=done" in state_text, state_text
+        assert "continuous_monitor" not in state_text, state_text
+        assert_public_safe(failure_turn)
+
+        proposer_successors = auto_research_successor_specs_for_action(
+            role_id="hypothesis_proposer",
+            action="propose_failure_successor",
+        )
+        assert proposer_successors == [], proposer_successors
+        classified_failure_successors = auto_research_successor_specs_for_action(
+            role_id="evaluator_promoter",
+            action="classify_evidence",
+        )
+        assert {
+            successor["action_kind"] for successor in classified_failure_successors
+        } == {
+            "remediate_data_measurement",
+            "propose_failure_successor",
+        }, classified_failure_successors
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        project = temp / "project"
+        project.mkdir()
+        state_file = project / "ACTIVE_GOAL_STATE.md"
+        registry = temp / "registry.json"
+        runtime_root = temp / "runtime"
+        write_summary_state(state_file)
+        write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
+        data_gap_review = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Summarize a declared data gap.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            dry_run=False,
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_data_gap_successor",
+            todo_id="todo_data_gap_successor",
+            failure_kind="data_or_measurement_gap",
+            measurement_scope="adjusted_price_field",
+        )
+        workspace = project / "visible-workspace"
+        workspace.mkdir()
+
+        data_gap_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        successors = data_gap_turn["successor_todos"]["successors"]
+        assert len(successors) == 1, data_gap_turn
+        assert successors[0]["claimed_by"] == EXECUTOR_AGENT_ID, data_gap_turn
+        assert successors[0]["action_kind"] == "remediate_data_measurement", data_gap_turn
+        assert data_gap_turn["evaluation_summary"]["failure_continuation"]["remediation_attempt_limit"] == 1, data_gap_turn
+        state_text = state_file.read_text(encoding="utf-8")
+        assert f"todo_id={data_gap_review['todo_id']} status=done" in state_text, state_text
+        assert "continuous_monitor" not in state_text, state_text
+        assert_public_safe(data_gap_turn)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp = Path(temp_dir)

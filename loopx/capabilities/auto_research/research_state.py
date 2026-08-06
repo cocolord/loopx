@@ -15,6 +15,7 @@ from typing import Any
 
 from .evidence_packet import (
     METRIC_DIRECTIONS,
+    RESEARCH_FAILURE_KINDS,
     RESEARCH_EVIDENCE_EVENT_SCHEMA_VERSION,
     RESEARCH_HYPOTHESIS_SCHEMA_VERSION,
     _compact_public_text,
@@ -321,6 +322,9 @@ def _research_evidence_from_rollout_event(event: dict[str, Any]) -> dict[str, An
             "baseline_metric": details.get("baseline_metric"),
             "eval_status": details.get("eval_status") or event.get("status"),
             "primary_metric_status": details.get("primary_metric_status") or "inconclusive",
+            "failure_kind": details.get("failure_kind") or None,
+            "measurement_scope": details.get("measurement_scope") or None,
+            "remediation_attempt": bool(details.get("remediation_attempt")),
             "artifact_refs": event.get("artifact_refs") or [],
             "protected_scope_clean": bool(details.get("protected_scope_clean")),
         }
@@ -363,6 +367,44 @@ def _best_metric(events: list[dict[str, Any]], *, split: str, direction: str) ->
     return max(values, key=lambda value: _metric_rank_key(value, direction=direction))
 
 
+def _default_failure_kind(
+    *,
+    status: str,
+    events: list[dict[str, Any]],
+) -> str:
+    explicit = [event for event in events if event.get("failure_kind")]
+    if explicit:
+        return str(explicit[-1]["failure_kind"])
+    if any(not event["protected_scope_clean"] for event in events):
+        return "guardrail_or_protected_boundary"
+    if status == "needs_retry":
+        return "retry_exhausted"
+    return "mechanism_contradicted"
+
+
+def _failure_measurement_scope(events: list[dict[str, Any]]) -> str | None:
+    values = [
+        str(event.get("measurement_scope") or "").strip()
+        for event in events
+        if event.get("measurement_scope")
+    ]
+    return values[-1] if values else None
+
+
+def _ancestor_hypothesis_ids(
+    hypothesis_id: str,
+    *,
+    hypotheses: dict[str, dict[str, Any]],
+) -> set[str]:
+    ancestor_ids: set[str] = set()
+    current_id = hypothesis_id
+    while current_id and current_id not in ancestor_ids:
+        ancestor_ids.add(current_id)
+        current = hypotheses.get(current_id) or {}
+        current_id = str(current.get("parent_hypothesis_id") or "").strip()
+    return ancestor_ids
+
+
 def build_research_evidence_graph_from_records(
     *,
     goal_id: str,
@@ -385,6 +427,7 @@ def build_research_evidence_graph_from_records(
     scored_events = [event for event in events if event["eval_status"] == "scored"]
     best_dev = _best_metric(scored_events, split="dev", direction=direction)
     best_holdout = _best_metric(scored_events, split="holdout", direction=direction)
+    hypotheses_by_id = {item["hypothesis_id"]: item for item in hypotheses}
     events_by_hypothesis: dict[str, list[dict[str, Any]]] = {}
     for event in events:
         events_by_hypothesis.setdefault(event["hypothesis_id"], []).append(event)
@@ -405,6 +448,24 @@ def build_research_evidence_graph_from_records(
         item_splits = sorted({event["split"] for event in item_events if event.get("split")})
         item_negative_count = len([event for event in item_events if _is_negative_evidence_event(event)])
         item_retry_count = len([event for event in item_events if _is_retry_evidence_event(event)])
+        item_failure_kind = (
+            _default_failure_kind(status=item["status"], events=item_events)
+            if item["status"] in {"contradicted", "retired", "needs_retry"}
+            or item_negative_count
+            else None
+        )
+        lineage_ids = _ancestor_hypothesis_ids(
+            item["hypothesis_id"],
+            hypotheses=hypotheses_by_id,
+        )
+        remediation_attempt_count = len(
+            [
+                event
+                for event in events
+                if event["hypothesis_id"] in lineage_ids
+                and event.get("remediation_attempt")
+            ]
+        )
         nodes.append(
             {
                 "hypothesis_id": item["hypothesis_id"],
@@ -431,6 +492,9 @@ def build_research_evidence_graph_from_records(
                 ),
                 "negative_evidence_count": item_negative_count,
                 "needs_retry_count": item_retry_count,
+                "failure_kind": item_failure_kind,
+                "measurement_scope": _failure_measurement_scope(item_events),
+                "remediation_attempt_count": remediation_attempt_count,
                 "source_kind": source,
             }
         )
@@ -454,6 +518,9 @@ def build_research_evidence_graph_from_records(
         "needs_retry_count": len(
             [event for event in events if _is_retry_evidence_event(event)]
         ) + len([item for item in hypotheses if item["status"] == "needs_retry"]),
+        "remediation_attempt_count": len(
+            [event for event in events if event.get("remediation_attempt")]
+        ),
         "nodes": nodes,
         "source_kind": source,
     }
@@ -547,6 +614,20 @@ def build_research_decision_candidates(evidence_graph: dict[str, Any]) -> dict[s
             direction=direction,
         )
         if status in {"contradicted", "retired"} or negative_count > 0:
+            failure_kind = str(raw_node.get("failure_kind") or "")
+            if failure_kind not in RESEARCH_FAILURE_KINDS:
+                failure_kind = (
+                    "guardrail_or_protected_boundary"
+                    if status == "contradicted" and negative_count
+                    else "mechanism_contradicted"
+                )
+            remediation_attempt_count = int(
+                raw_node.get("remediation_attempt_count") or 0
+            )
+            remediation_allowed = (
+                failure_kind == "data_or_measurement_gap"
+                and remediation_attempt_count < 1
+            )
             retirement_candidates.append(
                 {
                     "hypothesis_id": hypothesis_id,
@@ -555,6 +636,16 @@ def build_research_decision_candidates(evidence_graph: dict[str, Any]) -> dict[s
                     "negative_evidence_count": negative_count,
                     "evidence_event_count": evidence_count,
                     "reason": "negative_or_guardrail_evidence" if negative_count else f"status:{status}",
+                    "failure_kind": failure_kind,
+                    "measurement_scope": raw_node.get("measurement_scope"),
+                    "remediation_attempt_count": remediation_attempt_count,
+                    "remediation_attempt_limit": 1,
+                    "remediation_allowed": remediation_allowed,
+                    "next_outcome": (
+                        "remediate_data_measurement"
+                        if remediation_allowed
+                        else "propose_failure_successor"
+                    ),
                     "source_kind": source_kind,
                 }
             )
@@ -582,6 +673,32 @@ def build_research_decision_candidates(evidence_graph: dict[str, Any]) -> dict[s
         "validated_promotion_candidates": validated_promotion_candidates,
         "promotion_candidates": promotion_candidates,
         "retirement_candidates": retirement_candidates,
+    }
+
+
+def build_research_failure_continuation(
+    decision_candidates: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any] | None:
+    candidates = [
+        dict(candidate)
+        for candidate in decision_candidates.get("retirement_candidates") or []
+        if isinstance(candidate, dict)
+    ]
+    if not candidates:
+        return None
+    candidate = sorted(
+        candidates,
+        key=lambda item: str(item.get("hypothesis_id") or ""),
+    )[0]
+    return {
+        "hypothesis_id": candidate["hypothesis_id"],
+        "source_todo_id": candidate["todo_id"],
+        "failure_kind": candidate["failure_kind"],
+        "measurement_scope": candidate.get("measurement_scope"),
+        "remediation_attempt_count": candidate["remediation_attempt_count"],
+        "remediation_attempt_limit": candidate["remediation_attempt_limit"],
+        "next_outcome": candidate["next_outcome"],
+        "monitor_allowed": False,
     }
 
 
@@ -640,6 +757,7 @@ def build_auto_research_completion_status(
     validated_count = len(decisions.get("validated_promotion_candidates") or [])
     promotion_count = len(decisions.get("promotion_candidates") or [])
     retirement_count = len(decisions.get("retirement_candidates") or [])
+    failure_continuation = build_research_failure_continuation(decisions)
 
     status = "active"
     next_action = "continue_frontier"
@@ -662,10 +780,13 @@ def build_auto_research_completion_status(
         required_actions = ["boundary_scan", "promotion_decision"]
         reason = "validated_promotion_candidate_pending_decision"
     elif retirement_count:
-        status = "retirement_review_required"
-        next_action = "review_retirement_candidate"
-        required_actions = ["retirement_decision"]
-        reason = "retirement_candidate_pending_decision"
+        status = "failure_successor_required"
+        next_action = str(
+            (failure_continuation or {}).get("next_outcome")
+            or "propose_failure_successor"
+        )
+        required_actions = [next_action]
+        reason = "retirement_candidate_requires_successor_or_exhaustion"
 
     return {
         "schema_version": AUTO_RESEARCH_COMPLETION_STATUS_SCHEMA_VERSION,
@@ -681,6 +802,7 @@ def build_auto_research_completion_status(
         "dev_candidate_pending_holdout_count": dev_pending_count,
         "promotion_candidate_count": promotion_count,
         "retirement_candidate_count": retirement_count,
+        "failure_continuation": failure_continuation,
     }
 
 

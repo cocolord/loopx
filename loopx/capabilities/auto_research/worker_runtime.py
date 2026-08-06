@@ -20,6 +20,7 @@ from .research_state import (
     build_live_auto_research_projection,
     build_research_decision_candidates,
     build_research_evidence_graph_from_rollout_events,
+    build_research_failure_continuation,
     normalize_auto_research_action,
 )
 from ...control_plane.agents.multi_agent.role_successor import (
@@ -43,6 +44,8 @@ SUPPORTED_WORKER_ACTIONS = {
     "review_hypothesis_frontier",
     "run_dev_eval",
     "run_holdout_eval",
+    "remediate_data_measurement",
+    "propose_failure_successor",
     "write_evidence",
     "classify_evidence",
     "summarize_evidence",
@@ -55,8 +58,10 @@ AUTO_RESEARCH_MANUAL_RESEARCH_REQUIRED_MODE = "manual_research_required"
 MANUAL_RESEARCH_REQUIRED_ACTIONS = {
     "write_research_contract",
     "propose_hypothesis",
+    "propose_failure_successor",
     "run_dev_eval",
     "run_holdout_eval",
+    "remediate_data_measurement",
     "write_evidence",
 }
 SUMMARY_ACTIONS = {
@@ -166,6 +171,7 @@ def _write_evaluation_summary_artifact(
         rollout_events=rollout_events,
     )
     decisions = build_research_decision_candidates(graph)
+    failure_continuation = build_research_failure_continuation(decisions)
     holdout_metrics = _holdout_metric_sequence(rollout_events)
     metric = graph.get("metric") if isinstance(graph.get("metric"), dict) else {}
     baseline = graph.get("baseline_metric")
@@ -197,6 +203,7 @@ def _write_evaluation_summary_artifact(
             "validated_promotion_candidate_count": len(decisions.get("validated_promotion_candidates") or []),
             "promotion_candidate_count": len(decisions.get("promotion_candidates") or []),
             "retirement_candidate_count": len(decisions.get("retirement_candidates") or []),
+            "failure_continuation": failure_continuation,
             "holdout_metric_sequence": holdout_metrics,
             "holdout_improvement_count": holdout_improvements,
         },
@@ -271,6 +278,18 @@ def _maybe_add_role_successor_todos(
     decision_summary: dict[str, object],
     execute: bool,
 ) -> dict[str, object]:
+    successor_specs = auto_research_successor_specs_for_action(
+        role_id=role_id,
+        action=action,
+    )
+    failure_continuation = decision_summary.get("failure_continuation")
+    if isinstance(failure_continuation, dict):
+        next_outcome = str(failure_continuation.get("next_outcome") or "")
+        successor_specs = [
+            spec
+            for spec in successor_specs
+            if spec.get("action_kind") == next_outcome
+        ]
     return apply_role_successor_todos(
         registry_path=registry_path,
         goal_id=goal_id,
@@ -278,7 +297,7 @@ def _maybe_add_role_successor_todos(
         current_agent_id=agent_id,
         role_id=role_id,
         action=action,
-        successor_specs=auto_research_successor_specs_for_action(role_id=role_id, action=action),
+        successor_specs=successor_specs,
         decision_summary=decision_summary,
         execute=execute,
     )
@@ -585,6 +604,9 @@ def run_auto_research_worker_turn(
                 ],
                 "validated_promotion_candidate_count": artifact["decision_summary"][
                     "validated_promotion_candidate_count"
+                ],
+                "failure_continuation": artifact["decision_summary"][
+                    "failure_continuation"
                 ],
             },
             "successor_todos": successor_todos,

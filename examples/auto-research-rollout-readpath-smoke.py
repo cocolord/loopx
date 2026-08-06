@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.capabilities.auto_research.research_state import (  # noqa: E402
+    build_auto_research_completion_status,
     build_live_auto_research_projection,
     build_research_decision_candidates,
     build_research_evidence_graph_from_records,
@@ -276,8 +277,95 @@ def main() -> None:
             "hyp_bad_distance_cache"
         ), negative_decisions
         assert negative_decisions["retirement_candidates"][0]["negative_evidence_count"] == 1
+        assert negative_decisions["retirement_candidates"][0]["failure_kind"] == (
+            "mechanism_contradicted"
+        ), negative_decisions
+        assert negative_decisions["retirement_candidates"][0]["next_outcome"] == (
+            "propose_failure_successor"
+        ), negative_decisions
+        negative_completion = build_auto_research_completion_status(
+            negative_graph,
+            negative_decisions,
+        )
+        assert negative_completion["status"] == "failure_successor_required", negative_completion
+        assert negative_completion["next_action"] == "propose_failure_successor", negative_completion
+        assert negative_completion["failure_continuation"]["monitor_allowed"] is False, negative_completion
         assert_public_safe(negative_graph)
         assert_public_safe(negative_decisions)
+        assert_public_safe(negative_completion)
+
+        data_gap_graph = build_research_evidence_graph_from_records(
+            goal_id=GOAL_ID,
+            hypotheses=[
+                {
+                    "schema_version": "research_hypothesis_v0",
+                    "hypothesis_id": "hyp_data_gap",
+                    "parent_hypothesis_id": None,
+                    "todo_id": "todo_auto_research_data_gap",
+                    "claimed_by": AGENT_ID,
+                    "mechanism_family": "price_normalization",
+                    "hypothesis": "Normalize the declared price field before scoring.",
+                    "status": "contradicted",
+                    "grounding_refs": [GROUNDING_REF],
+                    "blocked_by": ["evidence_or_boundary_guardrail_failed"],
+                }
+            ],
+            evidence_events=[
+                {
+                    "schema_version": "research_evidence_event_v0",
+                    "hypothesis_id": "hyp_data_gap",
+                    "todo_id": "todo_auto_research_data_gap",
+                    "agent_id": AGENT_ID,
+                    "attempt": 1,
+                    "split": "dev",
+                    "metric": {
+                        "name": METRIC_NAME,
+                        "value": 0.8,
+                        "direction": "maximize",
+                    },
+                    "baseline_metric": 1.0,
+                    "eval_status": "scored",
+                    "primary_metric_status": "regressed",
+                    "failure_kind": "data_or_measurement_gap",
+                    "measurement_scope": "adjusted_price_field",
+                    "remediation_attempt": False,
+                    "artifact_refs": ["public_eval_summary:data_gap_initial"],
+                    "protected_scope_clean": True,
+                },
+                {
+                    "schema_version": "research_evidence_event_v0",
+                    "hypothesis_id": "hyp_data_gap",
+                    "todo_id": "todo_auto_research_data_gap",
+                    "agent_id": AGENT_ID,
+                    "attempt": 2,
+                    "split": "holdout",
+                    "metric": {
+                        "name": METRIC_NAME,
+                        "value": 0.7,
+                        "direction": "maximize",
+                    },
+                    "baseline_metric": 1.0,
+                    "eval_status": "scored",
+                    "primary_metric_status": "regressed",
+                    "failure_kind": "data_or_measurement_gap",
+                    "measurement_scope": "adjusted_price_field",
+                    "remediation_attempt": True,
+                    "artifact_refs": ["public_eval_summary:data_gap_remediation"],
+                    "protected_scope_clean": True,
+                },
+            ],
+            metric_name=METRIC_NAME,
+            metric_direction="maximize",
+            baseline_metric=1.0,
+            source_kind="public_records",
+        )
+        data_gap_decisions = build_research_decision_candidates(data_gap_graph)
+        data_gap_candidate = data_gap_decisions["retirement_candidates"][0]
+        assert data_gap_candidate["remediation_attempt_count"] == 1, data_gap_candidate
+        assert data_gap_candidate["remediation_allowed"] is False, data_gap_candidate
+        assert data_gap_candidate["next_outcome"] == "propose_failure_successor", data_gap_candidate
+        assert_public_safe(data_gap_graph)
+        assert_public_safe(data_gap_decisions)
 
         live_payload = build_live_auto_research_projection(
             goal_id=GOAL_ID,
