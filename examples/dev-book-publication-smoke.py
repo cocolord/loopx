@@ -10,6 +10,7 @@ import re
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BOOK = REPO_ROOT / "docs" / "book"
+CONTROL_PLANE_COURSE = REPO_ROOT / "docs" / "development" / "control-plane-course"
 MKDOCS = REPO_ROOT / "mkdocs.yaml"
 MKDOCS_ZH = REPO_ROOT / "mkdocs.book.zh.yaml"
 MKDOCS_EN = REPO_ROOT / "mkdocs.book.en.yaml"
@@ -39,6 +40,21 @@ CHAPTERS = (
     "appendix-reference",
 )
 
+COURSE_PAGES = (
+    "00-concept-primer",
+    "00-goal-control-plane-architecture",
+    "01-first-real-loop",
+    "02-state-substrate",
+    "03-work-graph-and-peers",
+    "04-quota-decision-kernel",
+    "05-host-scheduler-and-heartbeat",
+    "06-evidence-refresh-and-self-repair",
+    "07-engineering-a-control-plane-rule",
+    "08-autonomous-agent-quality-gates",
+    "09-extension-layer",
+    "topic-long-horizon-convergence",
+)
+
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
@@ -47,6 +63,10 @@ def read(path: Path) -> str:
 def validate_rendered_site(site_dir: Path) -> None:
     routes = {
         "index.html": ("LoopX Developer Book", "English edition", "MkDocs Material"),
+        "chapters/00-reading-guide/index.html": (
+            "Dev Book 与 Control-Plane Course 如何配合",
+            "/loopx/docs/development/control-plane-course/04-quota-decision-kernel/",
+        ),
         "chapters/01-from-session-to-loop/index.html": (
             "从一次会话到长程任务",
         ),
@@ -57,6 +77,10 @@ def validate_rendered_site(site_dir: Path) -> None:
     }
     english_routes = {
         "index.html": ("LoopX Developer Book", "简体中文版", "MkDocs Material"),
+        "chapters/00-reading-guide/index.html": (
+            "How the Dev Book and Control-Plane Course work together",
+            "/loopx/docs/development/control-plane-course/04-quota-decision-kernel/",
+        ),
         "chapters/01-from-session-to-loop/index.html": (
             "From one session to long-running work",
         ),
@@ -111,6 +135,11 @@ def validate_rendered_site(site_dir: Path) -> None:
             "第四部分：工程边界",
         ):
             assert chinese_section not in html
+
+    main_docs_dir = site_dir.parent
+    for page in COURSE_PAGES:
+        target = main_docs_dir / "development" / "control-plane-course" / page / "index.html"
+        assert target.is_file(), f"missing rendered Control-Plane Course route: {page}"
 
 
 def main() -> int:
@@ -183,6 +212,61 @@ def main() -> int:
         assert "MkDocs Material" in text
     assert "/loopx/docs/book/en/" in read(BOOK / "index.md")
     assert "/loopx/docs/book/" in read(BOOK / "en" / "index.md")
+
+    for page in COURSE_PAGES:
+        assert (CONTROL_PLANE_COURSE / f"{page}.md").is_file(), page
+
+    reading_guides = (
+        read(BOOK / "chapters" / "00-reading-guide.md"),
+        read(BOOK / "en" / "chapters" / "00-reading-guide.md"),
+    )
+    for guide in reading_guides:
+        assert "/loopx/docs/development/control-plane-course/" in guide
+        for page in COURSE_PAGES:
+            assert f"/loopx/docs/development/control-plane-course/{page}/" in guide, page
+
+    integrated_mechanisms = {
+        "chapters/01-from-session-to-loop.md": (
+            "PR Issue Fix",
+            "Single-Agent Auto ML",
+            "Multi-Agent Auto Research",
+            "/loopx/docs/development/control-plane-course/00-goal-control-plane-architecture/",
+        ),
+        "chapters/03-one-turn.md": (
+            "Decision Pipeline",
+            "identity",
+            "capability and workspace eligibility",
+            "/loopx/docs/development/control-plane-course/04-quota-decision-kernel/",
+        ),
+        "chapters/04-runtime-boundaries.md": (
+            "Material Evidence Delta",
+            "Goal / Acceptance",
+            "六条收敛不变量",
+            "/loopx/docs/development/control-plane-course/topic-long-horizon-convergence/",
+        ),
+        "en/chapters/01-from-session-to-loop.md": (
+            "PR Issue Fix",
+            "Single-Agent Auto ML",
+            "Multi-Agent Auto Research",
+            "/loopx/docs/development/control-plane-course/00-goal-control-plane-architecture/",
+        ),
+        "en/chapters/03-one-turn.md": (
+            "Decision pipeline",
+            "Identity",
+            "capability and workspace eligibility",
+            "/loopx/docs/development/control-plane-course/04-quota-decision-kernel/",
+        ),
+        "en/chapters/04-runtime-boundaries.md": (
+            "Material evidence delta",
+            "Goal or Acceptance",
+            "Six convergence invariants",
+            "/loopx/docs/development/control-plane-course/topic-long-horizon-convergence/",
+        ),
+    }
+    for relative_path, markers in integrated_mechanisms.items():
+        chapter = read(BOOK / relative_path)
+        for marker in markers:
+            assert marker in chapter, f"{relative_path}: missing integrated mechanism {marker}"
 
     all_markdown = "\n".join(
         read(path) for path in BOOK.rglob("*.md")
