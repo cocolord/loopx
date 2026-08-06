@@ -299,10 +299,36 @@ def test_projection_publication_rejects_undeclared_surface(
         )
 
 
-@pytest.mark.parametrize("execute", [False, True])
-def test_projection_publication_fails_before_provider_when_validator_unavailable(
+def test_projection_publication_dry_run_skips_validator_loading(
     tmp_path: Path,
-    execute: bool,
+) -> None:
+    marker = tmp_path / "provider-called"
+    state_file, _ = _installed_projection_extension(
+        tmp_path,
+        invocation_marker=marker,
+    )
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    surface = state["extensions"]["test-research-extension"]["revisions"][0][
+        "manifest"
+    ]["presentation_surfaces"][0]
+    surface["view_validator"] = "missing_validator_module:validate_view"
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+
+    receipt = publish_extension_projection(
+        "test-research-extension",
+        "investment-research",
+        state_file=state_file,
+        request={"schema_version": "synthetic_request_v0"},
+        execute=False,
+    )
+    assert receipt["ok"]
+    assert receipt["dry_run"]
+    assert not receipt["executed"]
+    assert not marker.exists()
+
+
+def test_projection_publication_fails_when_validator_unavailable_on_execute(
+    tmp_path: Path,
 ) -> None:
     marker = tmp_path / "provider-called"
     state_file, _ = _installed_projection_extension(
@@ -322,7 +348,7 @@ def test_projection_publication_fails_before_provider_when_validator_unavailable
             "investment-research",
             state_file=state_file,
             request={"schema_version": "synthetic_request_v0"},
-            execute=execute,
+            execute=True,
         )
 
     assert not marker.exists()
