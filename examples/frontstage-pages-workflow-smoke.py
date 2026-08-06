@@ -20,8 +20,18 @@ def assert_absent(text: str, needle: str) -> None:
         raise AssertionError(f"workflow must not reference {needle!r}")
 
 
+def assert_pr_and_push_trigger(trigger_text: str, path: str) -> None:
+    marker = f'      - "{path}"'
+    count = trigger_text.count(marker)
+    if count != 2:
+        raise AssertionError(
+            f"workflow must trigger pull_request and push for {path!r}; found {count}"
+        )
+
+
 def main() -> int:
     text = WORKFLOW.read_text(encoding="utf-8")
+    trigger_text = text.split("\npermissions:", 1)[0]
 
     for needle in [
         "workflow_dispatch:",
@@ -85,6 +95,13 @@ def main() -> int:
         '"/stargazers?per_page=100"',
     ]:
         assert_absent(text, forbidden)
+
+    for path in [
+        "mkdocs.book.zh.yaml",
+        "mkdocs.book.en.yaml",
+        "examples/dev-book-publication-smoke.py",
+    ]:
+        assert_pr_and_push_trigger(trigger_text, path)
 
     print("frontstage-pages-workflow-smoke: ok")
     return 0
