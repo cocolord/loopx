@@ -883,9 +883,9 @@ If the result says `should_run=false`:
   already been surfaced, the gate blocks only the gated delivery path. You may
   do exactly one bounded safe-bypass step from the Priority Stack that does not
   depend on that gate; validate, write back, refresh accountable progress, spend
-  once, and report compactly. If `user_todo_summary.open_count > 0`, include
-  those todos and do not say "no new user action". If none exists, report the
-  gate.
+  once. Only if `user_channel.notify=NOTIFY`: report the result compactly; if
+  `user_todo_summary.open_count > 0`, include those todos; if none exists, report
+  the gate. Under `DONT_NOTIFY`, stay quiet after the safe-bypass work.
 - If `effective_action=monitor_quiet_skip`, receipt/stall is written; quiet
   unless replan. On receipt write failure, retry same id. No edits/spend;
   receipts do not self-stop.
@@ -894,8 +894,10 @@ If the result says `should_run=false`:
   project-approved status/log/metric/marker surfaces named in active state,
   `recommended_action`, or `goal_boundary.next_probe`. Unchanged evidence:
   quiet `DONT_NOTIFY`, no edits, no spend. New eval/fail/complete/blocker/
-  approval/CI/deploy/data evidence: report, write back only allowed canonical
+  approval/CI/deploy/data evidence: write back only allowed canonical
   state/board/ledger, add todos if needed, then spend once after validation.
+  Only if `user_channel.notify=NOTIFY`: report the new evidence. Under
+  `DONT_NOTIFY`, stay quiet.
   Still do not launch/stop/restart/sync/design code or mutate production unless
   `should_run=true` or the user explicitly authorizes it.
 - Otherwise, do not do implementation work, adapter work, file edits, research,
@@ -928,8 +930,8 @@ If the result says `should_run=true`:
    surface propagation, or synthetic-only chains.
    Read `execution_obligation`: `notify` is not an execution gate;
    `must_attempt_work=true` means one bounded segment even with
-   `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false` and no
-   `notify_user_on_open_todo=true` blocker-push notification. Use
+   `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false` and
+   `user_channel.notify=DONT_NOTIFY`. Use
    `scheduler_hint` for wakeup and unchanged-loop limits. For Codex App:
    `apply_needed=true` -> update `recommended_rrule` once; on success run
    `ack_hint.cli_args`; on failure/timeout do not retry or ack, run
@@ -1165,8 +1167,8 @@ If `should_run=true`:
    surface/synthetic-only work.
 4. Follow `execution_obligation`: `notify` is not an execution gate.
    `must_attempt_work=true` means one bounded segment even with
-   `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false` and no
-   `notify_user_on_open_todo=true` blocker-push notification.
+   `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false` and
+   `user_channel.notify=DONT_NOTIFY`.
    Then follow `heartbeat_recommendation`:
    `run_first_read_only_map`: exact real-map, validate/save/refresh/spend;
    notify only under `NOTIFY`;

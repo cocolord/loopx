@@ -54,6 +54,13 @@ def user_output_policy(task_body: str, *, mode: str) -> dict[str, str]:
         assert "repair the projection internally and stay quiet" in body
         assert "notify only under `NOTIFY`" in body
         assert "Return compactly under `interaction_contract.user_channel.notify`" in body
+        # No bare report directives outside NOTIFY condition
+        assert "and report compactly" not in body, (
+            "full: bare 'and report compactly' (old form outside NOTIFY)"
+        )
+        assert "report, write back" not in body, (
+            "full: bare 'report, write back' (old form outside NOTIFY)"
+        )
     else:
         assert "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet" in body
         assert "Due/peer gate != prompt" in body
