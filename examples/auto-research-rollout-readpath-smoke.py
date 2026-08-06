@@ -20,6 +20,7 @@ from loopx.capabilities.auto_research.research_state import (  # noqa: E402
     build_live_auto_research_projection,
     build_research_decision_candidates,
     build_research_evidence_graph_from_records,
+    build_research_failure_continuation_resolution,
     build_research_evidence_graph_from_rollout_events,
 )
 from loopx.rollout_event_log import load_rollout_events, rollout_event_log_path  # noqa: E402
@@ -293,6 +294,81 @@ def main() -> None:
         assert_public_safe(negative_graph)
         assert_public_safe(negative_decisions)
         assert_public_safe(negative_completion)
+
+        ordinary_retry_graph = dict(negative_graph)
+        ordinary_retry_node = dict(negative_graph["nodes"][0])
+        ordinary_retry_node.update(
+            {
+                "hypothesis_id": "hyp_retry_still_available",
+                "todo_id": "todo_auto_research_retry_001",
+                "status": "needs_retry",
+                "negative_evidence_count": 0,
+                "failure_kind": None,
+            }
+        )
+        ordinary_retry_graph["nodes"] = [ordinary_retry_node]
+        ordinary_retry_decisions = build_research_decision_candidates(ordinary_retry_graph)
+        assert ordinary_retry_decisions["retirement_candidates"] == [], ordinary_retry_decisions
+        ordinary_retry_completion = build_auto_research_completion_status(
+            ordinary_retry_graph,
+            ordinary_retry_decisions,
+        )
+        assert ordinary_retry_completion["failure_continuation"] is None, ordinary_retry_completion
+        assert ordinary_retry_completion["status"] == "active", ordinary_retry_completion
+        assert_public_safe(ordinary_retry_decisions)
+        assert_public_safe(ordinary_retry_completion)
+
+        ambiguous_failure_graph = dict(negative_graph)
+        second_failure_node = dict(negative_graph["nodes"][0])
+        second_failure_node.update(
+            {
+                "hypothesis_id": "hyp_bad_distance_cache_second",
+                "todo_id": "todo_auto_research_bad_002",
+            }
+        )
+        ambiguous_failure_graph["nodes"] = [
+            dict(negative_graph["nodes"][0]),
+            second_failure_node,
+        ]
+        ambiguous_failure_decisions = build_research_decision_candidates(ambiguous_failure_graph)
+        ambiguous_failure_completion = build_auto_research_completion_status(
+            ambiguous_failure_graph,
+            ambiguous_failure_decisions,
+        )
+        assert ambiguous_failure_completion["status"] == "failure_successor_required", ambiguous_failure_completion
+        assert ambiguous_failure_completion["failure_continuation"] is None, ambiguous_failure_completion
+        assert ambiguous_failure_completion["failure_continuation_ambiguous"] is True, (
+            ambiguous_failure_completion
+        )
+        assert_public_safe(ambiguous_failure_decisions)
+        assert_public_safe(ambiguous_failure_completion)
+
+        missing_lineage_resolution = build_research_failure_continuation_resolution(
+            {
+                "retirement_candidates": [
+                    {
+                        "hypothesis_id": "hyp_other_failure",
+                        "todo_id": "todo_other",
+                        "failure_kind": "mechanism_contradicted",
+                        "measurement_scope": None,
+                        "remediation_attempt_count": 0,
+                        "remediation_attempt_limit": 1,
+                        "next_outcome": "propose_failure_successor",
+                    }
+                ]
+            },
+            selected_todo_id="todo_selected_summary",
+            selected_lineage_todo_id="todo_expected",
+            require_selected_failure_match=True,
+        )
+        assert missing_lineage_resolution["failure_continuation"] is None, (
+            missing_lineage_resolution
+        )
+        assert missing_lineage_resolution["matched_candidate_count"] == 0, (
+            missing_lineage_resolution
+        )
+        assert missing_lineage_resolution["unresolved"] is True, missing_lineage_resolution
+        assert_public_safe(missing_lineage_resolution)
 
         data_gap_graph = build_research_evidence_graph_from_records(
             goal_id=GOAL_ID,

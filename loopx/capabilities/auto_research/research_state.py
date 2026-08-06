@@ -220,6 +220,21 @@ def _todo_frontier_item(
             max_len=220,
         ),
     }
+    unblocks_todo_id = _compact_optional_token(
+        item.get("unblocks_todo_id"),
+        field="live.unblocks_todo_id",
+        default="",
+    )
+    if unblocks_todo_id:
+        summary["unblocks_todo_id"] = unblocks_todo_id
+    resume_when = _compact_optional_text(
+        item.get("resume_when"),
+        field="live.resume_when",
+        default="",
+        max_len=160,
+    )
+    if resume_when:
+        summary["resume_when"] = resume_when
     if blocked_by:
         summary["blocked_by"] = _compact_public_text(blocked_by, field="live.blocked_by", max_len=160)
     else:
@@ -371,14 +386,14 @@ def _default_failure_kind(
     *,
     status: str,
     events: list[dict[str, Any]],
-) -> str:
+) -> str | None:
     explicit = [event for event in events if event.get("failure_kind")]
     if explicit:
         return str(explicit[-1]["failure_kind"])
     if any(not event["protected_scope_clean"] for event in events):
         return "guardrail_or_protected_boundary"
     if status == "needs_retry":
-        return "retry_exhausted"
+        return None
     return "mechanism_contradicted"
 
 
@@ -613,8 +628,9 @@ def build_research_decision_candidates(evidence_graph: dict[str, Any]) -> dict[s
             baseline=baseline,
             direction=direction,
         )
-        if status in {"contradicted", "retired"} or negative_count > 0:
-            failure_kind = str(raw_node.get("failure_kind") or "")
+        failure_kind = str(raw_node.get("failure_kind") or "")
+        retry_exhausted = status == "needs_retry" and failure_kind == "retry_exhausted"
+        if status in {"contradicted", "retired"} or negative_count > 0 or retry_exhausted:
             if failure_kind not in RESEARCH_FAILURE_KINDS:
                 failure_kind = (
                     "guardrail_or_protected_boundary"
@@ -635,7 +651,13 @@ def build_research_decision_candidates(evidence_graph: dict[str, Any]) -> dict[s
                     "status": status,
                     "negative_evidence_count": negative_count,
                     "evidence_event_count": evidence_count,
-                    "reason": "negative_or_guardrail_evidence" if negative_count else f"status:{status}",
+                    "reason": (
+                        "retry_exhausted"
+                        if retry_exhausted
+                        else "negative_or_guardrail_evidence"
+                        if negative_count
+                        else f"status:{status}"
+                    ),
                     "failure_kind": failure_kind,
                     "measurement_scope": raw_node.get("measurement_scope"),
                     "remediation_attempt_count": remediation_attempt_count,
@@ -676,30 +698,83 @@ def build_research_decision_candidates(evidence_graph: dict[str, Any]) -> dict[s
     }
 
 
-def build_research_failure_continuation(
+def build_research_failure_continuation_resolution(
     decision_candidates: dict[str, list[dict[str, Any]]],
-) -> dict[str, Any] | None:
+    *,
+    selected_todo_id: str | None = None,
+    selected_lineage_todo_id: str | None = None,
+    allow_unbound_singleton: bool = False,
+    require_selected_failure_match: bool = False,
+) -> dict[str, Any]:
     candidates = [
         dict(candidate)
         for candidate in decision_candidates.get("retirement_candidates") or []
         if isinstance(candidate, dict)
     ]
-    if not candidates:
-        return None
-    candidate = sorted(
-        candidates,
-        key=lambda item: str(item.get("hypothesis_id") or ""),
-    )[0]
+    lineage_todo_id = str(selected_lineage_todo_id or "").strip()
+    selected_id = str(selected_todo_id or "").strip()
+    selection_bound = bool(lineage_todo_id or selected_id)
+    selected_parent_todo_id = lineage_todo_id or selected_id
+    matched = (
+        [
+            candidate
+            for candidate in candidates
+            if str(candidate.get("todo_id") or "").strip() == selected_parent_todo_id
+        ]
+        if selection_bound
+        else []
+    )
+    candidate = (
+        matched[0]
+        if selection_bound and len(matched) == 1
+        else candidates[0]
+        if allow_unbound_singleton and not selection_bound and len(candidates) == 1
+        else None
+    )
+    continuation = (
+        {
+            "hypothesis_id": candidate["hypothesis_id"],
+            "source_todo_id": candidate["todo_id"],
+            "failure_kind": candidate["failure_kind"],
+            "measurement_scope": candidate.get("measurement_scope"),
+            "remediation_attempt_count": candidate["remediation_attempt_count"],
+            "remediation_attempt_limit": candidate["remediation_attempt_limit"],
+            "next_outcome": candidate["next_outcome"],
+            "monitor_allowed": False,
+        }
+        if candidate
+        else None
+    )
     return {
-        "hypothesis_id": candidate["hypothesis_id"],
-        "source_todo_id": candidate["todo_id"],
-        "failure_kind": candidate["failure_kind"],
-        "measurement_scope": candidate.get("measurement_scope"),
-        "remediation_attempt_count": candidate["remediation_attempt_count"],
-        "remediation_attempt_limit": candidate["remediation_attempt_limit"],
-        "next_outcome": candidate["next_outcome"],
-        "monitor_allowed": False,
+        "failure_continuation": continuation,
+        "retirement_candidate_count": len(candidates),
+        "matched_candidate_count": len(matched),
+        "lineage_todo_id": lineage_todo_id or None,
+        "selection_bound": selection_bound,
+        "ambiguous": not selection_bound and len(candidates) > 1,
+        "unresolved": require_selected_failure_match
+        and selection_bound
+        and bool(candidates)
+        and len(matched) != 1,
     }
+
+
+def build_research_failure_continuation(
+    decision_candidates: dict[str, list[dict[str, Any]]],
+    *,
+    selected_todo_id: str | None = None,
+    selected_lineage_todo_id: str | None = None,
+    allow_unbound_singleton: bool = True,
+    require_selected_failure_match: bool = False,
+) -> dict[str, Any] | None:
+    resolution = build_research_failure_continuation_resolution(
+        decision_candidates,
+        selected_todo_id=selected_todo_id,
+        selected_lineage_todo_id=selected_lineage_todo_id,
+        allow_unbound_singleton=allow_unbound_singleton,
+        require_selected_failure_match=require_selected_failure_match,
+    )
+    return resolution["failure_continuation"]
 
 
 def _holdout_metric_sequence_from_graph(evidence_graph: dict[str, Any]) -> list[float]:
@@ -757,7 +832,11 @@ def build_auto_research_completion_status(
     validated_count = len(decisions.get("validated_promotion_candidates") or [])
     promotion_count = len(decisions.get("promotion_candidates") or [])
     retirement_count = len(decisions.get("retirement_candidates") or [])
-    failure_continuation = build_research_failure_continuation(decisions)
+    failure_resolution = build_research_failure_continuation_resolution(
+        decisions,
+        allow_unbound_singleton=True,
+    )
+    failure_continuation = failure_resolution["failure_continuation"]
 
     status = "active"
     next_action = "continue_frontier"
@@ -803,6 +882,7 @@ def build_auto_research_completion_status(
         "promotion_candidate_count": promotion_count,
         "retirement_candidate_count": retirement_count,
         "failure_continuation": failure_continuation,
+        "failure_continuation_ambiguous": failure_resolution["ambiguous"],
     }
 
 
