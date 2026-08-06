@@ -81,6 +81,56 @@ no-follow-up。只写“已重新评估，继续原计划”不一定能清除 r
 
 Self-repair 修复状态、projection 或 boundary，不降低 Gate，也不凭猜测补 permission。
 
+## 长程收敛：Turn 不是进展单位
+
+长程任务不会因为 Turn 数量增加而自动接近 Goal。一次 Turn 可能只是合法等待，也可能产生大量
+diff 却没有增加能改变下一步判断的证据。判断系统是否在收敛，要同时区分四种状态：
+
+| 状态 | 可观察特征 | 正确动作 |
+| --- | --- | --- |
+| 合法迭代 | 输入、revision 或 evidence 已变化，下一步因此可区分 | 执行一个新的 bounded Turn |
+| 外部等待 | 没有当前动作，但恢复条件、target 与 next due 明确 | Monitor、backoff、quiet |
+| 目标漂移 | 局部指标或当前 Todo 开始替代 Goal / Acceptance | Vision checkpoint、acceptance audit、replan |
+| 局部循环 | 重复同类动作，却没有新增信息、状态 delta 或失败区分度 | 停止重复，diagnose、replan 或 self-repair |
+
+“重复”本身不是循环。PR checks 从 pending 变成 failed 后再次处理，是合法迭代；外部训练任务仍在
+运行时按 due time 观察，是合法等待。只有输入事实、可归因 evidence 和下一步计划都没有 material
+变化，却继续消耗同类 Turn，才是空转。
+
+### Material Evidence Delta
+
+一次值得继续消耗资源的 Turn，应至少推进下面一项：
+
+- 新 observation 改变了当前领域判断；
+- 新 evidence 排除或支持了一个可检验解释；
+- 已验证 artifact 满足了一项 acceptance；
+- successor、Gate、blocker、Vision 或 no-follow-up 改变了 machine-visible frontier；
+- Provider effect 得到与 proposal identity、revision 和 readback 绑定的 receipt；
+- 明确证明当前只能等待，并写入 target、cadence 与恢复条件。
+
+单纯增加日志、重写总结、刷新同一 projection、重复一个 unchanged poll，或产生无法绑定当前
+revision 的测试结果，都不是 material progress。它们可以是诊断步骤，但不能冒充 Goal 推进。
+
+### 六条收敛不变量
+
+可以用六个问题 review 一条长程链：
+
+1. **方向：** 当前 Todo 仍能追溯到 Vision、Goal 与 Acceptance 吗？
+2. **权限：** transition 作用于正确对象，并由正确 Agent、Gate 或 Host capability 授权吗？
+3. **证据：** observation 是否 fresh，evidence 是否与 revision、scope 和 evaluator 绑定？
+4. **Delta：** 本轮是否改变了可重放事实、frontier 或等待条件？
+5. **活性：** acceptance 未满足而 frontier 为空时，是否形成 wait、replan、repair 或明确 stop？
+6. **终局：** terminal 是否同时关闭 Todo、Monitor、Gate、successor、receipt 与 acceptance gap？
+
+这六条把 Safety 与 Liveness 放在同一闭环：Safety 防止错误推进，Liveness 防止系统非常谨慎地
+永久卡住。Successor 把局部完成接回 Goal；Monitor backoff 避免等待时热轮询；Replan 改变失效路线；
+Self-Repair 修补控制面缺口；Terminal audit 防止“Todo 都勾完了”被误报为完成。
+
+更完整的双 Showcase 回放、Evidence Delta 判据、独立 oracle 与收敛实验见
+[长程任务如何收敛](/loopx/docs/development/control-plane-course/topic-long-horizon-convergence/)；
+证据、Refresh、Spend 与 repair delta 的源码路径见
+[Control-Plane Course 第 6 讲](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/)。
+
 ## Projection Gap 的处理顺序
 
 当两个表面冲突时：

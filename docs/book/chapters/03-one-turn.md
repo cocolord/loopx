@@ -112,6 +112,59 @@ Mode 将一组相互关联的状态压成可测试协议。外部开发者至少
 具体 mode 会随协议演进。书中要保存的是判别方法：谁拥有下一 transition、什么行为被允许、什么
 证据允许 writeback，而不是背诵一个永久不变的枚举列表。
 
+## Decision Pipeline：先排除非法路径，再选择 Frontier
+
+Quota 决策不是让多个规则各自返回一个布尔值，再用最后一次赋值获胜。它按依赖顺序把 source
+facts 编译成一个 interaction contract。外部开发者不必记住实现函数，但需要掌握九个阶段：
+
+1. **Identity：** 解析精确 Goal 与 registered Agent，身份不明时 fail closed；
+2. **Goal boundary：** 建立 repository、write scope、authority source、spawn 与 public/private
+   boundary；
+3. **User Gate：** 归一化 blocking scope、decision scope、具体问题和 projection gap；
+4. **Outcome / repair obligation：** 检查连续 surface-only progress、Vision 或 acceptance gap，
+   判断是否必须 replan 或 self-repair；
+5. **Capability：** 筛出当前执行面真正具备能力的候选；
+6. **Workspace：** 检查 task repository、worktree、branch 与 required write scope；
+7. **Frontier：** 解析 priority、claim/lease、dependency、successor、monitor 与 terminal
+   closure；
+8. **Interaction contract：** 把结果组合为 user、agent 与 CLI 三个 channel；
+9. **Scheduler hint：** 从已确定的 lifecycle 状态派生下一次 wake、backoff 与 ACK。
+
+顺序本身就是安全合同。例如先选择 Todo、后检查 workspace，会让 Host 在发现“当前目录错误”
+之前已经开始写；先把 open user item 当作全局阻塞，则会饿死不依赖该决定的安全工作。更可靠的
+阅读顺序是：
+
+```text
+identity
+  -> authority and boundary
+  -> scoped decision
+  -> repair obligation
+  -> capability and workspace eligibility
+  -> frontier and continuation
+  -> interaction contract
+  -> scheduler
+```
+
+### 三个组合 Case
+
+**Scoped Gate 与独立工作。** P0 被 scoped Gate 阻塞，另有独立 P1 时，user channel 保留
+Gate，agent channel 只执行明确选中的 P1。不能简化成“有 User Todo，所以整个 Goal 停止”。
+
+**未到期的 Monitor。** 没有 advancement work，且 Monitor 尚未到期时，正确结果是 quiet
+wait/backoff：不 poll、不 spend，也不停止 automation。`should_run=false` 不代表 Goal terminal。
+
+**Monitor、Gate 与 Replan 同时变化。** Due Monitor 产生新 Gate，同时 autonomous replan 到期时，
+先写 compact observation；再把 Gate 放进 user channel，并让 replan 形成 machine-visible
+frontier delta；最后重算 scheduler identity。不能因为 Monitor 本轮结束，就沿用旧 cadence quiet。
+
+这些 case 说明规则会组合，而不是互相覆盖。Gate 约束 authority，Monitor 表达何时观察，
+Replan 修订 frontier；只有最终 interaction contract 才定义本轮行为。
+
+需要阅读完整 decision table、九类组合 case、源码 seam 与 smoke 时，进入
+[Control-Plane Course 第 4 讲](/loopx/docs/development/control-plane-course/04-quota-decision-kernel/)；
+Host、heartbeat、stateful backoff 和 scheduler receipt 的实现细节见
+[第 5 讲](/loopx/docs/development/control-plane-course/05-host-scheduler-and-heartbeat/)。
+
 ## Bounded Delivery 的五段闭环
 
 一次正常交付至少包含五段：

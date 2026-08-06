@@ -105,6 +105,41 @@ Control plane: 接受、拒绝或重规划
 控制面不替代执行面。LoopX 不写代码、不托管 Git，也不代替 CI；它使这些系统的结果可以被一个
 跨 Turn 的工作生命周期消费。
 
+## 三类长程任务为什么能复用同一控制面
+
+LoopX 的控制合同不绑定某一种业务流程。仓库中的 Control-Plane Course 用三类 Showcase
+说明：领域事实和验收方式可以完全不同，Goal、Todo、Gate、Quota、Evidence 与恢复机制仍可复用。
+
+| Showcase | 领域事实与判断 | 复用的控制面 |
+| --- | --- | --- |
+| PR Issue Fix | issue feasibility、exact-head checks、review 与 merge state | Todo、claim、workspace guard、monitor、successor、terminal closeout |
+| Single-Agent Auto ML | metric contract、matched baseline、实验 revision、外部 task 与 guardrail | Quota、Provider receipt、monitor、defer/resume、promotion Gate |
+| Multi-Agent Auto Research | hypothesis、dev/holdout evidence、支持或反驳关系 | per-Agent frontier、handoff、Evidence lineage、promotion/retirement |
+
+三条产品链都可以压成同一个长期闭环：
+
+```text
+外部事实
+  -> Provider observation
+  -> Capability 的领域判断与 transition proposal
+  -> Kernel 检查 authority、frontier、quota 与 workspace
+  -> Agent / Host 执行一个 bounded Turn
+  -> 独立验证、evidence 与 receipt 写回
+  -> 重新计算 continue | wait | ask | replan | repair | terminal
+```
+
+复用的不是一段通用 prompt，而是生命周期不变量。Issue-Fix 可以理解
+`CHANGES_REQUESTED`，Auto ML 可以理解 matched baseline，Auto Research 可以理解 holdout；
+这些领域含义属于 Capability 与 Domain State。谁能 claim、是否可执行、何时再次唤醒、什么证据
+允许 writeback，以及 Goal 能否终止，仍由同一 Kernel 合同决定。
+
+这个边界也解释了为什么新增领域能力不应复制一套 runner、queue、retry 和 completion 状态机。
+领域层提供可判定事实与 proposal，Provider 执行外部调用，Kernel 拥有跨领域生命周期。
+
+需要从三个 Showcase 进入架构、源码入口和完整 case 时，继续阅读
+[Control-Plane Course 第 0 讲](/loopx/docs/development/control-plane-course/00-goal-control-plane-architecture/)；
+第一次接触术语时可先看[概念导读](/loopx/docs/development/control-plane-course/00-concept-primer/)。
+
 ## 哪些状态必须外置
 
 对贯穿任务，最小状态不是完整 transcript，而是一组可回答恢复问题的事实：

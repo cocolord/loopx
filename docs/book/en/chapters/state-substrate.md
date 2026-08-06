@@ -334,5 +334,10 @@ This chapter owns the learning sequence, not the complete schemas. For state cha
 - the [Status Data Contract](https://github.com/huangruiteng/loopx/blob/main/docs/status-data-contract.md)
   for Agent and operator-facing aggregation.
 
+If you plan to change registry, event, Domain State, replay, or projection builders, continue to
+[Control-Plane Course Lesson 2](/loopx/docs/development/control-plane-course/02-state-substrate/). It enters
+source paths and experiments through fact ownership in Issue-Fix, Auto ML, and Auto Research. This chapter
+remains the external developer's conceptual entrypoint.
+
 The next chapter builds a work graph on this substrate: who may do what, which condition blocks it, and
 how work legally continues, hands off, or ends.

@@ -321,5 +321,10 @@ run_recorded(R1, tests_passed_at=commit-a)
 - [Status Data Contract](https://github.com/huangruiteng/loopx/blob/main/docs/status-data-contract.md)：
   operator 与 Agent 读取的聚合表面。
 
+如果你准备修改 registry、event、Domain State、replay 或 projection builder，继续阅读
+[Control-Plane Course 第 2 讲](/loopx/docs/development/control-plane-course/02-state-substrate/)。
+它从 Issue-Fix、Auto ML 与 Auto Research 的事实归属进入源码路径和实验；本章继续作为外部
+开发者的概念入口。
+
 下一章在这套状态底座上建立工作图：谁可以做什么、什么条件阻塞它，以及一项工作如何合法地
 继续、交接或结束。

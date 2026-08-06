@@ -83,6 +83,63 @@ The target work may still be correct while the control plane is inconsistent:
 
 Self-repair fixes state, projection, or boundary. It does not weaken a Gate or invent permission.
 
+## Long-horizon convergence: a Turn is not the unit of progress
+
+Long-running work does not approach its Goal merely because it executes more Turns. A Turn may be a legal
+wait, or it may produce a large diff without adding evidence that can change the next decision. To judge
+convergence, separate four operating states:
+
+| State | Observable property | Correct action |
+| --- | --- | --- |
+| Legal iteration | Input, revision, or evidence changed, making the next action distinguishable | Execute one new bounded Turn |
+| External wait | No current action exists, but recovery condition, target, and next due time are explicit | Monitor, backoff, and quiet |
+| Goal drift | A local metric or current Todo begins to replace Goal or Acceptance | Vision checkpoint, acceptance audit, and replan |
+| Local loop | The same action family repeats without new information, state delta, or failure discrimination | Stop repeating; diagnose, replan, or self-repair |
+
+Repetition alone is not a loop. Processing a PR again after checks move from pending to failed is legal
+iteration. Observing an external training task at its due time is legal waiting. Work is spinning only when
+input facts, attributable evidence, and the next plan all remain materially unchanged while the same class
+of Turn continues to consume resources.
+
+### Material evidence delta
+
+A Turn that deserves more resource consumption should advance at least one of these:
+
+- a new observation changes the current domain judgment;
+- new evidence supports or excludes a testable explanation;
+- a validated artifact satisfies an acceptance condition;
+- a successor, Gate, blocker, Vision, or no-follow-up changes the machine-visible frontier;
+- a Provider effect receives a receipt bound to proposal identity, revision, and readback;
+- the system proves that it can only wait and writes the target, cadence, and recovery condition.
+
+More logs, rewritten summaries, a refresh of the same projection, another unchanged poll, or a test result
+that cannot bind to the current revision are not material progress. They may be diagnostic steps, but they
+must not impersonate Goal advancement.
+
+### Six convergence invariants
+
+Review a long-running chain with six questions:
+
+1. **Direction:** Can the current Todo still be traced to Vision, Goal, and Acceptance?
+2. **Authority:** Does the transition affect the correct object under the correct Agent, Gate, or Host
+   capability?
+3. **Evidence:** Is the observation fresh, and is evidence bound to revision, scope, and evaluator?
+4. **Delta:** Did this Turn change replayable facts, the frontier, or a wait condition?
+5. **Liveness:** If acceptance remains open and the frontier is empty, did the system create a wait, replan,
+   repair, or explicit stop?
+6. **Closure:** Does terminal state close Todos, Monitors, Gates, successors, receipts, and acceptance gaps?
+
+These invariants combine Safety and Liveness. Safety prevents an invalid transition. Liveness prevents a
+system from remaining cautiously stuck forever. A successor reconnects local completion to the Goal;
+Monitor backoff avoids hot polling; Replan changes a failed route; Self-Repair fixes control-plane gaps;
+and terminal audit prevents “all current Todos are checked” from becoming a false completion claim.
+
+For the complete paired-Showcase replay, evidence-delta criteria, independent oracle, and convergence
+experiments, use
+[Long-horizon convergence](/loopx/docs/development/control-plane-course/topic-long-horizon-convergence/).
+[Control-Plane Course Lesson 6](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/)
+continues into source paths for evidence, refresh, spend, and repair deltas.
+
 ## Handle a projection gap in order
 
 When two surfaces disagree:

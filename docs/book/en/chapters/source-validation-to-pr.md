@@ -516,6 +516,12 @@ Before opening the PR, confirm:
 - [ ] The PR links public work and does not duplicate maintainer-owned execution.
 - [ ] “Merged,” “released,” “deployed,” and “observed” remain distinct.
 
+When a risk surface requires choosing among deterministic tests, decision replay, canaries, model-behavior
+validation, or release gates, continue to
+[Control-Plane Course Lesson 8](/loopx/docs/development/control-plane-course/08-autonomous-agent-quality-gates/).
+The course provides combined risk cases; this chapter keeps the delivery path from local evidence to a
+public PR.
+
 You have now completed one Control-Plane path within developer contributions: select an owner from the
 contribution map, trace one protocol chain, change one rule, and deliver independent evidence in a PR.
 Capability, Provider, Host or Runner, projection and documentation, fixture, and Extension work have

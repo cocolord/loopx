@@ -113,6 +113,63 @@ recognize these categories:
 Exact mode names can evolve. Preserve the reasoning method: who owns the next transition, which behavior is
 allowed, and what evidence permits writeback.
 
+## Decision pipeline: eliminate illegal paths before choosing the frontier
+
+Quota does not let independent rules return booleans and allow the last assignment to win. It compiles
+source facts into one interaction contract in dependency order. External developers do not need to
+memorize implementation functions, but they do need the nine stages:
+
+1. **Identity:** resolve the exact Goal and registered Agent; fail closed when identity is ambiguous.
+2. **Goal boundary:** establish repository, write scope, authority sources, spawn policy, and the
+   public/private boundary.
+3. **User Gate:** normalize blocking scope, decision scope, the concrete question, and projection gaps.
+4. **Outcome or repair obligation:** inspect repeated surface-only progress, Vision, and acceptance gaps to
+   decide whether replan or self-repair must run.
+5. **Capability:** retain only candidates the current execution surface can actually perform.
+6. **Workspace:** check task repository, worktree, branch, and required write scopes.
+7. **Frontier:** resolve priority, claim or lease, dependency, successor, monitor, and terminal closure.
+8. **Interaction contract:** compose the result into user, Agent, and CLI channels.
+9. **Scheduler hint:** derive the next wake-up, backoff, and ACK from the resolved lifecycle state.
+
+The order is a safety contract. Selecting a Todo before checking the workspace can let a Host start writing
+before it discovers that the repository is wrong. Treating any open user item as a global stop can starve
+safe work that does not depend on that decision. A more reliable reading order is:
+
+```text
+identity
+  -> authority and boundary
+  -> scoped decision
+  -> repair obligation
+  -> capability and workspace eligibility
+  -> frontier and continuation
+  -> interaction contract
+  -> scheduler
+```
+
+### Three combined cases
+
+**Scoped Gate with independent work.** When a scoped Gate blocks a P0 and an independent P1 exists, keep
+the Gate in the user channel and execute only the explicitly selected P1 in the Agent channel. Do not
+collapse the state into “a User Todo exists, so stop the entire Goal.”
+
+**Monitor not yet due.** When no advancement work exists and a Monitor is not due, the correct result is
+quiet wait/backoff: do not poll, spend, or stop the automation. `should_run=false` does not mean that the
+Goal is terminal.
+
+**Monitor, Gate, and Replan changing together.** When a due Monitor creates a new Gate while autonomous
+replan is due, first write the compact observation. Then project the Gate into the user channel, create a
+machine-visible frontier delta for replan, and recompute scheduler identity. Do not remain quiet on the old
+cadence merely because the Monitor finished this poll.
+
+These cases show that rules compose rather than overwrite one another. A Gate constrains authority, a
+Monitor says when to observe, and Replan changes the frontier. Only the final interaction contract defines
+the turn.
+
+For the complete decision table, nine combined cases, source seams, and smokes, use
+[Control-Plane Course Lesson 4](/loopx/docs/development/control-plane-course/04-quota-decision-kernel/).
+[Lesson 5](/loopx/docs/development/control-plane-course/05-host-scheduler-and-heartbeat/) continues into
+Host behavior, heartbeat, stateful backoff, and scheduler receipts.
+
 ## The five-stage bounded-delivery loop
 
 A normal delivery turn has at least five stages:

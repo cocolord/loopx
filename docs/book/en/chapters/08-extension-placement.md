@@ -240,4 +240,10 @@ Shared code may justify a helper. It does not prove a need for independent insta
 | permissions | `[]` |
 | managed entrypoint | `loopx extension run` |
 
+If you are designing more than a standalone package—such as Explore, Domain State, a Capability Pack,
+multi-agent preset, Provider, or presentation composition—continue to
+[Control-Plane Course Lesson 9](/loopx/docs/development/control-plane-course/09-extension-layer/). It
+explains how these extension surfaces reuse the Kernel instead of creating a second Goal, Todo, quota, or
+scheduler.
+
 The next chapter creates this structure from the official scaffold and changes only the domain contract.

@@ -105,6 +105,45 @@ Control plane: accept, reject, or replan
 LoopX does not replace the execution plane. It does not write the code, host Git, or run CI. It lets a
 workflow consume verifiable results from those systems across turns.
 
+## Why three kinds of long-running work share one control plane
+
+LoopX control contracts are not tied to one domain workflow. The Control-Plane Course uses three
+Showcases to demonstrate that domain facts and acceptance can differ completely while Goal, Todo, Gate,
+quota, evidence, and recovery remain reusable.
+
+| Showcase | Domain facts and judgment | Reused control plane |
+| --- | --- | --- |
+| PR Issue Fix | Issue feasibility, exact-head checks, review, and merge state | Todo, claim, workspace guard, monitor, successor, and terminal closeout |
+| Single-Agent Auto ML | Metric contract, matched baseline, experiment revision, external task, and guardrail | Quota, Provider receipt, monitor, defer/resume, and promotion Gate |
+| Multi-Agent Auto Research | Hypothesis, dev/holdout evidence, and support/refutation relationships | Per-Agent frontier, handoff, evidence lineage, and promotion/retirement |
+
+All three product paths reduce to the same long-running loop:
+
+```text
+external fact
+  -> Provider observation
+  -> Capability domain judgment and transition proposal
+  -> Kernel checks authority, frontier, quota, and workspace
+  -> Agent / Host executes one bounded Turn
+  -> independent validation, evidence, and receipt writeback
+  -> recompute continue | wait | ask | replan | repair | terminal
+```
+
+The reusable unit is a lifecycle invariant, not a generic prompt. Issue-Fix may interpret
+`CHANGES_REQUESTED`, Auto ML may interpret a matched baseline, and Auto Research may interpret holdout
+evidence. Those meanings belong to a Capability and Domain State. The common Kernel still decides who can
+claim, whether execution is legal, when to wake again, which evidence permits writeback, and whether the
+Goal is terminal.
+
+This boundary also explains why a new domain capability should not copy its own runner, queue, retry, and
+completion state machine. The domain layer supplies decidable facts and proposals, a Provider performs
+external calls, and the Kernel owns cross-domain lifecycle.
+
+For the complete Showcase derivation, architecture, and source entrypoints, continue to
+[Control-Plane Course Lesson 0](/loopx/docs/development/control-plane-course/00-goal-control-plane-architecture/).
+Use the [concept primer](/loopx/docs/development/control-plane-course/00-concept-primer/) first when the
+vocabulary is new.
+
 ## The minimum state to externalize
 
 For the running scenario, the minimum useful state is not the full transcript. It is enough state to answer

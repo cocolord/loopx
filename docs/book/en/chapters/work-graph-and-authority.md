@@ -337,5 +337,10 @@ For work-graph or authority changes, start with:
 - [Host Integration Surface](https://github.com/huangruiteng/loopx/blob/main/docs/reference/protocols/host-integration-surface-v0.md)
   for claims, optional leases, capability, and Host boundaries.
 
+For changes involving equal peers, lifecycle authority, handoff, dependencies, or successors, continue to
+[Control-Plane Course Lesson 3](/loopx/docs/development/control-plane-course/03-work-graph-and-peers/).
+The course provides combined cases and source walkthroughs; this chapter preserves the work-graph and
+authority model needed by external contributors.
+
 The next chapter compiles these facts and authorities into one governed Turn: who acts, who waits, which
 channel informs the user, and when writeback and spend are legal.

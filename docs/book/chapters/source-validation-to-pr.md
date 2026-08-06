@@ -511,6 +511,11 @@ observed in target environment
 - [ ] PR 关联公开 Issue/任务，且未复制 maintainer-owned work；
 - [ ] “merged、released、deployed、observed” 没有混为一谈。
 
+需要为不同风险 surface 选择 deterministic test、decision replay、canary、模型行为验证或
+release gate 时，继续阅读
+[Control-Plane Course 第 8 讲](/loopx/docs/development/control-plane-course/08-autonomous-agent-quality-gates/)。
+课程提供组合风险 case；本章保留从本地证据到公开 PR 的交付主线。
+
 至此，你完成了开发者贡献中的一条 Control-Plane 路径：从贡献地图选择 owner，沿协议链定位
 实现，修改一条规则，再以独立证据交付 PR。Capability、Provider、Host/Runner、
 Projection/Docs/fixtures 与 Extension 等贡献面会有不同的最近验证，但复用同一原则：先确认

@@ -424,5 +424,11 @@ Before changing a rule, confirm:
 - [ ] Compatibility protects real contracts rather than incorrect behavior.
 - [ ] Documentation changes return to their authoritative homes.
 
+To map this method onto real Kernel bounded contexts, ordered rules, schemas, projections, and smoke
+paths, continue to
+[Control-Plane Course Lesson 7](/loopx/docs/development/control-plane-course/07-engineering-a-control-plane-rule/).
+This chapter owns the external contribution method; the course owns the deeper implementation derivation
+and review exercises.
+
 The next chapter takes the repair from local evidence to a public PR: quality layers, commits, boundary
 scans, and a protocol-level review packet.

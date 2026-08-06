@@ -423,5 +423,10 @@ Characterization 证明“过去如此”，不证明“应该如此”。发现
 - [ ] Compatibility 只保护真实合同，不保护错误行为；
 - [ ] 文档更新回到各自的 authoritative home。
 
+需要把这套方法映射到 Kernel bounded context、ordered rule、schema、projection 和 smoke 的真实
+源码链时，继续阅读
+[Control-Plane Course 第 7 讲](/loopx/docs/development/control-plane-course/07-engineering-a-control-plane-rule/)。
+本章负责外部贡献的端到端方法；课程负责更深的实现推导与评审练习。
+
 下一章把这项规则修复从本地验证推进到 PR：如何选择质量层、组织 commit、扫描公开边界，并给
 reviewer 一份协议级证据包。
