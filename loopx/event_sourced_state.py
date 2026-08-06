@@ -709,6 +709,8 @@ def _update_todo_from_event(todo: dict[str, Any], event: dict[str, Any]) -> None
     actor_agent_id = normalize_todo_claimed_by(event.get("actor_agent_id"))
     if actor_agent_id:
         todo["last_actor_agent_id"] = actor_agent_id
+    elif event_type not in (REFRESH_RECORDED, RUN_RECORDED, QUOTA_SPENT, EVIDENCE_ATTACHED):
+        todo.pop("last_actor_agent_id", None)
     if event_type == TODO_CLAIMED:
         claimed_by = normalize_todo_claimed_by(payload.get("claimed_by"))
         if claimed_by:

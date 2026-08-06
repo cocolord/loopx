@@ -649,6 +649,18 @@ def _task_graph_build_predecessor_chain(
                     builder=builder,
                     public_safe_compact_text=public_safe_compact_text,
                 )
+            if not is_root:
+                continue
+            pred_list = _task_graph_resolve_direct_predecessors(
+                current_tid,
+                current_todo,
+                predecessors_by_successor=predecessors_by_successor,
+                predecessors_by_supersedes=predecessors_by_supersedes,
+                public_safe_compact_text=public_safe_compact_text,
+            )
+            for pred_id, rel_hint in pred_list:
+                if pred_id not in visited:
+                    queue.append((pred_id, current_nid, rel_hint))
             continue
 
         if not is_root:
