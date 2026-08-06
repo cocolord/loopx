@@ -75,6 +75,50 @@ def user_output_policy(task_body: str, *, mode: str) -> dict[str, str]:
     }
 
 
+def assert_sole_notification_authority(task_body: str, *, mode: str) -> None:
+    body = normalized(task_body)
+    assert "no-change=`surface_only`/no spend; unchanged vision=" in body, mode
+    assert "`--vision-unchanged-reason`; no status-check `outcome_progress`." in body, mode
+
+    if mode == "full":
+        assert (
+            "once. Only if `user_channel.notify=NOTIFY`: report the result compactly; "
+            "if `user_todo_summary.open_count > 0`, include those todos; if none exists, "
+            "report the gate. Under `DONT_NOTIFY`, stay quiet after the safe-bypass work."
+        ) in body, body
+        assert (
+            "state/board/ledger, add todos if needed, then spend once after validation. "
+            "Only if `user_channel.notify=NOTIFY`: report the new evidence. Under "
+            "`DONT_NOTIFY`, stay quiet."
+        ) in body, body
+        return
+
+    if mode == "compact":
+        assert (
+            "Only under `NOTIFY`, `state=operator_gate`/"
+            "`notify_user_on_open_todo=true` permit concrete blocker-push; else quiet."
+        ) in body, body
+        assert "Return only under `user_channel.notify=NOTIFY`; otherwise stay quiet." in body
+        return
+
+    if mode == "brief":
+        assert "Return only under `user_channel.notify=NOTIFY`; else quiet." in body
+        return
+
+    assert mode == "thin", mode
+    assert "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet." in body
+
+
+def assert_peer_scope_notification_authority(task_body: str) -> None:
+    body = normalized(task_body)
+    assert (
+        "If a todo is claimed or leased by another peer, choose another in-scope item "
+        "or record no in-scope work internally. Only if "
+        "`user_channel.notify=NOTIFY`, report no in-scope work. Under "
+        "`DONT_NOTIFY`, stay quiet."
+    ) in body, body
+
+
 def user_output_outcome(
     task_body: str,
     decision: dict[str, object],
@@ -123,6 +167,14 @@ def main() -> int:
             "control-plane coordination and todo claim ergonomics",
             "do not take benchmark execution todos unless reassigned",
         ],
+        registered_agents=["codex-main-control", "codex-side-bypass"],
+    )
+    full_scoped_payload = build_heartbeat_prompt(
+        goal_id=GOAL_ID,
+        active_state=ACTIVE_STATE,
+        full=True,
+        agent_id="codex-side-bypass",
+        agent_scopes=["control-plane coordination and todo claim ergonomics"],
         registered_agents=["codex-main-control", "codex-side-bypass"],
     )
     primary_scoped_payload = build_heartbeat_prompt(
@@ -366,12 +418,14 @@ def main() -> int:
     )
     for mode_label, mode_payload in mode_payloads:
         mode_body = str(mode_payload["task_body"])
+        assert_sole_notification_authority(mode_body, mode=mode_label)
         for label, decision, expected in notification_cases:
             assert user_output_outcome(
                 mode_body,
                 decision,
                 mode=mode_label,
             ) == expected, f"{mode_label}: {label}"
+    assert_peer_scope_notification_authority(str(full_scoped_payload["task_body"]))
 
     assert "`state=operator_gate` / `notify_user_on_open_todo=true` /" not in compact_task
     assert (

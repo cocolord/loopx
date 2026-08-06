@@ -402,7 +402,9 @@ Before delivery, claim an in-scope open todo:
 ```
 
 If a todo is claimed or leased by another peer, choose another in-scope item or
-report no in-scope work. Scope belongs in the heartbeat prompt, not todo metadata.
+record no in-scope work internally. Only if `user_channel.notify=NOTIFY`, report
+no in-scope work. Under `DONT_NOTIFY`, stay quiet. Scope belongs in the heartbeat
+prompt, not todo metadata.
 """
 
 
