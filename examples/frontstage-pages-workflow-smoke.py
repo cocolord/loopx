@@ -20,12 +20,41 @@ def assert_absent(text: str, needle: str) -> None:
         raise AssertionError(f"workflow must not reference {needle!r}")
 
 
+def _extract_paths_block(text: str, event: str) -> str:
+    """Extract the paths list under a given event (pull_request or push)."""
+    marker = f"\n  {event}:"
+    idx = text.find(marker)
+    if idx == -1:
+        return ""
+    rest = text[idx + len(marker):]
+    paths_marker = "\n    paths:"
+    pi = rest.find(paths_marker)
+    if pi == -1:
+        return ""
+    block = rest[pi + len(paths_marker):]
+    # Stop at the next top-level key (indented with exactly 2 spaces, not 6)
+    lines = block.split("\n")
+    collected = []
+    for line in lines:
+        if line and not line.startswith("      ") and not line.startswith("        "):
+            break
+        collected.append(line)
+    return "\n".join(collected)
+
+
 def assert_pr_and_push_trigger(trigger_text: str, path: str) -> None:
     marker = f'      - "{path}"'
-    count = trigger_text.count(marker)
-    if count != 2:
+    pr_block = _extract_paths_block(trigger_text, "pull_request")
+    push_block = _extract_paths_block(trigger_text, "push")
+    pr_count = pr_block.count(marker)
+    push_count = push_block.count(marker)
+    if pr_count != 1:
         raise AssertionError(
-            f"workflow must trigger pull_request and push for {path!r}; found {count}"
+            f"workflow must trigger pull_request exactly once for {path!r}; found {pr_count}"
+        )
+    if push_count != 1:
+        raise AssertionError(
+            f"workflow must trigger push exactly once for {path!r}; found {push_count}"
         )
 
 
