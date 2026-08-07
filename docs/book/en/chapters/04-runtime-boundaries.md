@@ -121,7 +121,7 @@ iteration. Observing an external training task at its due time is legal waiting.
 input facts, attributable evidence, and the next plan all remain materially unchanged while the same class
 of Turn continues to consume resources.
 
-### Material Evidence Delta
+### Material evidence delta
 
 A Turn that deserves more resource consumption should advance at least one of these:
 

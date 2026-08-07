@@ -117,7 +117,7 @@ Specific modes will evolve with the protocol. What the book preserves is the rea
 the next transition, which behavior is allowed, and what evidence permits writeback — not a permanently
 unchanging list of enum values.
 
-## Decision Pipeline: eliminate illegal paths before choosing the frontier
+## Decision pipeline: eliminate illegal paths before choosing the frontier
 
 Quota decision-making is not about letting multiple rules each return a boolean and letting the last
 assignment win. It compiles source facts into one interaction contract in dependency order. External
