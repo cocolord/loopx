@@ -1,16 +1,16 @@
 # Recovery, self-repair, and runtime boundaries
 
-The hard part of a long-running system is not “continue forever.” It is deriving a legal next action after
-the session, Host, Agent, workspace, or external facts have changed. This chapter separates continuation,
-retry, replan, self-repair, and terminal closure, then places Agents, Providers, Capabilities, Extensions,
-Hosts, and external systems behind explicit authority boundaries.
+The hard part of a long-running system is not "continue forever." It is deriving a legal next action after
+the session, Host, Agent, workspace, or external facts have changed. This chapter separates recovery,
+replan, self-repair, and terminal closure, then uses clear runtime responsibilities to prevent an
+Extension, Provider, or projection from crossing the authority boundary.
 
 ## What you should learn
 
 After this chapter, you should be able to:
 
-- explain which facts are replayable and which require fresh inspection;
-- distinguish continuation, retry, replan, and self-repair;
+- explain which facts to replay and which must be freshly inspected after interruption;
+- distinguish continuation, replan, self-repair, and retry;
 - recognize projection gaps, stale evidence, and workspace drift;
 - distinguish Agent, Provider, Capability, Kernel, and Extension;
 - decide when a Goal is terminal rather than only seeing every current Todo checked;
@@ -29,7 +29,7 @@ not need a verbatim transcript. It does need to reconstruct:
 - external handles, readbacks, and monitor due state;
 - current interaction contract and stop condition.
 
-Some facts replay from durable project state. Others require a fresh read:
+Some facts replay from durable project state. Others require a fresh inspection:
 
 | Replayable facts | Facts to inspect again |
 | --- | --- |
@@ -41,20 +41,20 @@ Some facts replay from durable project state. Others require a fresh read:
 An old receipt proves that an action succeeded for bound input and revision. It does not prove the external
 world remains unchanged. An old claim does not prove the Agent is still running.
 
-## Continuation, retry, replan, and self-repair
+## Continuation, Retry, Replan, and Self-Repair
 
-These actions solve different failures.
+These four actions solve different failures.
 
 ### Continuation
 
 Goal, frontier, and protocol semantics are materially unchanged. A new turn performs another bounded
-segment on the existing Todo. A resumable Host session still has to rerun current guards.
+segment on the existing Todo. Even when a Host session can resume, current guards must still rerun.
 
 ### Retry
 
 The action remains legal, but transport, timeout, or temporary environment failure prevented a reliable
-result. Retry needs an idempotency boundary, attempt identity, and readback so an already-successful effect
-is not executed again after its response was lost.
+result. Retry needs an idempotency boundary, attempt identity, and readback so an already-successful
+effect is not executed again after its response was lost.
 
 ### Replan
 
@@ -67,21 +67,41 @@ The work semantics must change. Examples include:
 - repeated surface activity without outcome progress;
 - a peer whose role scope no longer covers the next step.
 
-Replan produces an observable delta: Todo, Vision, acceptance, successor, supersession, or no-follow-up.
-“Reconsidered and kept going” does not necessarily satisfy a replan obligation.
+Replan must produce an observable delta: Todo, Vision, acceptance, successor, supersession, or
+no-follow-up. Writing "reassessed, continuing original plan" does not necessarily satisfy a replan
+obligation.
 
-### Self-repair
+### Self-Repair
 
 The target work may still be correct while the control plane is inconsistent:
 
 - an event source and status projection disagree;
 - a User Todo count exists without a concrete Gate payload;
-- Next Action points to a completed Todo;
+- a stale Next Action points to a completed Todo;
 - the wrong worktree remains configured as the delivery workspace;
 - a monitor lacks target, cadence, or bounded observation handle;
 - writeback and spend lineage is incomplete.
 
 Self-repair fixes state, projection, or boundary. It does not weaken a Gate or invent permission.
+
+### Dreaming vs Replan boundary
+
+Both Replan and Dreaming change the imagination of the future, but only one is executable:
+
+- **Replan** is a machine-visible change on the current goal graph: add/remove Todos, change Gates,
+  write successors, update acceptance. It produces new facts that quota and frontier can directly read.
+- **Dreaming** is exploring future possibilities: a new branch direction, an alternative approach, an
+  unverified hypothesis. It can only produce proposals, not replace the current runnable frontier.
+
+The key distinction: an agent writes a set of draft Todos during dreaming, but does not write them into
+the current goal's frontier through a lifecycle command. They are not executable tasks at that point, and
+the next quota round will not select them. If an agent skips replan and lets a dreaming proposal
+impersonate executable tasks, quota will continue running on the wrong frontier.
+
+The correct flow is: dreaming produces a proposal -> operator or autonomous replan decides to accept ->
+accepted proposal is written into the goal graph via lifecycle command -> next quota round sees it.
+Replan writes into the goal graph; Dreaming writes into the proposal space. The two cannot substitute for
+each other.
 
 ## Long-horizon convergence: a Turn is not the unit of progress
 
@@ -101,7 +121,7 @@ iteration. Observing an external training task at its due time is legal waiting.
 input facts, attributable evidence, and the next plan all remain materially unchanged while the same class
 of Turn continues to consume resources.
 
-### Material evidence delta
+### Material Evidence Delta
 
 A Turn that deserves more resource consumption should advance at least one of these:
 
@@ -116,6 +136,38 @@ More logs, rewritten summaries, a refresh of the same projection, another unchan
 that cannot bind to the current revision are not material progress. They may be diagnostic steps, but they
 must not impersonate Goal advancement.
 
+### Outcome Floor: preventing micro-actions from impersonating progress
+
+A multi-file diff can still be surface-only changes without genuinely advancing acceptance. LoopX uses two
+levels of granularity to distinguish "did work" from "advanced the goal":
+
+**Delivery Scale**:
+
+| Value | Meaning |
+| --- | --- |
+| `test_only` | Only ran tests, no new artifact produced |
+| `single_surface` | Modified a single file or surface |
+| `multi_surface` | Crossed multiple files/modules |
+| `implementation` | Produced a verifiable functional implementation |
+
+**Delivery Outcome**:
+
+| Value | Meaning |
+| --- | --- |
+| `surface_only` | Artifact exists but did not advance acceptance |
+| `outcome_gap` | Advanced a sub-goal but did not close it |
+| `outcome_progress` | Advanced an acceptance of the primary goal |
+| `primary_goal_outcome` | Directly closed a primary acceptance |
+
+Key rule: a `multi_surface` delivery can still be a `surface_only` outcome. After consecutive
+`surface_only` or no-progress deliveries, quota will require the next delivery to produce a genuine
+outcome or self-repair. This is not a penalty for "writing a lot," but a guard against substituting surface
+activity for goal advancement.
+
+Relationship to material evidence delta: outcome is the semantic classification of evidence delta. A
+delivery that neither changes the machine-visible frontier nor advances acceptance has neither material
+delta nor outcome.
+
 ### Six convergence invariants
 
 Review a long-running chain with six questions:
@@ -129,16 +181,17 @@ Review a long-running chain with six questions:
    repair, or explicit stop?
 6. **Closure:** Does terminal state close Todos, Monitors, Gates, successors, receipts, and acceptance gaps?
 
-These invariants combine Safety and Liveness. Safety prevents an invalid transition. Liveness prevents a
-system from remaining cautiously stuck forever. A successor reconnects local completion to the Goal;
-Monitor backoff avoids hot polling; Replan changes a failed route; Self-Repair fixes control-plane gaps;
-and terminal audit prevents “all current Todos are checked” from becoming a false completion claim.
+These six keep Safety and Liveness in the same loop: Safety prevents an invalid transition; Liveness
+prevents a system from remaining cautiously stuck forever. A successor reconnects local completion to the
+Goal; Monitor backoff avoids hot polling while waiting; Replan changes a failed route; Self-Repair fixes
+control-plane gaps; and terminal audit prevents "all current Todos are checked" from becoming a false
+completion claim.
 
 For the complete paired-Showcase replay, evidence-delta criteria, independent oracle, and convergence
 experiments, use
 [Long-horizon convergence](/loopx/docs/development/control-plane-course/topic-long-horizon-convergence/).
-[Control-Plane Course Lesson 6](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/)
-continues into source paths for evidence, refresh, spend, and repair deltas.
+For evidence, refresh, spend, and repair delta source paths, see
+[Control-Plane Course Lesson 6](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/).
 
 ## Handle a projection gap in order
 
@@ -181,6 +234,23 @@ lane away from the Goal.
 Goal-level replan takes precedence over monitor quiet or agent-scope wait. Otherwise the system can remain
 quiet because no current Todo is runnable while acceptance still has an open gap.
 
+### Vision unchanged honesty condition
+
+Claiming "Vision unchanged" is not always safe. On the first material closeout, there is no baseline, so
+claiming unchanged is judged as `missing_required`: the system cannot distinguish "truly unchanged" from
+"never checked." Therefore the first round must write a vision patch; it cannot bypass with "unchanged."
+
+For subsequent rounds, claiming unchanged requires:
+
+- a comparable baseline exists (the vision written in the previous round);
+- this round's delivery did not genuinely change any vision premise;
+- the writeback explicitly references the baseline revision and the "unchanged" reason.
+
+If the baseline is missing but the agent still claims unchanged, quota will produce a
+`vision_checkpoint_missing` gap. This is not a punishment, but a guard against the agent accumulating
+wrong assumptions on a never-checked state. For the full failure replay, see
+[Control-Plane Course Lesson 6](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/).
+
 ## Terminal closure
 
 Every current Todo being done proves only that the list ended. A terminal audit also checks:
@@ -202,8 +272,8 @@ open state to make the Goal look complete.
 
 ## Four runtime responsibilities
 
-Long-running systems often call every integration a tool or plugin. LoopX keeps four runtime
-responsibilities distinct:
+Long-running Agent systems often call every component a "tool" or "plugin." LoopX uses four runtime
+responsibilities:
 
 | Responsibility | Contract |
 | --- | --- |
@@ -212,17 +282,16 @@ responsibilities distinct:
 | Capability | Defines a caller outcome, normalizes Provider output, and applies domain policy |
 | LoopX Kernel | Accepts or rejects a proposal and owns generic Goal, Todo, Gate, quota, and recovery state |
 
-The normal flow is not “the Agent called a tool, therefore the Todo is done”:
+The normal flow is not "the Agent called a tool, therefore the Todo is done":
 
 ```text
 Agent -> Capability -> Provider -> external system
 Provider readback -> Capability validation/proposal -> LoopX transition
 ```
 
-A Capability is the outcome contract a caller can depend on. A Provider implements that contract or
-accesses an external system. The Kernel owns cross-domain lifecycle. Domain packs such as Issue-Fix or
-Explore can own domain results, but they must not become a second owner for generic quota, Gates, or
-permission.
+A Capability is the outcome contract a caller can depend on. A Provider implements or accesses an external
+system. The Kernel owns cross-domain lifecycle. Domain results such as Issue-Fix or Explore can own their
+Domain State, but they must not own generic quota, Gates, or permission in reverse.
 
 ## Extension is a delivery and lifecycle boundary
 
@@ -243,12 +312,12 @@ Extension package
       └── participates in Agent -> Capability -> Provider -> Kernel flow
 ```
 
-A deterministic, zero-permission standalone Extension can expose a bounded request/response command
-through the managed runtime. As soon as an operation needs read, write, send, publish, or manage authority,
-it must enter a Capability or domain command that can enforce permission, decision scope, and domain
-policy.
+For a deterministic, zero-permission standalone Extension, LoopX can call a bounded request/response
+command through the managed runtime. As soon as an operation needs read, write, send, publish, or manage
+authority, it must enter a Capability or domain command that can enforce permission, decision scope, and
+domain policy.
 
-“Installed,” “doctor-ready,” and “authorized for this effect” are three different states.
+"Installed," "doctor-ready," and "authorized for this effect" are three different states.
 
 ## Who owns each fact
 
@@ -269,7 +338,7 @@ External systems remain authoritative for their facts:
 - Git owns commits and branches;
 - GitHub owns current PR, Issue, and check state;
 - CI owns job results;
-- a cloud service owns actual resource state.
+- a cloud service owns actual resource state;
 - the Host owns its session and actual wake-up effect.
 
 LoopX may retain bounded observations, readbacks, and evidence pointers. A stale copy must not replace the
@@ -277,8 +346,8 @@ external authority.
 
 ### Host and Agent
 
-The Host owns sessions, model turns, tools, and wake-up mechanisms. The Agent owns current reasoning and a
-temporary plan. Neither can be the sole owner of project Goal state.
+The Host owns sessions, model turns, tool surfaces, and actual wake-up mechanisms. The Agent owns current
+reasoning and a temporary plan. Neither can be the sole owner of project Goal state.
 
 The Host follows the current `interaction_contract` and `scheduler_hint`. It must not preserve
 project-specific control logic indefinitely in a heartbeat prompt. The Agent cannot infer current
@@ -314,24 +383,21 @@ freshness, omission notes, and legal routes for reacquiring material.
 
 LoopX does not replace:
 
-- the agent runtime that performs reasoning;
-- the Host scheduler that actually wakes work;
-- Git history and branches;
-- CI execution and check state;
-- external service authentication;
-- a domain system's own resource facts;
-- an independent validator.
+- Agent runtime: the model still performs reasoning;
+- Host scheduler: the Host still performs actual wake-up;
+- Git: code history and branches are still managed by Git;
+- CI: test execution and check state are still managed by CI;
+- external service authentication: TurnEnvelope and receipt are not security tokens;
+- domain system: LoopX does not fabricate external resource facts;
+- independent validator: an Executor's own completion claim is not sufficient proof.
 
-A TurnEnvelope or receipt is not a service credential. An executor's own completion claim is not sufficient
-proof.
+These boundaries support two later practice paths:
 
-These boundaries support two later paths:
+1. **Project onboarding**: reuse these protocols without modifying LoopX source.
+2. **Developer contributions**: locate the owning boundary from the caller outcome and protocol, and
+   deliver Control Plane, Capability/Domain State, Provider, Host/Runner,
+   Projection/Dashboard, Docs/fixtures, or Extension.
 
-1. **Project onboarding** reuses the protocols without modifying LoopX source.
-2. **Developer contributions** locate the owning contract and bounded context before changing the Control
-   Plane, a Capability, a Provider, Host or Runner integration, a projection, documentation or fixture, or
-   an Extension package.
-
-The paths share the same control-plane model and do not require one another. Extension lifecycle remains a
-specialized contribution path for optional or independently versioned delivery. The next part starts with
-the most common job: onboarding an existing project.
+Extension is an independent packaging/lifecycle path within developer contributions, not the unified
+abstraction for all contributions. The two paths share the same control-plane model and do not require one
+another. The next part starts with the most common job: project onboarding.

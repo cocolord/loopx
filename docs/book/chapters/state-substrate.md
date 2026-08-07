@@ -159,6 +159,34 @@ Goal lifecycle 仍由 Todo、Gate、events 与 acceptance 组合决定。
 尤其强调：图中的 `blocks`、`validates`、`continues` 和 `hands_off_to` 是派生关系，不是新的调度
 命令。
 
+## 三种 Ledger：Turn Journal、Goal State、Run History
+
+把“所有记录”都当成同一类状态，会导致“阶段已记录”冒充“业务 transition”。LoopX 区分三种 ledger：
+
+| Ledger | 拥有什么 | 生命周期 | 典型用途 |
+| --- | --- | --- | --- |
+| Turn journal | 单次事务的恢复信息 | 单次事务 | 恢复一个中断的 bounded segment |
+| Goal/event state | 持久 lifecycle transition | 跨 session、跨 Host | 判断当前 frontier、Gate、acceptance |
+| Run history/status | 历史的证据索引与投影 | 只读，不可重写 | 复审、replan、handoff 时的上下文 |
+
+**Turn journal** 回答“本轮发生了什么，如果中断如何恢复”。它记录的是单次事务内的临时状态，不是
+持久业务事实。把 journal 当 goal state 的典型错误：agent 在 journal 中看到“已进入阶段三”，就认为
+goal 已经 transition 到阶段三。但 journal 只记录 agent 有过的意图，只有 goal/event state 才记录
+实际完成的 transition。
+
+**Goal/event state** 回答“当前 frontier 是什么，谁可以做什么”。它通过 append-only event 记录
+lifecycle transition（Todo 完成、Gate 解决、Vision 更新），并支持跨 session 重建。这是 quota
+decision 的唯一权威事实来源。
+
+**Run history/status** 回答“历史上发生了什么，有什么证据”。它是只读的，不能反向写入 goal state。
+run 记录说“这轮测试通过”，不等于 goal state 中对应的 acceptance 已闭合——只有通过 lifecycle
+command 写入的 transition 才算。
+
+区分这三者的实践意义：每次写回前，确认要写入的是 goal/event state（transition）而不是 turn
+journal（临时记录）；每次读取 decision 前，确认读的是 goal/event state 而不是 run history 的旧
+投影。完整三类 ledger 的源码路径和实验见
+[Control-Plane Course 第 6 讲](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/)。
+
 ## Canonical、Workbench、Projection 与外部事实
 
 四个词必须分开：

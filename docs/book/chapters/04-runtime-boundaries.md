@@ -81,6 +81,23 @@ no-follow-up。只写“已重新评估，继续原计划”不一定能清除 r
 
 Self-repair 修复状态、projection 或 boundary，不降低 Gate，也不凭猜测补 permission。
 
+### Dreaming 与 Replan 的边界
+
+Replan 和 Dreaming 都改变对未来的想象，但只有一个是可执行的：
+
+- **Replan** 是当前目标图上的机器可见变化：新增/删除 Todo、改 Gate、写 successor、更新 acceptance。
+  它产生的是可被 quota 和 frontier 直接读取的新事实。
+- **Dreaming** 是探索未来可能性：一个新的分支方向、一个替代方案、一个未验证的假设。它只能产生
+  proposal，不能替代当前 runnable frontier。
+
+关键区分：agent 在 dreaming 中写了一组新 Todo 草稿，但并没有通过 lifecycle command 把它们写入
+当前 goal 的 frontier。此时它们不是可执行的任务，下一轮 quota 不会选中它们。如果 agent 跳过
+replan 直接让 dreaming proposal 冒充可执行任务，会导致 quota 在错误 frontier 上继续运行。
+
+正确流程是：dreaming 产生 proposal → operator 或自主 replan 判断是否接受 → 接受后通过
+lifecycle command 写入 goal 图 → 下一轮 quota 可见。Replan 写入 goal 图，Dreaming 写入 proposal
+空间；两者不能互相替代。
+
 ## 长程收敛：Turn 不是进展单位
 
 长程任务不会因为 Turn 数量增加而自动接近 Goal。一次 Turn 可能只是合法等待，也可能产生大量
@@ -110,6 +127,34 @@ diff 却没有增加能改变下一步判断的证据。判断系统是否在收
 
 单纯增加日志、重写总结、刷新同一 projection、重复一个 unchanged poll，或产生无法绑定当前
 revision 的测试结果，都不是 material progress。它们可以是诊断步骤，但不能冒充 Goal 推进。
+
+### Outcome Floor：防止微小动作冒充推进
+
+一个 multi-file diff 仍可能只是 surface-only 改动，没有真正推进 acceptance。LoopX 用两层粒度
+区分“做了工作”和“推进了目标”：
+
+**Delivery Scale**（交付规模）：
+| 值 | 含义 |
+| --- | --- |
+| `test_only` | 仅运行测试，未产生新 artifact |
+| `single_surface` | 修改单个文件或表面 |
+| `multi_surface` | 跨多个文件/模块 |
+| `implementation` | 产生可验证的功能实现 |
+
+**Delivery Outcome**（交付成果）：
+| 值 | 含义 |
+| --- | --- |
+| `surface_only` | 有 artifact 但未推进 acceptance |
+| `outcome_gap` | 推进了某个子目标但未闭合 |
+| `outcome_progress` | 推进了 primary goal 的某个 acceptance |
+| `primary_goal_outcome` | 直接闭合一个 primary acceptance |
+
+关键规则：一个 `multi_surface` 交付仍可能只是 `surface_only` 成果。连续 `surface_only` 或
+`no-progress` 后，quota 会要求下一次交付必须产生真正的 outcome 或 self-repair。这不是惩罚
+“写得多”，而是防止系统用表面活动代替目标推进。
+
+和 material evidence delta 的关系：outcome 是 evidence delta 的语义分类。一次交付如果既不改变
+machine-visible frontier，也不推进 acceptance，那它既没有 material delta，也没有 outcome。
 
 ### 六条收敛不变量
 
@@ -170,6 +215,22 @@ detect mismatch
 
 Goal-level replan 先于 monitor quiet 或 agent-scope wait。否则系统可能在“当前没有可运行 Todo”
 时静默等待，却遗漏 acceptance 仍未闭合的事实。
+
+### Vision unchanged 的诚实条件
+
+声称“Vision 不变”并不总是安全的。首次 material closeout 时没有 baseline，声称 unchanged 会被判为
+`missing_required`：系统无法区分“确实没变”和“从未检查过”。因此第一次必须写 vision patch，不能
+靠“不变”绕过。
+
+后续 round 声称 unchanged 需要满足：
+
+- 存在可比较的 baseline（上一轮已写入的 vision）；
+- 本轮 delivery 确实没有改变任何 vision 前提；
+- 写回时明确引用 baseline revision 和“不变”理由。
+
+如果 baseline 缺失但 agent 仍声称 unchanged，quota 会产生 `vision_checkpoint_missing` gap。这不是
+为了惩罚，而是为了防止 agent 在 never-checked 状态上积累错误假设。完整失败回放见
+[Control-Plane Course 第 6 讲](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/)。
 
 ## Terminal Closure
 

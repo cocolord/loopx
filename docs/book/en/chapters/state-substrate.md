@@ -1,11 +1,11 @@
-# Durable state and read-only projections
+# Durable State and Read-Only Projections
 
 Long-running work does not recover because a system stores more conversation. It recovers because each
 important fact has a stable owner and can be projected into a fresh decision. This chapter establishes
-the LoopX state substrate: which surfaces own facts, which surfaces only help readers, and why a page that
-looks like current state is not automatically a write API.
+the LoopX state substrate: which surfaces own facts, which surfaces only help readers, and why a page or
+Markdown file that "looks like current state" cannot automatically become a write entrypoint.
 
-## What you should learn
+## What You Should Learn
 
 After this chapter, you should be able to:
 
@@ -13,16 +13,16 @@ After this chapter, you should be able to:
 - decide whether a field belongs to canonical state, an external authority, or a derived read model;
 - explain how append-only events, replay, idempotency, and freshness relate;
 - explain why a dashboard, prompt, or task graph must not become a second state machine;
-- start protocol work from the authoritative contract rather than a volatile Python function name.
+- when a protocol changes, find the authoritative source rather than relying on a Python function name.
 
-## Goal identity does not belong to a chat thread
+## Goal Identity Does Not Belong to a Chat Thread
 
 The durable identity in LoopX is the **Goal**, not a Host thread:
 
 ```text
 Goal
 ├── objective and boundary
-├── Todos, Gates, and evidence lineage
+├── todos, gates and evidence lineage
 ├── registered peer identities
 └── runtime and projection routes
 
@@ -34,15 +34,15 @@ Codex App, Codex CLI, or another Host can advance the same Goal at different tim
 read more than one Goal. Reading a Goal does not grant write authority, and ending a session does not
 delete the Goal.
 
-### Reuse an exact Goal instead of guessing from text
+### Reuse an Exact Goal Instead of Guessing from Text
 
 Goal reuse depends on a stable `goal_id` and registry connection, not fuzzy objective similarity:
 
 ```text
-one registered Goal
-  -> reuse that exact Goal boundary
+one registered goal
+  -> reuse that exact goal boundary
 
-multiple registered Goals
+multiple registered goals
   -> read-only goal_selection_gate
   -> choose one exact goal_id
   -> rerun before any mutation
@@ -75,11 +75,11 @@ next decision =
 An old conversation may help interpretation. It cannot outrank current Git state, an unresolved Gate,
 current CI, or LoopX canonical lifecycle state.
 
-## Five state surfaces
+## Five State Surfaces
 
-### 1. Registry: identity, connection, and durable policy
+### 1. Registry: Identity, Connection, and Durable Policy
 
-The registry answers “which Goal is this, where is it connected, and which runtime routes are allowed?”
+The registry answers "which Goal is this, where is it connected, and which runtime routes are allowed?"
 It can carry:
 
 - Goal id, repository, and active-state route;
@@ -91,7 +91,7 @@ It can carry:
 The registry does not prove that a Host successfully started. It also does not store every Agent result.
 It owns connection and policy facts, not execution receipts.
 
-### 2. Event ledger: what happened
+### 2. Event Ledger: What Happened
 
 [`event_sourced_state_contract_v0`](https://github.com/huangruiteng/loopx/blob/main/docs/reference/protocols/event-sourced-state-contract-v0.md)
 represents Todo, Gate, run, evidence, projection, and quota changes as append-only events.
@@ -103,16 +103,16 @@ At least four invariants matter:
 | Append-only | New facts extend history instead of rewriting it to hide an earlier action |
 | Ordered | Replay reconstructs the same lifecycle sequence |
 | Idempotent | Replaying the same `event_id` with the same payload does not duplicate the effect |
-| Privacy-partitioned | Public-safe summaries do not mix with local or private payloads |
+| Privacy-partitioned | Public-safe summaries do not mix with local or private payloads in the same public stream |
 
-Marking a Markdown checkbox is not sufficient proof that a Todo completed. A legal transition should keep
+Marking a Markdown checkbox as `[x]` is not sufficient proof that a Todo completed. A legal transition should keep
 the Todo id, producer, completion evidence, time, and event lineage so status, review packets, and the next
 quota decision can reuse the same fact.
 
-### 3. Active-state workbench: a human-readable work surface
+### 3. Active-State Workbench: A Human-Readable Work Surface
 
 `ACTIVE_GOAL_STATE.md` helps humans and Agents read the Objective, Next Action, User Todos, Agent Todos,
-and Progress. It is an important workbench, but “all truth lives in Markdown” is the wrong model.
+and Progress. It is an important workbench, but "all truth lives in Markdown" is the wrong model.
 
 During migration or compatibility windows, Markdown may still participate in Todo reads. Canonical writes
 should still pass through LoopX lifecycle commands and controlled writeback so they form governed events.
@@ -127,7 +127,7 @@ several boundaries:
 - a generated compatibility id is not automatically a migration-ready canonical id;
 - duplicate ids or missing sections become diagnostics instead of disappearing silently.
 
-### 4. Run history: what one bounded turn observed and delivered
+### 4. Run History: What One Bounded Turn Observed and Delivered
 
 Run history keeps a compact index for one bounded turn, such as:
 
@@ -144,7 +144,7 @@ back. Goal lifecycle still depends on the combination of Todos, Gates, events, e
 Rich logs, raw transcripts, and verifier tails can stay in local or private runtime artifacts. A public
 projection should retain only the bounded references required for review and recovery.
 
-### 5. Status and other projections: how a consumer reads now
+### 5. Status and Other Projections: How a Consumer Reads Now
 
 `loopx status`, `quota should-run`, dashboards, review packets, and task graphs are different read models
 for different consumers.
@@ -167,7 +167,39 @@ They must not:
 is explicit about this boundary. Relationships such as `blocks`, `validates`, `continues`, and
 `hands_off_to` are derived graph edges, not new scheduling commands.
 
-## Canonical state, workbench, projection, and external fact
+## Three Ledgers: Turn Journal, Goal State, and Run History
+
+Treating "all records" as the same kind of state leads to "phase recorded" being mistaken for "business
+transition." LoopX distinguishes three ledgers:
+
+| Ledger | What it owns | Lifecycle | Typical use |
+| --- | --- | --- | --- |
+| Turn journal | Recovery information for a single transaction | Single transaction | Recover an interrupted bounded segment |
+| Goal/event state | Durable lifecycle transitions | Cross-session, cross-Host | Determine current frontier, Gate, acceptance |
+| Run history/status | Historical evidence index and projection | Read-only, not rewritable | Context for review, replan, handoff |
+
+**Turn journal** answers "what happened in this turn and how to recover if interrupted." It records
+temporary state within a single transaction, not durable business facts. The classic mistake of treating a
+journal as goal state: an agent sees "entered phase three" in the journal and assumes the goal has
+transitioned to phase three. But the journal only records what the agent intended; only goal/event state
+records the actual completed transition.
+
+**Goal/event state** answers "what is the current frontier, and who can do what." It records lifecycle
+transitions (Todo completion, Gate resolution, Vision update) through append-only events and supports
+cross-session reconstruction. This is the sole authoritative source of truth for quota decisions.
+
+**Run history/status** answers "what happened historically, and what evidence exists." It is read-only and
+cannot write back into goal state. A run record saying "tests passed this round" does not mean the
+corresponding acceptance in goal state is closed—only a transition written through a lifecycle command
+counts.
+
+The practical significance of distinguishing these three: before every write-back, confirm you are writing
+to goal/event state (a transition) and not to the turn journal (temporary records); before every decision
+read, confirm you are reading goal/event state and not an old projection from run history. For complete
+source paths and experiments on the three ledgers, see
+[Control-Plane Course Lesson 6](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/).
+
+## Canonical State, Workbench, Projection, and External Fact
 
 Keep these four categories separate:
 
@@ -178,11 +210,11 @@ Keep these four categories separate:
 | Projection | Status, quota packet, dashboard, task graph | Projection builder | No; it informs a decision |
 | External fact | Git commit, PR, CI result, cloud resource | The corresponding external system | Only through fresh readback and evidence |
 
-A page saying “the PR is merged” may be stale. A previous run saying “tests passed” may refer to an older
-commit. Inspect the external system and verify revision, freshness, and scope before using that observation
-for a current transition.
+A page saying "the PR is merged" may be a stale projection. A previous run saying "tests passed" may refer
+to an older commit. Inspect the external system and verify revision, freshness, and scope before using that
+observation for a current transition.
 
-## Storage medium is not the authority contract
+## Storage Medium Is Not the Authority Contract
 
 The current LoopX control plane is **local-first**: the project registry, active-state workbench, event and
 run history, and runtime state live in project-local or user-local storage. This does not make a Markdown
@@ -213,10 +245,10 @@ write intent. The protocol also states that hard idempotency, uniform optimistic
 enforcement are promoted writer by writer. Do not assume that every writer already enforces the complete
 Draft.
 
-Files, SQLite, and future providers answer “where are the bytes?” Events, revisions, CAS, leases, and
-authority answer “which transition is legal?”
+Files, SQLite, and future providers answer "where are the bytes?" Events, revisions, CAS, leases, and
+authority answer "which transition is legal?"
 
-### Shipped boundary versus design boundary
+### Shipped Boundary Versus Design Boundary
 
 The current public architecture keeps the CLI as the compatibility baseline and describes a local
 server/daemon as a roadmap. Detailed multi-Host authority, offline queue, and shared-control-plane designs
@@ -242,7 +274,7 @@ commands and receipts, and separate message delivery, context memory, and state 
 is promoted and validated, this book teaches those boundaries rather than a fictional cloud-mode
 quickstart.
 
-## Three layers of integrity for historical artifacts
+## Three Layers of Integrity for Historical Artifacts
 
 LoopX can prevent research, validation, and decision artifacts from being rewritten silently. That does not
 make an old conclusion perpetually applicable. Evaluate historical evidence in three layers:
@@ -262,7 +294,9 @@ observation or stale evidence instead of deleting it or treating it as current a
 provides a bounded, read-only Agent chronology for replan and handoff. It does not replace current status,
 a quota decision, or external-system readback.
 
-## Replay does not preserve an old conclusion forever
+## Replay Does Not Preserve an Old Conclusion Forever
+
+Replay aims to reconstruct current state from ordered facts, not to permanently preserve old judgments.
 
 Assume the ledger contains:
 
@@ -283,7 +317,7 @@ and G1 existed. It does not prove:
 
 The recovering executor combines replayed project facts with a fresh environment inspection.
 
-## A projection gap is a control-plane failure
+## A Projection Gap Is a Control-Plane Failure
 
 Do not choose whichever surface is most convenient when sources disagree:
 
@@ -302,7 +336,7 @@ These are **projection gaps**. Handle them in order:
 
 Manually editing several displays into agreement only hides the fault.
 
-## Decide where a new field belongs
+## Decide Where a New Field Belongs
 
 Ask in this order:
 
@@ -317,7 +351,7 @@ Ask in this order:
 If one field tries to carry configuration, event, display, and permission semantics, the protocol
 boundary probably needs to be split first.
 
-## Protocol reading routes
+## Protocol Reading Routes
 
 This chapter owns the learning sequence, not the complete schemas. For state changes, start with:
 
@@ -339,5 +373,5 @@ If you plan to change registry, event, Domain State, replay, or projection build
 source paths and experiments through fact ownership in Issue-Fix, Auto ML, and Auto Research. This chapter
 remains the external developer's conceptual entrypoint.
 
-The next chapter builds a work graph on this substrate: who may do what, which condition blocks it, and
+The next chapter builds a work graph on this state substrate: who may do what, which condition blocks it, and
 how work legally continues, hands off, or ends.

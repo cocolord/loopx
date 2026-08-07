@@ -165,6 +165,35 @@ Replan 修订 frontier；只有最终 interaction contract 才定义本轮行为
 Host、heartbeat、stateful backoff 和 scheduler receipt 的实现细节见
 [第 5 讲](/loopx/docs/development/control-plane-course/05-host-scheduler-and-heartbeat/)。
 
+### Quota 是决策编译器，不是余额检查
+
+“还剩多少配额”的直觉是减法思维：每次运行扣一次，耗尽就停。但一轮合法工作可能不需要 spend
+（monitor poll、dry-run、preflight），一轮 spend 也不等于做了有效交付（artifact 无 validation）。
+把 quota 理解为余额检查，会让系统在以下场景出错：
+
+- **PR checks 挂起时**：不能因为 goal 仍在 active 就调用模型。必须先等待外部结果，再决定下一步。
+- **连续 dry-run 或 preflight 失败**：spend 未发生，但系统不应无限重试。连续失败需要 repair 或
+  replan，而不是继续“尝试”。
+- **monitor 未到期**：不应因为“还有配额”就提前 poll，浪费外部资源。
+
+Quota 的正确模型是从 source facts 按稳定 precedence 编译成 interaction contract。它决定“本轮是否
+允许 delivery、允许什么行为、允许几次 spend”，而不是“余额 > 0 就开始”。五个关键 source facts
+及其决策含义：
+
+| Source Fact | 决策含义 |
+| --- | --- |
+| Goal 是否注册、Agent 是否识别 | 身份不明时 fail closed，不消耗任何资源 |
+| User Gate 是否阻塞当前 scope | 被阻塞的路径不执行，不被阻塞的 fallback 可以独立运行 |
+| Frontier 是否有 claimable Todo | 无可运行候选时进入 monitor/agent-scope wait，不消耗 agent 资源 |
+| 连续 delivery 是否缺乏 outcome | 多轮 surface-only 后，要求真正 outcome 或 self-repair，不无限交付 |
+| 外部 evidence 是否 fresh | 过期证据不能进入当前决策，必须先刷新 readback |
+
+禁止的捷径包括：凭“goal active”跳过 Gate、凭“曾有配额”跳过 workspace check、凭“用户未投诉”
+跳过 validation。这些都是把局部信号当成全局授权。
+
+完整决策 table、九类组合 case 和规则优先级见
+[Control-Plane Course 第 4 讲](/loopx/docs/development/control-plane-course/04-quota-decision-kernel/)。
+
 ## Bounded Delivery 的五段闭环
 
 一次正常交付至少包含五段：
@@ -229,6 +258,25 @@ dry-run、失败 preflight、未变化 monitor poll、scheduler cadence change �
 wrong: act -> spend -> later decide whether it worked
 right: act -> independent validation -> durable writeback -> spend once
 ```
+
+### 缺层的故障模式
+
+五段闭环是连续依赖链。缺哪一层，都会产生不同的故障，而不是“循环仍在继续”：
+
+| 缺失层 | 可见症状 | 后果 |
+| --- | --- | --- |
+| 缺 Validation | 有 artifact 但无 postcondition 检验 | 不合格交付进入 writeback，后续决策基于错误证据 |
+| 缺 Writeback | artifact 已生成但 Todo 仍 open | 下一 peer 看不到完成，重复工作或选错 frontier |
+| 缺 Refresh | Todo 已更新但 status/vision 还是旧值 | quota 选错目标，monitor 按过期条件判断 |
+| 缺 Spend | 交付已写回但没有 quota 记录 | 连续交付不被计数，outcome floor 无法生效 |
+
+Validation 缺失最危险，因为它把内部信心当成了外部事实。Writeback 缺失最常见，因为 agent 在“完成
+工作”后跳过闭环，只保留了本地 artifact 或聊天记录。Refresh 缺失最隐蔽：表面上看状态正确，实际
+quota 和 monitor 在读取决策前已过时。
+
+这个证据阶梯的完整实验见
+[Control-Plane Course 第 6 讲](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/)，
+其中包含每层的失败回放和修复路径。
 
 ## Evidence、Receipt 与 Observation
 
@@ -338,6 +386,19 @@ Scheduler state 还绑定 `reset_token` 与 `identity_signature`。用户反馈�
 Gate resolution 或 material evidence transition 会改变 identity，并把 cadence 恢复到当前 profile
 的初始值；连续 unchanged polls 才继续 backoff。Cadence apply、failure writeback 和 ACK 都不产生
 delivery quota spend。
+
+### 多 Monitor 交错时的 per-lane 计数
+
+当 M1 和 M2 两个 monitor 交替轮询时，如果只数“相邻 run 是否无变化”，M1 的 run 会打断 M2 的
+no-change streak，M2 也会打断 M1。最终两个 monitor 的 consecutive_no_change 都永远到不了阈值，
+系统无法进入 backoff，反而变成热轮询。
+
+正确做法是**每个 monitor todo 维护独立的 `consecutive_no_change` 计数器**。M2 有 material change
+时只重置 M2，M1 不受影响。回合顺序（A1、B1、A2、B2...）不会互相清零。
+
+这个 per-lane 设计也适用于多 agent 场景：每个 agent 的 monitor 是独立 lane，共享的是同一个
+frontier 读模型，但 no-change 判断是 per-lane 的。实现细节和交错实验见
+[Control-Plane Course 第 6 讲](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/)。
 
 ## 一轮何时结束
 
