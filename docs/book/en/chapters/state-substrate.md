@@ -5,7 +5,7 @@ important fact has a stable owner and can be projected into a fresh decision. Th
 the LoopX state substrate: which surfaces own facts, which surfaces only help readers, and why a page or
 Markdown file that "looks like current state" cannot automatically become a write entrypoint.
 
-## What You Should Learn
+## What you should learn
 
 After this chapter, you should be able to:
 
@@ -91,7 +91,7 @@ It can carry:
 The registry does not prove that a Host successfully started. It also does not store every Agent result.
 It owns connection and policy facts, not execution receipts.
 
-### 2. Event Ledger: What Happened
+### 2. Event ledger: what happened
 
 [`event_sourced_state_contract_v0`](https://github.com/huangruiteng/loopx/blob/main/docs/reference/protocols/event-sourced-state-contract-v0.md)
 represents Todo, Gate, run, evidence, projection, and quota changes as append-only events.
@@ -144,7 +144,7 @@ back. Goal lifecycle still depends on the combination of Todos, Gates, events, e
 Rich logs, raw transcripts, and verifier tails can stay in local or private runtime artifacts. A public
 projection should retain only the bounded references required for review and recovery.
 
-### 5. Status and Other Projections: How a Consumer Reads Now
+### 5. Status and other projections: how a consumer reads now
 
 `loopx status`, `quota should-run`, dashboards, review packets, and task graphs are different read models
 for different consumers.
@@ -199,7 +199,7 @@ read, confirm you are reading goal/event state and not an old projection from ru
 source paths and experiments on the three ledgers, see
 [Control-Plane Course Lesson 6](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/).
 
-## Canonical State, Workbench, Projection, and External Fact
+## Canonical state, workbench, projection, and external fact
 
 Keep these four categories separate:
 
@@ -274,7 +274,7 @@ commands and receipts, and separate message delivery, context memory, and state 
 is promoted and validated, this book teaches those boundaries rather than a fictional cloud-mode
 quickstart.
 
-## Three Layers of Integrity for Historical Artifacts
+## Three layers of integrity for historical artifacts
 
 LoopX can prevent research, validation, and decision artifacts from being rewritten silently. That does not
 make an old conclusion perpetually applicable. Evaluate historical evidence in three layers:
@@ -351,7 +351,7 @@ Ask in this order:
 If one field tries to carry configuration, event, display, and permission semantics, the protocol
 boundary probably needs to be split first.
 
-## Protocol Reading Routes
+## Protocol reading routes
 
 This chapter owns the learning sequence, not the complete schemas. For state changes, start with:
 

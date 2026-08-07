@@ -41,7 +41,7 @@ Some facts replay from durable project state. Others require a fresh inspection:
 An old receipt proves that an action succeeded for bound input and revision. It does not prove the external
 world remains unchanged. An old claim does not prove the Agent is still running.
 
-## Continuation, Retry, Replan, and Self-Repair
+## Continuation, retry, replan, and self-repair
 
 These four actions solve different failures.
 
@@ -84,7 +84,7 @@ The target work may still be correct while the control plane is inconsistent:
 
 Self-repair fixes state, projection, or boundary. It does not weaken a Gate or invent permission.
 
-### Dreaming vs Replan boundary
+### Dreaming vs replan boundary
 
 Both Replan and Dreaming change the imagination of the future, but only one is executable:
 

@@ -96,7 +96,7 @@ The user Gate remains visible, but it does not cover the independent link-check 
 three channels into "a user Todo exists, so stop the Agent" loses the scoped fallback. Collapsing them
 into "the Agent can run, so do not notify the user" is equally wrong.
 
-## Common Interaction Modes
+## Common interaction modes
 
 A mode compresses a related set of states into a testable contract. External developers should at least
 be able to recognize these categories:
