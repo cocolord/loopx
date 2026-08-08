@@ -78,9 +78,8 @@ def user_output_policy(task_body: str, *, mode: str) -> dict[str, str]:
 
 def assert_sole_notification_authority(task_body: str, *, mode: str) -> None:
     body = normalized(task_body)
-    assert "no-change=`surface_only`/no spend; unchanged vision=" in body, mode
-    assert "`--vision-unchanged-reason`; status-only ->" in body, mode
-    assert "`surface_only`; validated blocker/successor/lifecycle ->" in body, mode
+    assert "no-change=`surface_only`/no spend; unchanged->" in body, mode
+    assert "`--vision-unchanged-reason`; material->actual outcome." in body, mode
 
     if mode == "full":
         assert (
@@ -115,9 +114,8 @@ def assert_peer_scope_notification_authority(task_body: str) -> None:
     body = normalized(task_body)
     assert (
         "If a todo is claimed or leased by another peer, choose another in-scope item "
-        "or record no in-scope work internally. Only if "
-        "`user_channel.notify=NOTIFY`, report no in-scope work. Under "
-        "`DONT_NOTIFY`, stay quiet."
+        "or record no in-scope work internally. Only `NOTIFY` reports it; "
+        "`DONT_NOTIFY` stays quiet."
     ) in body, body
 
 
@@ -587,7 +585,7 @@ def main() -> int:
         "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend)",
         "else RRULE/ack/fail",
         "no-change=`surface_only`/no spend",
-        "unchanged vision=`--vision-unchanged-reason`",
+        "unchanged->`--vision-unchanged-reason`",
         "guard receipt; 2 stalls->replan",
         "`lark_event_inbox`: reply_due",
         "drain_command/reply-readback/ACK",
@@ -684,7 +682,7 @@ def main() -> int:
         "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend)",
         "else RRULE/ack/fail",
         "no-change=`surface_only`/no spend",
-        "unchanged vision=`--vision-unchanged-reason`",
+        "unchanged->`--vision-unchanged-reason`",
         "guard receipt; 2 stalls->replan",
         "P0 blocked: safe P1/P2",
         "monitor quiet/no-spend",
@@ -701,8 +699,7 @@ def main() -> int:
     ):
         assert "no-change=`surface_only`/no spend" in task, label
         assert "`--vision-unchanged-reason`" in task, label
-        assert "status-only -> `surface_only`" in task, label
-        assert "validated blocker/successor/lifecycle -> actual outcome" in task, label
+        assert "material->actual outcome" in task, label
     assert "if absent say" not in thin_task, thin_task
     assert "If false/0: quiet/no-user-todo" not in thin_task, thin_task
 

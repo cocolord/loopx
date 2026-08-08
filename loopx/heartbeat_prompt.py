@@ -59,9 +59,8 @@ HEARTBEAT_NOTIFICATION_RULE_SHORT = (
     "具体user todo未投影，需修复LoopX状态投影."
 )
 HEARTBEAT_VISION_WRITEBACK_RULE_SHORT = (
-    "writeback: no-change=`surface_only`/no spend; unchanged vision="
-    "`--vision-unchanged-reason`; status-only -> `surface_only`; "
-    "validated blocker/successor/lifecycle -> actual outcome."
+    "writeback: no-change=`surface_only`/no spend; "
+    "unchanged->`--vision-unchanged-reason`; material->actual outcome."
 )
 SCHEDULER_HINT_APPLICATION_RULE = (
     "`scheduler_hint` no-spend. host_action=pause_or_delete_current_heartbeat -> "
@@ -404,9 +403,8 @@ Before delivery, claim an in-scope open todo:
 ```
 
 If a todo is claimed or leased by another peer, choose another in-scope item or
-record no in-scope work internally. Only if `user_channel.notify=NOTIFY`, report
-no in-scope work. Under `DONT_NOTIFY`, stay quiet. Scope belongs in the heartbeat
-prompt, not todo metadata.
+record no in-scope work internally. Only `NOTIFY` reports it; `DONT_NOTIFY` stays quiet.
+Scope belongs in the heartbeat prompt, not todo metadata.
 """
 
 

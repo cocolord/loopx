@@ -216,7 +216,7 @@ def main() -> int:
         assert "`LOOPX_TURN=<current_time_iso>`; reuse." in compact_prompt, prompt
         assert "guard receipt; 2 stalls->replan" in compact_prompt, prompt
         assert "no-change=`surface_only`/no spend" in compact_prompt, prompt
-        assert "unchanged vision=`--vision-unchanged-reason`" in compact_prompt, prompt
+        assert "unchanged->`--vision-unchanged-reason`" in compact_prompt, prompt
 
     print("blocker-push-runtime-smoke ok")
     return 0
