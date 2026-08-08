@@ -462,6 +462,8 @@ def _task_graph_attach_handoff(
     handoff_to = public_safe_compact_text(handoff_note.get("to_agent"), limit=80)
     if not handoff_from or not handoff_to or handoff_from == handoff_to:
         return
+    handoff_status = public_safe_compact_text(handoff_note.get("status"), limit=80)
+    handoff_state = handoff_status if handoff_status in ("done", "waiting", "unknown") else "done"
     handoff_id = f"handoff:{current_tid}:{handoff_from}:{handoff_to}"
     handoff_node_id = builder.add_node(
         {
@@ -472,7 +474,7 @@ def _task_graph_attach_handoff(
             ),
             "kind": "handoff",
             "title": f"Handoff from {handoff_from} to {handoff_to}",
-            "state": "done",
+            "state": handoff_state,
             "refs": _task_graph_refs(
                 "todo_ids",
                 current_tid,
@@ -594,9 +596,7 @@ def _task_graph_build_predecessor_chain(
 
     while queue:
         current_tid, successor_nid, edge_rel_hint = queue.pop(0)
-        if current_tid in visited:
-            continue
-        visited.add(current_tid)
+        already_visited = current_tid in visited
         current_todo = all_todos_by_id.get(current_tid)
         if not isinstance(current_todo, dict):
             continue
@@ -605,7 +605,7 @@ def _task_graph_build_predecessor_chain(
             str(normalize_todo_status(current_todo.get("status")) or todo_status_open)
         )
 
-        if not is_root and emitted_count >= max_predecessor_nodes:
+        if not is_root and not already_visited and emitted_count >= max_predecessor_nodes:
             truncated = True
             break
 
@@ -650,27 +650,34 @@ def _task_graph_build_predecessor_chain(
         if not current_nid:
             continue
 
+        if already_visited:
+            continue
+
+        visited.add(current_tid)
+
         if not is_root:
             emitted_count += 1
 
-        _task_graph_attach_evidence(
-            current_todo=current_todo,
-            current_tid=current_tid,
-            current_nid=current_nid,
-            builder=builder,
-            public_safe_compact_text=public_safe_compact_text,
-        )
+        if is_done:
+            _task_graph_attach_evidence(
+                current_todo=current_todo,
+                current_tid=current_tid,
+                current_nid=current_nid,
+                builder=builder,
+                public_safe_compact_text=public_safe_compact_text,
+            )
+
+        if not is_root:
+            _task_graph_attach_handoff(
+                current_todo=current_todo,
+                current_tid=current_tid,
+                current_nid=current_nid,
+                successor_nid=successor_nid,
+                builder=builder,
+                public_safe_compact_text=public_safe_compact_text,
+            )
 
         if not is_done:
-            if not is_root:
-                _task_graph_attach_handoff(
-                    current_todo=current_todo,
-                    current_tid=current_tid,
-                    current_nid=current_nid,
-                    successor_nid=successor_nid,
-                    builder=builder,
-                    public_safe_compact_text=public_safe_compact_text,
-                )
             if not is_root:
                 continue
             pred_list = _task_graph_resolve_direct_predecessors(
@@ -681,8 +688,7 @@ def _task_graph_build_predecessor_chain(
                 public_safe_compact_text=public_safe_compact_text,
             )
             for pred_id, rel_hint in pred_list:
-                if pred_id not in visited:
-                    queue.append((pred_id, current_nid, rel_hint))
+                queue.append((pred_id, current_nid, rel_hint))
             continue
 
         pred_list = _task_graph_resolve_direct_predecessors(
@@ -693,8 +699,7 @@ def _task_graph_build_predecessor_chain(
             public_safe_compact_text=public_safe_compact_text,
         )
         for pred_id, rel_hint in pred_list:
-            if pred_id not in visited:
-                queue.append((pred_id, current_nid, rel_hint))
+            queue.append((pred_id, current_nid, rel_hint))
 
     return {
         "emitted_predecessor_count": emitted_count,

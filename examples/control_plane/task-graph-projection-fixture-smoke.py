@@ -418,6 +418,247 @@ def assert_predecessor_budget_and_actor_contract() -> None:
     assert "actor_agent" not in actor_node, actor_node
 
 
+def assert_diamond_dag_predecessor_edges() -> None:
+    """In a diamond DAG root <- {a, b} <- shared, both edges a->shared and b->shared must be present."""
+    root = {
+        "todo_id": "todo_root",
+        "title": "Root",
+        "text": "Root",
+        "status": "open",
+        "done": False,
+    }
+    a = {
+        "todo_id": "todo_a",
+        "title": "Task A",
+        "text": "Task A",
+        "status": "done",
+        "done": True,
+        "successor_todo_ids": ["todo_root"],
+    }
+    b = {
+        "todo_id": "todo_b",
+        "title": "Task B",
+        "text": "Task B",
+        "status": "done",
+        "done": True,
+        "successor_todo_ids": ["todo_root"],
+    }
+    shared = {
+        "todo_id": "todo_shared",
+        "title": "Shared",
+        "text": "Shared",
+        "status": "done",
+        "done": True,
+        "successor_todo_ids": ["todo_a", "todo_b"],
+    }
+    projection = build_task_graph_projection(
+        {
+            "goal_id": "task-graph-diamond-dag",
+            "agent_todos": {
+                "total_count": 4,
+                "open_count": 1,
+                "items": [root, a, b, shared],
+            },
+            "user_todos": {
+                "total_count": 0,
+                "open_count": 0,
+                "items": [],
+            },
+        },
+        goal={"id": "task-graph-diamond-dag"},
+    )
+    assert projection is not None
+    edges = projection["edges"]
+    nodes = projection["nodes"]
+    node_ids = {node["refs"]["todo_ids"][0]: node["node_id"] for node in nodes if node["kind"] == "deliverable"}
+    # 4 nodes: root, a, b, shared
+    assert len(node_ids) == 4, node_ids
+    # Check all expected edges exist
+    edge_pairs = {(e["from_node_id"], e["to_node_id"], e["relation"]) for e in edges}
+    root_id = node_ids["todo_root"]
+    a_id = node_ids["todo_a"]
+    b_id = node_ids["todo_b"]
+    shared_id = node_ids["todo_shared"]
+    assert (root_id, a_id, "depends_on") in edge_pairs, edge_pairs
+    assert (root_id, b_id, "depends_on") in edge_pairs, edge_pairs
+    assert (a_id, shared_id, "depends_on") in edge_pairs, edge_pairs
+    assert (b_id, shared_id, "depends_on") in edge_pairs, edge_pairs
+    assert projection["limits"]["predecessor_truncated"] is False
+
+
+def assert_evidence_only_for_done_predecessor() -> None:
+    """Evidence should only attach when predecessor is done, not when open."""
+    root = {
+        "todo_id": "todo_root",
+        "title": "Root",
+        "text": "Root",
+        "status": "open",
+        "done": False,
+        "successor_todo_ids": ["todo_done_pred", "todo_open_pred"],
+    }
+    done_pred = {
+        "todo_id": "todo_done_pred",
+        "title": "Done predecessor",
+        "text": "Done predecessor",
+        "status": "done",
+        "done": True,
+        "evidence": "Completed work evidence.",
+        "successor_todo_ids": ["todo_root"],
+    }
+    open_pred = {
+        "todo_id": "todo_open_pred",
+        "title": "Open predecessor",
+        "text": "Open predecessor",
+        "status": "open",
+        "done": False,
+        "evidence": "In-progress notes.",
+        "successor_todo_ids": ["todo_root"],
+    }
+    projection = build_task_graph_projection(
+        {
+            "goal_id": "task-graph-evidence-done-only",
+            "agent_todos": {
+                "total_count": 3,
+                "open_count": 1,
+                "items": [root, done_pred, open_pred],
+            },
+            "user_todos": {
+                "total_count": 0,
+                "open_count": 0,
+                "items": [],
+            },
+        },
+        goal={"id": "task-graph-evidence-done-only"},
+    )
+    assert projection is not None
+    evidence_nodes = [n for n in projection["nodes"] if n["kind"] == "evidence"]
+    # Only one evidence node (for done_pred), not for open_pred
+    assert len(evidence_nodes) == 1, evidence_nodes
+    ev_node = evidence_nodes[0]
+    evidence_todo_ids = ev_node["refs"]["todo_ids"]
+    assert "todo_done_pred" in evidence_todo_ids, evidence_todo_ids
+    assert "todo_open_pred" not in evidence_todo_ids, evidence_todo_ids
+
+
+def assert_handoff_for_both_open_and_done_predecessor() -> None:
+    """Handoff should attach for non-root predecessors regardless of done status."""
+    root = {
+        "todo_id": "todo_root",
+        "title": "Root",
+        "text": "Root",
+        "status": "open",
+        "done": False,
+        "successor_todo_ids": ["todo_done_handoff", "todo_open_handoff"],
+    }
+    done_handoff = {
+        "todo_id": "todo_done_handoff",
+        "title": "Done predecessor with handoff",
+        "text": "Done predecessor with handoff",
+        "status": "done",
+        "done": True,
+        "handoff_note": {
+            "from_agent": "agent-a",
+            "to_agent": "agent-b",
+            "status": "done",
+        },
+        "successor_todo_ids": ["todo_root"],
+    }
+    open_handoff = {
+        "todo_id": "todo_open_handoff",
+        "title": "Open predecessor with handoff",
+        "text": "Open predecessor with handoff",
+        "status": "open",
+        "done": False,
+        "handoff_note": {
+            "from_agent": "agent-c",
+            "to_agent": "agent-d",
+            "status": "waiting",
+        },
+        "successor_todo_ids": ["todo_root"],
+    }
+    projection = build_task_graph_projection(
+        {
+            "goal_id": "task-graph-handoff-both",
+            "agent_todos": {
+                "total_count": 3,
+                "open_count": 1,
+                "items": [root, done_handoff, open_handoff],
+            },
+            "user_todos": {
+                "total_count": 0,
+                "open_count": 0,
+                "items": [],
+            },
+        },
+        goal={"id": "task-graph-handoff-both"},
+    )
+    assert projection is not None
+    handoff_nodes = [n for n in projection["nodes"] if n["kind"] == "handoff"]
+    assert len(handoff_nodes) == 2, handoff_nodes
+    # Check that the done handoff has state "done"
+    done_hn = next(n for n in handoff_nodes if n["from_agent"] == "agent-a")
+    assert done_hn["state"] == "done", done_hn
+    # Check that the open handoff has state "waiting" (from status field)
+    open_hn = next(n for n in handoff_nodes if n["from_agent"] == "agent-c")
+    assert open_hn["state"] == "waiting", open_hn
+
+
+def assert_cycle_predecessor_safety() -> None:
+    """A cycle A->B->A should not cause infinite loop or crash."""
+    root = {
+        "todo_id": "todo_cycle_root",
+        "title": "Cycle Root",
+        "text": "Cycle Root",
+        "status": "open",
+        "done": False,
+    }
+    a = {
+        "todo_id": "todo_cycle_a",
+        "title": "Cycle A",
+        "text": "Cycle A",
+        "status": "done",
+        "done": True,
+        "successor_todo_ids": ["todo_cycle_root", "todo_cycle_b"],
+    }
+    b = {
+        "todo_id": "todo_cycle_b",
+        "title": "Cycle B",
+        "text": "Cycle B",
+        "status": "done",
+        "done": True,
+        "successor_todo_ids": ["todo_cycle_a"],
+    }
+    projection = build_task_graph_projection(
+        {
+            "goal_id": "task-graph-cycle",
+            "agent_todos": {
+                "total_count": 3,
+                "open_count": 1,
+                "items": [root, a, b],
+            },
+            "user_todos": {
+                "total_count": 0,
+                "open_count": 0,
+                "items": [],
+            },
+        },
+        goal={"id": "task-graph-cycle"},
+    )
+    assert projection is not None
+    # Should not have exploded; should have exactly 3 deliverable nodes
+    deliverable_nodes = [n for n in projection["nodes"] if n["kind"] == "deliverable"]
+    assert len(deliverable_nodes) == 3, deliverable_nodes
+    # root->a and a->b edges should exist; b->a is correctly skipped due to cycle detection
+    edge_pairs = {(e["from_node_id"], e["to_node_id"], e["relation"]) for e in projection["edges"]}
+    node_ids = {n["refs"]["todo_ids"][0]: n["node_id"] for n in deliverable_nodes}
+    root_id = node_ids["todo_cycle_root"]
+    a_id = node_ids["todo_cycle_a"]
+    b_id = node_ids["todo_cycle_b"]
+    assert (root_id, a_id, "depends_on") in edge_pairs
+    assert (a_id, b_id, "depends_on") in edge_pairs
+    assert (b_id, a_id, "depends_on") in edge_pairs
+
+
 def main() -> int:
     fixture_text = read(FIXTURE_PATH)
     contract = read(CONTRACT_PATH)
@@ -464,6 +705,10 @@ def main() -> int:
     assert not (fixture_keys & forbidden_keys), fixture_keys & forbidden_keys
     assert_runtime_projection_builder()
     assert_predecessor_budget_and_actor_contract()
+    assert_diamond_dag_predecessor_edges()
+    assert_evidence_only_for_done_predecessor()
+    assert_handoff_for_both_open_and_done_predecessor()
+    assert_cycle_predecessor_safety()
 
     print("task-graph-projection-fixture-smoke ok")
     return 0
