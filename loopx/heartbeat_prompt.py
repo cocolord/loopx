@@ -55,11 +55,13 @@ USER_TODO_FINAL_MESSAGE_RULE = (
 )
 HEARTBEAT_NOTIFICATION_RULE_SHORT = (
     "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet. "
-    "Due/peer gate != prompt; missing NOTIFY action -> projection repair."
+    "Due/peer gate != prompt; missing NOTIFY action->"
+    "具体user todo未投影，需修复LoopX状态投影."
 )
 HEARTBEAT_VISION_WRITEBACK_RULE_SHORT = (
     "writeback: no-change=`surface_only`/no spend; unchanged vision="
-    "`--vision-unchanged-reason`; no status-check `outcome_progress`."
+    "`--vision-unchanged-reason`; status-only -> `surface_only`; "
+    "validated blocker/successor/lifecycle -> actual outcome."
 )
 SCHEDULER_HINT_APPLICATION_RULE = (
     "`scheduler_hint` no-spend. host_action=pause_or_delete_current_heartbeat -> "

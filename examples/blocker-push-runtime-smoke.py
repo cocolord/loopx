@@ -212,7 +212,7 @@ def main() -> int:
         assert "Normal turns use CLI `interaction_contract`" in compact_prompt, prompt
         assert "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet" in compact_prompt, prompt
         assert "Due/peer gate != prompt" in compact_prompt, prompt
-        assert "missing NOTIFY action -> projection repair" in compact_prompt, prompt
+        assert "missing NOTIFY action->具体user todo未投影" in compact_prompt, prompt
         assert "`LOOPX_TURN=<current_time_iso>`; reuse." in compact_prompt, prompt
         assert "guard receipt; 2 stalls->replan" in compact_prompt, prompt
         assert "no-change=`surface_only`/no spend" in compact_prompt, prompt

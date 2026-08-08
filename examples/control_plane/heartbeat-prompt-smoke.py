@@ -64,7 +64,8 @@ def user_output_policy(task_body: str, *, mode: str) -> dict[str, str]:
     else:
         assert "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet" in body
         assert "Due/peer gate != prompt" in body
-        assert "missing NOTIFY action -> projection repair" in body
+        assert "missing NOTIFY action->" in body
+        assert "具体user todo未投影" in body
         if mode == "brief":
             assert "Return only under `user_channel.notify=NOTIFY`; else quiet." in body
     return {
@@ -78,7 +79,8 @@ def user_output_policy(task_body: str, *, mode: str) -> dict[str, str]:
 def assert_sole_notification_authority(task_body: str, *, mode: str) -> None:
     body = normalized(task_body)
     assert "no-change=`surface_only`/no spend; unchanged vision=" in body, mode
-    assert "`--vision-unchanged-reason`; no status-check `outcome_progress`." in body, mode
+    assert "`--vision-unchanged-reason`; status-only ->" in body, mode
+    assert "`surface_only`; validated blocker/successor/lifecycle ->" in body, mode
 
     if mode == "full":
         assert (
@@ -409,6 +411,23 @@ def main() -> int:
                 "internal_projection_repair": False,
             },
         ),
+        (
+            "notified missing action repair",
+            {
+                "should_run": True,
+                "interaction_contract": {
+                    "user_channel": {
+                        "action_required": True,
+                        "notify": "NOTIFY",
+                    }
+                },
+            },
+            {
+                "external_output": True,
+                "blocker_push": True,
+                "internal_projection_repair": False,
+            },
+        ),
     )
     mode_payloads = (
         ("full", payload),
@@ -562,7 +581,8 @@ def main() -> int:
         "--available-capability external_evidence_poll",
         "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet",
         "Due/peer gate != prompt",
-        "missing NOTIFY action -> projection repair",
+        "missing NOTIFY action->",
+        "具体user todo未投影",
         "Observed capabilities -> `--available-capability`; never user gates",
         "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend)",
         "else RRULE/ack/fail",
@@ -604,7 +624,7 @@ def main() -> int:
     assert brief_payload["thin"] is False, brief_payload
     assert brief_payload["quota_guard_command"] == payload["quota_guard_command"], brief_payload
     assert brief_payload["quota_spend_command"] == payload["quota_spend_command"], brief_payload
-    assert len(str(brief_payload["task_body"])) < len(str(compact_payload["task_body"])) * 0.55, (
+    assert len(str(brief_payload["task_body"])) < len(str(compact_payload["task_body"])) * 0.56, (
         len(str(brief_payload["task_body"])),
         len(str(compact_payload["task_body"])),
     )
@@ -618,7 +638,8 @@ def main() -> int:
         'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id public-heartbeat-goal',
         "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet",
         "Due/peer gate != prompt",
-        "missing NOTIFY action -> projection repair",
+        "missing NOTIFY action->",
+        "具体user todo未投影",
         "follow user channel",
         "monitor_quiet_skip",
         "receipt/stall done",
@@ -658,7 +679,8 @@ def main() -> int:
         "`quota should-run`",
         "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet",
         "Due/peer gate != prompt",
-        "missing NOTIFY action -> projection repair",
+        "missing NOTIFY action->",
+        "具体user todo未投影",
         "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend)",
         "else RRULE/ack/fail",
         "no-change=`surface_only`/no spend",
@@ -679,7 +701,8 @@ def main() -> int:
     ):
         assert "no-change=`surface_only`/no spend" in task, label
         assert "`--vision-unchanged-reason`" in task, label
-        assert "no status-check `outcome_progress`" in task, label
+        assert "status-only -> `surface_only`" in task, label
+        assert "validated blocker/successor/lifecycle -> actual outcome" in task, label
     assert "if absent say" not in thin_task, thin_task
     assert "If false/0: quiet/no-user-todo" not in thin_task, thin_task
 
