@@ -174,9 +174,10 @@ Goal lifecycle 仍由 Todo、Gate、events 与 acceptance 组合决定。
 goal 已经 transition 到阶段三。但 journal 只记录 agent 有过的意图，只有 goal/event state 才记录
 实际完成的 transition。
 
-**Goal/event state** 回答“当前 frontier 是什么，谁可以做什么”。它通过 append-only event 记录
-lifecycle transition（Todo 完成、Gate 解决、Vision 更新），并支持跨 session 重建。这是 quota
-decision 的唯一权威事实来源。
+**Goal/event state** 回答”当前 frontier 是什么，谁可以做什么”。它通过 append-only event 记录
+lifecycle transition（Todo 完成、Gate 解决、Vision 更新），并支持跨 session 重建。它是
+durable lifecycle fact 的权威来源，quota 将其与 registry/boundary、Todo/Gate、
+capability/workspace、run outcomes/history、scheduler context 以及 fresh external fact 一起编译。
 
 **Run history/status** 回答“历史上发生了什么，有什么证据”。它是只读的，不能反向写入 goal state。
 run 记录说“这轮测试通过”，不等于 goal state 中对应的 acceptance 已闭合——只有通过 lifecycle

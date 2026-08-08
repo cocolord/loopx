@@ -288,7 +288,7 @@ not "the loop is still running":
 | Missing Validation | Artifact exists but no postcondition check | Defective delivery enters writeback; subsequent decisions are based on wrong evidence |
 | Missing Writeback | Artifact was produced but Todo is still open | The next peer cannot see completion; duplicates work or selects the wrong frontier |
 | Missing Refresh | Todo was updated but status/vision is still stale | Quota selects the wrong target; monitor judges by expired conditions |
-| Missing Spend | Delivery was written back but no quota record exists | Consecutive deliveries are not counted; outcome floor cannot take effect |
+| Missing Spend | Delivery was written back but no quota record exists | Quota accounting and delivery causality are inconsistent |
 
 Missing Validation is the most dangerous because it treats internal confidence as external fact. Missing
 Writeback is the most common because agents skip the loop after "finishing work," keeping only local

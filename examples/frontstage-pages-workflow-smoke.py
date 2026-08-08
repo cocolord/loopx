@@ -81,7 +81,7 @@ def main() -> int:
         "apps/presentation/site/**",
         "examples/showcase-catalog-smoke.py",
         "python3 examples/showcase-catalog-smoke.py",
-"examples/readme-star-history-smoke.py",
+        "examples/readme-star-history-smoke.py",
         "python3 examples/readme-star-history-smoke.py",
         "scripts/render-star-history.py",
         "secrets.STAR_HISTORY_READ_TOKEN",
@@ -96,7 +96,7 @@ def main() -> int:
         "--expected-count",
         "output/frontstage-pages/site/site-assets/star-history.svg",
         "python3 examples/dev-book-publication-smoke.py",
-        "python3 examples/dev-book-publication-smoke.py --site-dir output/frontstage-pages/site/docs/book"
+        "python3 examples/dev-book-publication-smoke.py --site-dir output/frontstage-pages/site/docs/book",
         "npm run smoke:frontstage-share-bundle",
         "npm run export:frontstage-share -- --base /loopx/ --out-dir ../../../output/frontstage-pages",
         "mkdocs build --strict --site-dir output/frontstage-pages/site/docs",

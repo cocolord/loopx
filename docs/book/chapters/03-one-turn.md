@@ -268,7 +268,7 @@ right: act -> independent validation -> durable writeback -> spend once
 | 缺 Validation | 有 artifact 但无 postcondition 检验 | 不合格交付进入 writeback，后续决策基于错误证据 |
 | 缺 Writeback | artifact 已生成但 Todo 仍 open | 下一 peer 看不到完成，重复工作或选错 frontier |
 | 缺 Refresh | Todo 已更新但 status/vision 还是旧值 | quota 选错目标，monitor 按过期条件判断 |
-| 缺 Spend | 交付已写回但没有 quota 记录 | 连续交付不被计数，outcome floor 无法生效 |
+| 缺 Spend | 交付已写回但没有 quota 记录 | quota accounting / delivery causality 不一致 |
 
 Validation 缺失最危险，因为它把内部信心当成了外部事实。Writeback 缺失最常见，因为 agent 在“完成
 工作”后跳过闭环，只保留了本地 artifact 或聊天记录。Refresh 缺失最隐蔽：表面上看状态正确，实际

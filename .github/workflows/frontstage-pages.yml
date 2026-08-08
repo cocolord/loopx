@@ -20,7 +20,6 @@ on:
       - "docs/assets/long-running-loop-ml-experiment-trajectory.png"
       - "examples/export-frontstage-share-bundle.mjs"
       - "examples/frontstage-share-bundle-smoke.mjs"
-<<<<<<< HEAD
       - "examples/readme-star-history-smoke.py"
       - "examples/dev-book-publication-smoke.py"
       - "examples/goal-channel-frontstage-fixture.py"

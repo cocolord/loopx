@@ -9,8 +9,6 @@ exclude_docs: |
   /README.md
   archive/**
   book/**
-  architecture/rfcs/shared-goal-authority-state-provider-v0.md
-  architecture/rfcs/shared-goal-authority-state-provider-v0.zh-CN.md
   research/long-horizon-agent-benchmarks/*.json
   showcases/**/*.html
   showcases/showcase-animation-prototype.html

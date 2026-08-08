@@ -186,7 +186,9 @@ records the actual completed transition.
 
 **Goal/event state** answers "what is the current frontier, and who can do what." It records lifecycle
 transitions (Todo completion, Gate resolution, Vision update) through append-only events and supports
-cross-session reconstruction. This is the sole authoritative source of truth for quota decisions.
+cross-session reconstruction. It is the authoritative source for durable lifecycle facts, and quota
+compiles it together with registry/boundary, Todo/Gate, capability/workspace, run outcomes/history,
+scheduler context, and fresh external facts.
 
 **Run history/status** answers "what happened historically, and what evidence exists." It is read-only and
 cannot write back into goal state. A run record saying "tests passed this round" does not mean the
