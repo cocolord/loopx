@@ -14,6 +14,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.cli_commands.status import review_packet_handoff_only_payload  # noqa: E402
+from loopx.control_plane.todos.handoff_note import (  # noqa: E402
+    attach_todo_handoff_note,
+)
 from loopx.event_sourced_state import (  # noqa: E402
     TODO_ADDED,
     TODO_UPDATED,
@@ -569,13 +572,11 @@ def assert_handoff_for_both_open_and_done_predecessor() -> None:
         "text": "Open predecessor with handoff",
         "status": "open",
         "done": False,
-        "handoff_note": {
-            "from_agent": "agent-c",
-            "to_agent": "agent-d",
-            "status": "waiting",
-        },
+        "claimed_by": "agent-d",
+        "agent_id": "agent-c",
         "successor_todo_ids": ["todo_root"],
     }
+    open_handoff = attach_todo_handoff_note(open_handoff)
     projection = build_task_graph_projection(
         {
             "goal_id": "task-graph-handoff-both",
@@ -598,9 +599,60 @@ def assert_handoff_for_both_open_and_done_predecessor() -> None:
     # Check that the done handoff has state "done"
     done_hn = next(n for n in handoff_nodes if n["from_agent"] == "agent-a")
     assert done_hn["state"] == "done", done_hn
-    # Check that the open handoff has state "waiting" (from status field)
-    open_hn = next(n for n in handoff_nodes if n["from_agent"] == "agent-c")
+    # Check that the open handoff derives state from the todo's actual status
+    # (attach_todo_handoff_note does not inject a status field)
+    open_hn = next(n for n in handoff_nodes if n["from_agent"] != "agent-a")
     assert open_hn["state"] == "waiting", open_hn
+
+
+def assert_handoff_missing_status_not_default_to_done() -> None:
+    """Open predecessor with an attach_todo_handoff_note-produced handoff
+    (which has no status field) must not default to 'done'."""
+    open_handoff = {
+        "todo_id": "todo_open_no_status",
+        "title": "Open predecessor without explicit handoff status",
+        "text": "Open predecessor without explicit handoff status",
+        "status": "open",
+        "done": False,
+        "claimed_by": "agent-x",
+        "agent_id": "agent-e",
+        "resume_when": "todo_done:todo_target",
+        "successor_todo_ids": ["todo_root"],
+    }
+    open_handoff = attach_todo_handoff_note(open_handoff)
+    assert "status" not in open_handoff["handoff_note"], (
+        "attach_todo_handoff_note must not inject a status field"
+    )
+    root = {
+        "todo_id": "todo_root",
+        "title": "Root",
+        "text": "Root",
+        "status": "open",
+        "done": False,
+    }
+    projection = build_task_graph_projection(
+        {
+            "goal_id": "task-graph-handoff-no-status",
+            "agent_todos": {
+                "total_count": 2,
+                "open_count": 1,
+                "items": [root, open_handoff],
+            },
+            "user_todos": {
+                "total_count": 0,
+                "open_count": 0,
+                "items": [],
+            },
+        },
+        goal={"id": "task-graph-handoff-no-status"},
+    )
+    assert projection is not None
+    handoff_nodes = [n for n in projection["nodes"] if n["kind"] == "handoff"]
+    assert len(handoff_nodes) == 1, handoff_nodes
+    hn = handoff_nodes[0]
+    assert hn["state"] != "done", (
+        f"handoff on open predecessor must not default to done: {hn}"
+    )
 
 
 def assert_cycle_predecessor_safety() -> None:
@@ -708,6 +760,7 @@ def main() -> int:
     assert_diamond_dag_predecessor_edges()
     assert_evidence_only_for_done_predecessor()
     assert_handoff_for_both_open_and_done_predecessor()
+    assert_handoff_missing_status_not_default_to_done()
     assert_cycle_predecessor_safety()
 
     print("task-graph-projection-fixture-smoke ok")

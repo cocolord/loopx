@@ -463,7 +463,14 @@ def _task_graph_attach_handoff(
     if not handoff_from or not handoff_to or handoff_from == handoff_to:
         return
     handoff_status = public_safe_compact_text(handoff_note.get("status"), limit=80)
-    handoff_state = handoff_status if handoff_status in ("done", "waiting", "unknown") else "done"
+    if handoff_status in ("done", "waiting", "unknown"):
+        handoff_state = handoff_status
+    elif current_todo.get("done") is True or str(current_todo.get("status") or "").strip().lower() == "done":
+        handoff_state = "done"
+    elif str(current_todo.get("status") or "").strip().lower() == "open":
+        handoff_state = "waiting"
+    else:
+        handoff_state = "unknown"
     handoff_id = f"handoff:{current_tid}:{handoff_from}:{handoff_to}"
     handoff_node_id = builder.add_node(
         {
