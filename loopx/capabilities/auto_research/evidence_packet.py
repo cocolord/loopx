@@ -77,7 +77,7 @@ def _compact_public_text(value: Any, *, field: str, max_len: int = 240) -> str:
         raise ValueError(f"{field} must be non-empty")
     if len(text) > max_len:
         raise ValueError(f"{field} is too long for a compact public-safe field")
-    if ".." in text:
+    if ".." in text.replace("...", ""):
         raise ValueError(f"{field} must not contain parent-directory markers")
     if _ABSOLUTE_PATH_RE.search(text) or text.startswith(("/", "~")):
         raise ValueError(f"{field} must use a public alias, not a local/private path")
