@@ -1253,6 +1253,93 @@ def main() -> int:
         assert frontier_completion["status"] == "target_reached", target_reached
         assert target_reached["frontier"]["frontier"]["selected"] is None, target_reached
         assert_public_safe(target_reached)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        project = temp / "project"
+        project.mkdir()
+        state_file = project / "ACTIVE_GOAL_STATE.md"
+        registry = temp / "registry.json"
+        runtime_root = temp / "runtime"
+        write_summary_state(state_file)
+        write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
+        failure_evidence = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Evaluate a retired evidence branch for lineage dedup.",
+            task_class="advancement_task",
+            action_kind="run_dev_eval",
+            claimed_by=EXECUTOR_AGENT_ID,
+            dry_run=False,
+        )
+        first_summary = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] First summary of the retired evidence branch.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            unblocks_todo_id=failure_evidence["todo_id"],
+            dry_run=False,
+        )
+        second_summary = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Second summary of the same retired evidence branch.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            unblocks_todo_id=failure_evidence["todo_id"],
+            dry_run=False,
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_lineage_dedup_failure",
+            todo_id=failure_evidence["todo_id"],
+        )
+        workspace = project / "visible-workspace"
+        workspace.mkdir()
+
+        first_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        first_successors = first_turn["successor_todos"]["successors"]
+        assert len(first_successors) == 1, first_turn
+        assert first_successors[0]["action_kind"] == "propose_failure_successor", first_turn
+        assert first_successors[0]["claimed_by"] == HYPOTHESIS_AGENT_ID, first_turn
+        first_successor_text = first_successors[0]["todo_command"]
+        assert ".." not in first_successor_text, f"successor text contains ..: {first_successor_text!r}"
+        assert_public_safe(first_turn)
+
+        second_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        second_successors = second_turn["successor_todos"]["successors"]
+        assert len(second_successors) == 1, second_turn
+        second_successor = second_successors[0]
+        assert second_successor["already_exists"] is True, (
+            f"second successor should be deduplicated, got: {second_successor}"
+        )
+        assert second_successor["todo_id"] == first_successors[0]["todo_id"], (
+            f"second successor should have the same todo_id, got: {second_successor['todo_id']}"
+        )
+        assert_public_safe(second_turn)
+
     return 0
 
 

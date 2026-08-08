@@ -103,9 +103,16 @@ def _compact_optional_text(value: Any, *, field: str, default: str, max_len: int
     if value is None or str(value).strip() == "":
         return default
     text = " ".join(str(value).strip().split())
-    _compact_public_text(text, field=field, max_len=max(len(text), max_len))
     if len(text) > max_len:
-        text = text[: max_len - 1].rstrip() + "."
+        prefix = text[: max_len - 1].rstrip()
+        if prefix.endswith(".") and not prefix.endswith(".."):
+            text = prefix
+        else:
+            text = prefix.rstrip(".") + "."
+    # Strip trailing dot-runs so public text validation does not flag them
+    # as parent-directory markers (text may arrive with "..." from upstream).
+    while text.endswith(".."):
+        text = text[:-1]
     return _compact_public_text(text, field=field, max_len=max_len)
 
 

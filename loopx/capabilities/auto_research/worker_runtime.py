@@ -381,6 +381,9 @@ def _maybe_add_role_successor_todos(
             for spec in successor_specs
             if spec.get("action_kind") == next_outcome
         ]
+    text_source_todo_id = None
+    if isinstance(failure_continuation, dict):
+        text_source_todo_id = str(failure_continuation.get("source_todo_id") or "") or None
     return apply_role_successor_todos(
         registry_path=registry_path,
         goal_id=goal_id,
@@ -391,6 +394,7 @@ def _maybe_add_role_successor_todos(
         successor_specs=successor_specs,
         decision_summary=decision_summary,
         execute=execute,
+        text_source_todo_id=text_source_todo_id,
     )
 
 

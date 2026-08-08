@@ -15,7 +15,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from loopx.capabilities.auto_research.evidence_packet import _compact_public_text  # noqa: E402
 from loopx.capabilities.auto_research.research_state import (  # noqa: E402
+    _compact_optional_text,
     build_auto_research_completion_status,
     build_live_auto_research_projection,
     build_research_decision_candidates,
@@ -528,5 +530,19 @@ def main() -> None:
     print("auto-research-rollout-readpath-smoke ok")
 
 
+def _test_compact_optional_text_dot_guard() -> None:
+    """Regression: compacting long text must not produce '..' (parent-directory marker)."""
+    long_text = "a" * 219 + "b."
+    result = _compact_optional_text(long_text, field="live.title", default="fallback", max_len=220)
+    assert ".." not in result, f"unexpected .. in compacted text: {result!r}"
+    _compact_public_text(result, field="live.title", max_len=220)
+    long_text_no_dot = "a" * 219 + "c"
+    result2 = _compact_optional_text(long_text_no_dot, field="live.title", default="fallback", max_len=220)
+    assert ".." not in result2, f"unexpected .. in compacted text: {result2!r}"
+    _compact_public_text(result2, field="live.title", max_len=220)
+    print("compact-optional-text-dot-guard ok")
+
+
 if __name__ == "__main__":
+    _test_compact_optional_text_dot_guard()
     main()
