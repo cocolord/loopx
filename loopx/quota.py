@@ -67,6 +67,7 @@ from .control_plane.quota.stall_repair import (
 from .control_plane.quota.decision_summary import (
     goal_status_health_ok as _goal_status_health_ok,
     quota_decision_agent_id,
+    quota_plan_items as _quota_plan_items,
     refine_quota_recommended_action,
     resolve_quota_run_decision,
 )
@@ -78,6 +79,7 @@ from .control_plane.quota.monitor_poll import (
 )
 from .control_plane.quota.recent_runs import (
     build_monitor_debt_arbitration as _build_monitor_debt_arbitration,
+    goal_latest_run as _goal_latest_run,
     goal_latest_runs as _goal_latest_runs,
     recent_external_monitor_observation_unchanged as _recent_external_monitor_observation_unchanged,
 )
@@ -115,6 +117,16 @@ from .control_plane.quota.spend_sources import (
     DEFAULT_SLOT_SPEND_SOURCE,
 )
 from .control_plane.quota.states import QUOTA_STATE_ORDER
+from .control_plane.quota.policy_constants import (
+    AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS,
+    DEFAULT_COMPUTE_QUOTA,
+    DEFAULT_SLOT_MINUTES,
+    DEFAULT_WINDOW_HOURS,
+    FOCUS_WAIT_LIFECYCLE_MARKERS,
+    FOCUS_WAIT_REASON,
+    MONITOR_DUE_ITEM_LIMIT,
+    SELF_REPAIR_SPEND_ACTIONS,
+)
 from .control_plane.runtime.decision_freshness import (
     decision_freshness_warning as _decision_freshness_warning,
 )
@@ -194,38 +206,12 @@ _PUBLIC_COMPAT_REEXPORTS = {
 }
 
 
-DEFAULT_COMPUTE_QUOTA = 1.0
-DEFAULT_WINDOW_HOURS = 24
-DEFAULT_SLOT_MINUTES = 1
 AUTONOMOUS_REPLAN_ACK_NEUTRAL_CLASSIFICATIONS = {
     QUOTA_SLOT_SPENT_CLASSIFICATION,
     QUOTA_SLOT_VOIDED_CLASSIFICATION,
     QUOTA_SCHEDULER_ACK_CLASSIFICATION,
     "delivery_completion_spend_accounted_v0",
 }
-FOCUS_WAIT_LIFECYCLE_MARKERS = {
-    "continuation_boundary",
-    "focus_wait",
-}
-FOCUS_WAIT_REASON = (
-    "focus wait: delivery lane has a continuation boundary or missing novelty; "
-    "wait for new evidence, owner input, external eval, or a clean baseline before "
-    "spending delivery compute"
-)
-AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS = (
-    "source",
-    "open_count",
-    "task_class",
-    "items",
-)
-SELF_REPAIR_SPEND_ACTIONS = {
-    "control_plane_health_repair",
-    "control_plane_projection_repair",
-    "state_projection_gap_repair",
-    "boundary_projection_repair",
-    "todo_decision_scope_projection_repair",
-}
-MONITOR_DUE_ITEM_LIMIT = 1
 
 def _validate_goal_id_path_segment(goal_id: str) -> str:
     value = goal_id.strip()
@@ -508,7 +494,7 @@ def quota_status(
         payload["blocked_action_scope"] = "delivery_focus"
         payload["focus_wait"] = True
     elif waiting_on == "codex":
-        if allowed_slots > 0 and spent_slots >= allowed_slots:
+        if spent_slots >= allowed_slots:
             state = "throttled"
             reason = f"{compute:g} compute quota spent {spent_slots}/{allowed_slots} slots in this window"
         else:
@@ -521,13 +507,6 @@ def quota_status(
     payload["state"] = state
     payload["reason"] = reason
     return payload
-
-
-def _latest_run(goal: dict[str, Any]) -> dict[str, Any]:
-    latest_runs = goal.get("latest_runs") if isinstance(goal.get("latest_runs"), list) else []
-    if latest_runs and isinstance(latest_runs[0], dict):
-        return latest_runs[0]
-    return {}
 
 
 def _quota_sort_key(item: dict[str, Any]) -> tuple[int, float, int, str]:
@@ -926,7 +905,7 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             if isinstance(attention.get("project_asset"), dict)
             else {}
         )
-        latest = _latest_run(goal)
+        latest = _goal_latest_run(goal)
         waiting_on = attention.get("waiting_on") or "none"
         lifecycle_phase = attention.get("lifecycle_phase") or goal.get("lifecycle_phase")
         lifecycle_flags = attention.get("lifecycle_flags") or goal.get("lifecycle_flags")
@@ -1051,16 +1030,6 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
         "groups": groups,
         "health_items": health_items,
     }
-
-
-def _quota_plan_items(plan: dict[str, Any]) -> list[dict[str, Any]]:
-    groups = plan.get("groups") if isinstance(plan.get("groups"), dict) else {}
-    items: list[dict[str, Any]] = []
-    for state_items in groups.values():
-        if not isinstance(state_items, list):
-            continue
-        items.extend(item for item in state_items if isinstance(item, dict))
-    return items
 
 
 def _recent_reward_lessons(status_payload: dict[str, Any], *, goal_id: str) -> list[dict[str, Any]]:
@@ -2810,6 +2779,11 @@ def record_quota_monitor_poll(
     cadence: str | None = None,
     next_due_at: str | None = None,
     next_agent_todo: str | None = None,
+    next_action_kind: str | None = None,
+    next_task_repository: str | None = None,
+    next_required_capabilities: list[str] | None = None,
+    next_continuation_policy: str | None = None,
+    next_target_key: str | None = None,
     next_user_todo: str | None = None,
     next_user_task_class: str | None = None,
     next_claimed_by: str | None = None,
@@ -2846,6 +2820,11 @@ def record_quota_monitor_poll(
         cadence=cadence,
         next_due_at=next_due_at,
         next_agent_todo=next_agent_todo,
+        next_action_kind=next_action_kind,
+        next_task_repository=next_task_repository,
+        next_required_capabilities=next_required_capabilities,
+        next_continuation_policy=next_continuation_policy,
+        next_target_key=next_target_key,
         next_user_todo=next_user_todo,
         next_user_task_class=next_user_task_class,
         next_claimed_by=next_claimed_by,
