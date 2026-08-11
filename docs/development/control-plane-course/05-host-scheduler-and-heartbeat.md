@@ -1,4 +1,4 @@
-# 第 7 讲：Host、Heartbeat 与 Stateful Backoff
+# 第 5 讲：Host、Heartbeat 与 Stateful Backoff
 
 > **本讲结论：** Host 拥有唤醒和外部 effect，LoopX 拥有 cadence proposal 与验证规则；
 > 只有绑定 proposal identity 的 host readback 才能形成 durable scheduler ACK。
@@ -632,7 +632,7 @@ App tick
 2. `docs/operations/long-task-cadence-policy.md`
 3. `loopx/heartbeat_prompt.py`
 4. `loopx/control_plane/scheduler/`
-5. `loopx/control_plane/quota/should_run_packet.py` 的 final composition：interaction contract、scheduler hint、protocol action packet
+5. `loopx/quota.py` 的 final composition：interaction contract、scheduler hint、protocol action packet
 6. `docs/product/core-control-plane/state-machine.md` 的 Scheduler/Heartbeat 状态机
 
 ## 代表性 Smoke
