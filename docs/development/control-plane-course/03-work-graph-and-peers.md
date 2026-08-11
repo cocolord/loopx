@@ -1,4 +1,4 @@
-# 第 5 讲：Todo 工作图与 Peer 协作
+# 第 3 讲：Todo 工作图与 Peer 协作
 
 > **本讲结论：** Todo 定义工作生命周期；claim、lease、capability、workspace 和 gate 是五种
 > 不同约束；handoff 传递可恢复 frontier，不创造永久 leader。
@@ -254,7 +254,7 @@ Lease 丢失应 fail closed。一个 worker 不应该在 lease 过期后继续�
 生命周期与幂等合同由 `tests/control_plane/test_task_lease.py` 和
 `examples/control_plane/task-lease-runtime-smoke.py` 看护。
 
-第 9 讲介绍的 supervisor 目前只产生观察和提议。若未来增加 supervisor 建议的
+第 7 讲介绍的 supervisor 目前只产生观察和提议。若未来增加 supervisor 建议的
 temporary execution branch，对应 branch lease 也只能授权该分支执行，不能继承
 source todo、source quota 或 source durable memory。
 
@@ -390,13 +390,6 @@ Capability 是 preflight 条件，不是 permission：
 - 有 `benchmark_runner` 不代表可以提交 leaderboard。
 
 权限仍来自 goal boundary、user gate、workspace policy 和 host authority。
-
-未知或非 owner-held 的缺失能力会作为 `repair_missing` 暴露给 agent，而不是
-直接跳过。Agent 必须自己判断能否满足：例如独立 worktree/branch 可以由当前
-runtime 自证，就执行 repair 并写回 `capability_gap_status=fixed`；不能证明就写
-blocker。分支/worktree 的最终约束仍由 `--task-repository`、
-`--required-write-scope` 和 workspace guard 执行，不要在 capability gate 里
-维护能力名清单。
 
 `target_capability` 则表示 todo 正在构建或修复什么能力，不是执行这个 todo 的硬前提。
 

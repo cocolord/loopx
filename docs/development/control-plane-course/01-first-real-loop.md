@@ -1,4 +1,4 @@
-# 第 3 讲：从 Showcase 到第一次真实 Loop
+# 第 1 讲：从 Showcase 到第一次真实 Loop
 
 > **本讲结论：** 第一次真实 Loop 不是“heartbeat 调一次模型”，而是外置 source state 被
 > 编译成适合有限上下文的 CLI packet 和 bounded action，执行结果经验证写回，再由
@@ -6,11 +6,11 @@
 
 ## 本讲在课程中的位置
 
-[第 2 讲](02-goal-control-plane-architecture.md)已经从 Issue-Fix、Single-Agent Auto ML
+[第 0 讲](00-goal-control-plane-architecture.md)已经从 Issue-Fix、Single-Agent Auto ML
 与 Auto Research 三条产品闭环推导出 Kernel、Capability Pack、Domain State、host/runtime
 和外部事实源的边界。
 本讲不再展开领域判断，而是沿共同生命周期跑通第一次真实 Loop。
-全课由第 2 讲架构导论和第 3 到第 11 讲专题组成，每讲只增加一个主要抽象：
+全课由第 0 讲架构导论和 9 讲专题组成，每讲只增加一个主要抽象：
 
 | 讲次 | 新增的主要抽象 | 学完后能回答的问题 |
 | --- | --- | --- |
@@ -39,7 +39,7 @@
 
 ## 先把三个 Showcase 压成一轮
 
-第 2 讲看到的是完整产品闭环。本讲只截取其中一轮，观察 LoopX 如何把长期状态变成
+第 0 讲看到的是完整产品闭环。本讲只截取其中一轮，观察 LoopX 如何把长期状态变成
 一次可提交的小变化：
 
 | Showcase 中的一轮 | 本轮输入 | Bounded action | 可接受回执 | 下一轮依据 |
@@ -401,12 +401,9 @@ loopx --format json quota should-run \
 2. `loopx/cli_commands/starter_bootstrap.py`
 3. `loopx/bootstrap_command_pack.py`
 4. `loopx/heartbeat_prompt.py`
-5. `loopx/control_plane/quota/should_run.py::build_quota_should_run`
+5. `loopx/quota.py::build_quota_should_run`
 
-不要从头通读旧的 `loopx.quota` facade。真实决策在
-`loopx/control_plane/quota/should_run.py`、`should_run_prepare.py` 与
-`should_run_packet.py`。先搜索 `build_quota_should_run`，再沿 bounded-context
-helper 向下读。
+不要从头通读 `quota.py`。先搜索 `build_quota_should_run`，再沿它调用的 bounded-context helper 向下读。
 
 ### 步骤 D：带着调用链读核心代码
 
@@ -566,9 +563,7 @@ effective_action = _effective_action(...)
 
 按这个顺序领读：先确定 goal boundary，再选 work lane，再检查能力与 workspace，最后让 projection repair 覆盖普通 delivery。`should_run=True` 只说明“本轮有必须尝试的合法动作”，动作可能是 repair，并不总是产品交付。
 
-建议断点：`should_run_prepare.py` 的 preparation 阶段，以及
-`should_run_packet.py` 的 route/build 阶段。每次只记录 `effective_action`、
-四个 `*_allowed` 与 guard 的 `reason`。
+建议断点：`quota.py:1300`、`:1351`、`:1404`、`:1442`、`:1461`。每次只记录 `effective_action`、四个 `*_allowed` 与 guard 的 `reason`。
 
 #### 读完这一段应能回答
 
@@ -595,7 +590,7 @@ effective_action = _effective_action(...)
 ### “Supervisor 就是主 agent”
 
 不是。当前 peer 模型没有 primary/side 的运行时层级。可选 supervisor 是 equal peer
-上的观察和 proposal overlay；第 9 讲用它演示规则设计，第 11 讲说明它与其他扩展能力
+上的观察和 proposal overlay；第 7 讲用它演示规则设计，第 9 讲说明它与其他扩展能力
 如何复用同一个 kernel。
 
 ## 本讲源码与 smoke 地图
@@ -606,7 +601,7 @@ effective_action = _effective_action(...)
 | 新人命令路径 | `docs/guides/newcomer-command-path.md` |
 | guided start | `loopx/cli_commands/starter_bootstrap.py`、`loopx/bootstrap_command_pack.py` |
 | heartbeat body | `loopx/heartbeat_prompt.py` |
-| quota 入口 | `loopx/control_plane/quota/should_run.py::build_quota_should_run` |
+| quota 入口 | `loopx/quota.py::build_quota_should_run` |
 | Showcase 真相 | `docs/showcases/showcase-catalog.json` |
 | guided start 回归 | `examples/bootstrap-command-pack-smoke.py` |
 | quota/heartbeat 回归 | `examples/control_plane/heartbeat-quota-flow-smoke.py` |
@@ -651,7 +646,7 @@ state_key   = scheduler_hint.codex_app.stateful_backoff
 RRULE       = FREQ=MINUTELY;INTERVAL=3
 ```
 
-课堂上可以逐条对照自己的状态文件。实验还应故意漏写一次 material refresh 的 vision decision，观察后续 quota 产生 `vision_checkpoint_missing`；第 8 讲会完整复盘这个失败案例。
+课堂上可以逐条对照自己的状态文件。实验还应故意漏写一次 material refresh 的 vision decision，观察后续 quota 产生 `vision_checkpoint_missing`；第 6 讲会完整复盘这个失败案例。
 
 ## 课后检查
 
