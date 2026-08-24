@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+from loopx.capabilities.benchmark_toolkit.external_agent import (
+    EXTERNAL_AGENT_REQUEST_SCHEMA_VERSION,
+    EXTERNAL_AGENT_RESULT_SCHEMA_VERSION,
+    execute_external_agent_request,
+)
+from loopx.cli import main
+
+
+def _request(workspace: Path) -> dict[str, object]:
+    return {
+        "schema_version": EXTERNAL_AGENT_REQUEST_SCHEMA_VERSION,
+        "instruction": "Implement the requested task without reading evaluator files.",
+        "workspace": str(workspace),
+        "timeout_seconds": 10,
+    }
+
+
+def test_external_agent_phase_runs_solver_with_request_reference(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request_path = tmp_path / "request.json"
+    result_path = tmp_path / "result.json"
+    marker = workspace / "marker.txt"
+    request_path.write_text(json.dumps(_request(workspace)), encoding="utf-8")
+
+    solver = [
+        sys.executable,
+        "-c",
+        (
+            "import os\n"
+            "from pathlib import Path\n"
+            "request = Path(os.environ['LOOPX_EXTERNAL_AGENT_REQUEST'])\n"
+            "assert request.is_file()\n"
+            "Path('marker.txt').write_text(os.environ['LOOPX_EXTERNAL_AGENT_INSTRUCTION_SHA256'])\n"
+        ),
+    ]
+    result = execute_external_agent_request(
+        request_path=request_path,
+        result_path=result_path,
+        solver_command=solver,
+        execute=True,
+    )
+
+    assert result["schema_version"] == EXTERNAL_AGENT_RESULT_SCHEMA_VERSION
+    assert result["status"] == "succeeded"
+    assert marker.read_text(encoding="utf-8") == result["receipt"]["instruction_sha256"]
+    persisted = json.loads(result_path.read_text(encoding="utf-8"))
+    assert persisted == result
+    rendered = json.dumps(result, sort_keys=True)
+    assert str(workspace) not in rendered
+    assert "Implement the requested task" not in rendered
+    assert "python" not in rendered
+
+
+def test_external_agent_phase_fails_closed_for_invalid_request(
+    tmp_path: Path,
+) -> None:
+    result_path = tmp_path / "result.json"
+    result = execute_external_agent_request(
+        request_path=tmp_path / "missing.json",
+        result_path=result_path,
+        solver_command=[sys.executable, "-c", "raise SystemExit(0)"],
+        execute=True,
+    )
+
+    assert result["status"] == "failed"
+    assert result["receipt"]["classification"] == "agent_phase_input_invalid"
+    assert json.loads(result_path.read_text(encoding="utf-8")) == result
+
+
+def test_external_agent_phase_rejects_string_solver_command(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request_path = tmp_path / "request.json"
+    result_path = tmp_path / "result.json"
+    request_path.write_text(json.dumps(_request(workspace)), encoding="utf-8")
+
+    result = execute_external_agent_request(
+        request_path=request_path,
+        result_path=result_path,
+        solver_command="not-an-argv",  # type: ignore[arg-type]
+        execute=True,
+    )
+
+    assert result["status"] == "failed"
+    assert result["receipt"]["classification"] == "agent_phase_input_invalid"
+
+
+def test_benchmark_agent_phase_cli_reads_environment_defaults(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request_path = tmp_path / "request.json"
+    result_path = tmp_path / "result.json"
+    request_path.write_text(json.dumps(_request(workspace)), encoding="utf-8")
+    solver = [sys.executable, "-c", "raise SystemExit(0)"]
+
+    monkeypatch.setenv("LOOPSBENCH_EXTERNAL_AGENT_REQUEST", str(request_path))
+    monkeypatch.setenv("LOOPSBENCH_EXTERNAL_AGENT_RESULT", str(result_path))
+    monkeypatch.setenv("LOOPX_EXTERNAL_AGENT_SOLVER_COMMAND_JSON", json.dumps(solver))
+
+    assert main(["benchmark", "agent-phase", "--execute"]) == 0
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    assert result["status"] == "succeeded"

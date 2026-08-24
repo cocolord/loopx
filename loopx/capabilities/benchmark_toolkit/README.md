@@ -5,6 +5,27 @@ admission, permission, artifact, integrity, and reusable agent-runtime boundarie
 around benchmark experiments. It does not own benchmark-family runners, result
 ledgers, or scoring adapters.
 
+## External-agent phase
+
+A benchmark harness may own the task container and verifier while delegating only
+the agent phase to a preinstalled command. The harness writes an
+`external_agent_request_v1` JSON file containing the task instruction,
+task-visible workspace, and timeout, then invokes:
+
+```bash
+loopx benchmark agent-phase \
+  --request "$LOOPSBENCH_EXTERNAL_AGENT_REQUEST" \
+  --result "$LOOPSBENCH_EXTERNAL_AGENT_RESULT" \
+  --solver-command-json '["<solver>", "<arg>"]' \
+  --execute
+```
+
+The command writes one `external_agent_result_v1` result with hashes and
+bounded lifecycle fields only. It does not provision a task, start Docker,
+access a verifier, calculate a score, upload a result, or grant model or
+credential authority. The solver command is runner-owned and executes in the
+request's task-visible workspace.
+
 ## Source revision admission
 
 A long-running campaign can keep launching from an old installed checkout after
