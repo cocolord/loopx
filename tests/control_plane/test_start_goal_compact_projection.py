@@ -609,7 +609,7 @@ def test_candidate_preflight_contract_describes_receipt_shapes() -> None:
         )
 
 
-def test_goal_text_never_selects_capability_route_without_switch(
+def test_generic_goal_text_never_selects_explicit_capability_route_without_switch(
     tmp_path: Path,
 ) -> None:
     project = _write_connected_project(tmp_path)
@@ -661,6 +661,211 @@ def test_goal_text_never_selects_capability_route_without_switch(
     route = explicit_route["guided_transaction"]["selected_capability_route"]
     assert route["selection_source"] == "explicit_capability_route"
     assert route["selection_reason_code"] == "capability_route_enabled"
+
+
+def test_wish_intent_routes_to_auto_research_before_goal_selection(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--format",
+                "json",
+                "start-goal",
+                "--guided",
+                "--project",
+                str(project),
+                "--host-surface",
+                "ark-managed-agent",
+                "--slash-command-arguments",
+                "我许愿帮我在美股发现最近的机会",
+            ]
+        )
+    payload = json.loads(output.getvalue())
+
+    assert exit_code == 0
+    route = payload["capability_intent_route"]
+    assert route["capability_id"] == "auto-research"
+    assert route["selection_source"] == "capability_catalog_intent_alias"
+    assert payload["recommended_next_step"] == {
+        "kind": "invoke_capability_entry",
+        "requires_user_confirmation": False,
+        "command": (
+            "loopx auto-research start "
+            "'我许愿帮我在美股发现最近的机会' --execute"
+        ),
+    }
+    assert "project_connection" not in payload
+    assert "goal_selection_gate" not in payload
+
+
+def test_wish_intent_routes_before_host_surface_selection(tmp_path: Path) -> None:
+    project = _write_connected_project(tmp_path)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--format",
+                "json",
+                "start-goal",
+                "--guided",
+                "--project",
+                str(project),
+                "--slash-command-arguments",
+                "许愿在当前的美股市场发现机会",
+            ]
+        )
+    payload = json.loads(output.getvalue())
+
+    assert exit_code == 0
+    assert payload["recommended_next_step"]["kind"] == "invoke_capability_entry"
+    assert payload["capability_intent_route"]["capability_id"] == "auto-research"
+    assert "host_surface_selection_gate" not in payload
+
+
+def test_wish_intent_preserves_explicit_runtime_root(tmp_path: Path) -> None:
+    project = _write_connected_project(tmp_path)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--runtime-root",
+                "explicit runtime",
+                "--format",
+                "json",
+                "start-goal",
+                "--guided",
+                "--project",
+                str(project),
+                "--slash-command-arguments",
+                "我许愿比较两个假设",
+            ]
+        )
+    payload = json.loads(output.getvalue())
+    entry_argv = shlex.split(payload["capability_intent_route"]["entry_command"])
+
+    assert exit_code == 0
+    assert entry_argv[:3] == [
+        "loopx",
+        "--runtime-root",
+        str(project / "explicit runtime"),
+    ]
+    assert entry_argv[3:] == [
+        "auto-research",
+        "start",
+        "我许愿比较两个假设",
+        "--execute",
+    ]
+
+
+def test_wish_clause_after_pr_context_routes_to_auto_research(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--format",
+                "json",
+                "start-goal",
+                "--guided",
+                "--project",
+                str(project),
+                "--host-surface",
+                "ark-managed-agent",
+                "--slash-command-arguments",
+                (
+                    "https://github.com/huangruiteng/loopx/pull/3593 这个PR合入了。"
+                    "那你用这个PR新增的能力，我许愿在美股给我挣钱！今天就要"
+                ),
+            ]
+        )
+    payload = json.loads(output.getvalue())
+
+    assert exit_code == 0
+    assert payload["capability_intent_route"]["capability_id"] == "auto-research"
+    assert payload["capability_intent_route"]["matched_alias"] == "我许愿"
+
+
+def test_wish_line_after_pr_context_routes_to_auto_research(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--format",
+                "json",
+                "start-goal",
+                "--guided",
+                "--project",
+                str(project),
+                "--host-surface",
+                "ark-managed-agent",
+                "--slash-command-arguments",
+                (
+                    "https://github.com/huangruiteng/loopx/pull/3593 这个PR合入了\n"
+                    "我许愿在美股给我挣钱"
+                ),
+            ]
+        )
+    payload = json.loads(output.getvalue())
+
+    assert exit_code == 0
+    assert payload["capability_intent_route"]["capability_id"] == "auto-research"
+    assert payload["capability_intent_route"]["matched_alias"] == "我许愿"
+
+
+def test_auto_research_discussion_remains_on_normal_goal_route(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    exit_code, payload = _invoke_ark_start_goal_cli(
+        project,
+        "--slash-command-arguments",
+        "评估是否应该使用 Auto Research",
+    )
+
+    assert exit_code == 0
+    assert "capability_intent_route" not in payload
+    assert payload["recommended_next_step"]["kind"] == "goal_plan_write_and_activate"
+
+
+def test_explicit_capability_switch_overrides_wish_intent_alias(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    exit_code, payload = _invoke_ark_start_goal_cli(
+        project,
+        "--capability-route",
+        "issue-fix",
+        "--goal-text",
+        "许愿修复指定 issue",
+    )
+
+    assert exit_code == 0
+    assert "capability_intent_route" not in payload
+    route = payload["guided_transaction"]["selected_capability_route"]
+    assert route["capability_id"] == "issue-fix"
+    assert route["selection_source"] == "explicit_capability_route"
+
+
+def test_explicit_goal_id_overrides_wish_intent_alias(tmp_path: Path) -> None:
+    project = _write_connected_project(tmp_path)
+    exit_code, payload = _invoke_ark_start_goal_cli(
+        project,
+        "--goal-text",
+        "我许愿继续现有研究目标",
+    )
+
+    assert exit_code == 0
+    assert "capability_intent_route" not in payload
+    assert payload["goal_id"] == GOAL_ID
+    assert payload["recommended_next_step"]["kind"] == "goal_plan_write_and_activate"
 
 
 def test_explicit_capability_route_survives_compact_detail_readback(

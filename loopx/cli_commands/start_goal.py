@@ -12,10 +12,13 @@ from ..bootstrap_command_pack import (
     build_start_goal_host_surface_selection_packet,
     render_start_goal_guided_markdown,
 )
+from ..capabilities.catalog import build_capability_registry
+from ..capabilities.intent_route import resolve_capability_intent_route_from_records
 from ..control_plane.effect_runtime import (
     EffectRuntimeStartupError,
     MINIMUM_NODE_VERSION_TEXT,
 )
+from ..paths import resolve_runtime_root
 from ._host_thread import current_host_thread_id
 
 PrintPayload = Callable[
@@ -105,13 +108,26 @@ def _render_start_goal_markdown(payload: dict[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _render_capability_intent_route(payload: dict[str, object]) -> str:
+    route = payload["capability_intent_route"]
+    assert isinstance(route, dict)
+    return (
+        "# LoopX Capability Intent Route\n\n"
+        f"- capability: `{route.get('capability_id')}`\n"
+        f"- route: `{route.get('route_id')}`\n"
+        f"- source: `{route.get('selection_source')}`\n"
+        f"- next: `{route.get('entry_command')}`\n"
+    )
+
+
 def add_capability_route_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--capability-route",
         choices=START_GOAL_CAPABILITY_ROUTES,
         help=(
-            "Explicit product capability route for this goal start. Goal text never "
-            "selects a capability route."
+            "Explicit product capability route override for this goal start. Generic "
+            "goal wording never selects a route; a registered capability may declare "
+            "an exact invocation alias handled before generic Goal routing."
         ),
     )
 
@@ -284,6 +300,34 @@ def handle_start_goal_command(
         return 2
     try:
         goal_text, capability_route, fine_grained = _resolve_start_goal_input(args)
+        intent_route_runtime_root = None
+        if runtime_root_arg:
+            registry_path = (
+                Path(args.project).expanduser().resolve() / ".loopx" / "registry.json"
+            )
+            intent_route_runtime_root = str(
+                resolve_runtime_root(
+                    {},
+                    override=runtime_root_arg,
+                    registry_path=registry_path,
+                )
+            )
+        intent_route = (
+            resolve_capability_intent_route_from_records(
+                goal_text,
+                records=build_capability_registry().records(),
+                cli_bin=args.cli_bin,
+                runtime_root=intent_route_runtime_root,
+            )
+            if (
+                capability_route is None
+                and args.goal_id is None
+                and args.agent_id is None
+                and not bool(getattr(args, "new_peer", False))
+                and not fine_grained
+            )
+            else None
+        )
     except ValueError as exc:
         payload = {
             "ok": False,
@@ -296,6 +340,27 @@ def handle_start_goal_command(
         }
         print_payload(payload, args.format, _render_start_goal_markdown)
         return 2
+    if intent_route is not None:
+        payload = {
+            "ok": True,
+            "schema_version": "loopx_start_goal_capability_intent_route_v0",
+            "read_only": True,
+            "goal_text": goal_text,
+            "capability_intent_route": intent_route,
+            "recommended_next_step": {
+                "kind": "invoke_capability_entry",
+                "requires_user_confirmation": False,
+                "command": intent_route["entry_command"],
+            },
+            "safety_contract": {
+                "writes_registry": False,
+                "writes_state_file": False,
+                "creates_heartbeat": False,
+                "spends_quota": False,
+            },
+        }
+        print_payload(payload, args.format, _render_capability_intent_route)
+        return 0
     if not args.host_surface:
         try:
             payload = build_start_goal_host_surface_selection_packet(

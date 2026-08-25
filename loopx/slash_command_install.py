@@ -83,8 +83,11 @@ def _loopx_start_goal_arguments_instruction(
         "unchanged as one value to "
         f'`{cli_bin} start-goal --guided --project . --slash-command-arguments='
         f'"<complete visible $ARGUMENTS>" --host-surface {selected_host}`. '
-        "The CLI, not the model, owns parsing supported leading switches and "
-        "preserving the remaining goal text. Never split or recompose the "
+        "The CLI, not the model, owns parsing supported leading switches, "
+        "resolving capability-owned intent aliases, and preserving the remaining "
+        "goal text. If the result contains a typed "
+        "`capability_intent_route`, execute its exact `entry_command` and do not "
+        "continue the generic Goal transaction. Never split or recompose the "
         "arguments, and never infer a route from issue/PR wording or URLs."
     )
     if host_surface is None:

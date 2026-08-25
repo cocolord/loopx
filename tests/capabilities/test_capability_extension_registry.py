@@ -11,6 +11,8 @@ from loopx.capabilities.catalog import (
     build_capability_detail_packet,
     build_capability_registry,
 )
+from loopx.capabilities.intent_route import resolve_capability_intent_route_from_records
+from loopx.capabilities.registry import CapabilityRegistry
 from loopx.capabilities.context_providers import (
     OpenVikingContextProvider,
     build_context_provider,
@@ -432,6 +434,196 @@ def test_active_explore_and_auto_research_records_point_to_real_smokes() -> None
             prefix = "python3 "
             assert command.startswith(prefix)
             assert (repository / command.removeprefix(prefix)).is_file()
+
+
+@pytest.mark.parametrize(
+    "goal_text",
+    [
+        "我许愿帮我在美股发现最近的机会",
+        "许愿在当前的美股市场发现机会",
+        "使用 Auto Research，许愿在当前的美股市场发现机会",
+        (
+            "https://github.com/huangruiteng/loopx/pull/3593 这个PR合入了。"
+            "那你用这个PR新增的能力，我许愿在美股给我挣钱！今天就要"
+        ),
+        (
+            "https://github.com/huangruiteng/loopx/pull/3593 这个PR合入了\n"
+            "我许愿在美股给我挣钱"
+        ),
+        "Start Auto Research to compare two hypotheses",
+    ],
+)
+def test_auto_research_catalog_routes_explicit_wish_intent(goal_text: str) -> None:
+    capability = build_capability_detail_packet("auto-research")["capability"]
+    route = resolve_capability_intent_route_from_records(
+        goal_text,
+        records=build_capability_registry().records(),
+        cli_bin="loopx",
+    )
+
+    assert capability["intent_routes"][0]["route_id"] == "wish"
+    assert "许愿" in capability["intent_routes"][0]["aliases"]
+    assert route is not None
+    assert route["schema_version"] == "loopx_capability_intent_route_v0"
+    assert route["capability_id"] == "auto-research"
+    assert route["route_id"] == "wish"
+    assert route["selection_source"] == "capability_catalog_intent_alias"
+    assert route["selection_reason_code"] == "explicit_capability_alias"
+    assert route["entry_command"].startswith("loopx auto-research start ")
+    assert route["entry_command"].endswith(" --execute")
+
+
+def test_capability_intent_route_preserves_typed_runtime_root() -> None:
+    route = resolve_capability_intent_route_from_records(
+        "我许愿比较两个假设",
+        records=build_capability_registry().records(),
+        cli_bin="loopx",
+        runtime_root="/tmp/runtime with spaces",
+    )
+
+    assert route is not None
+    assert route["entry_command"] == (
+        "loopx --runtime-root '/tmp/runtime with spaces' "
+        "auto-research start '我许愿比较两个假设' --execute"
+    )
+
+
+@pytest.mark.parametrize(
+    "goal_text",
+    [
+        "研究当前的美股市场",
+        "评估是否应该使用 Auto Research",
+        "总结 wish-to-artifact PR 的实现",
+        "修复普通 Goal 的路由",
+    ],
+)
+def test_capability_intent_route_does_not_capture_generic_goal_text(
+    goal_text: str,
+) -> None:
+    assert (
+        resolve_capability_intent_route_from_records(
+            goal_text,
+            records=build_capability_registry().records(),
+            cli_bin="loopx",
+        )
+        is None
+    )
+
+
+def test_capability_intent_route_rejects_ambiguous_capabilities() -> None:
+    route = {
+        "route_id": "wish",
+        "match_kind": "normalized_prefix",
+        "aliases": ["wish"],
+        "command_argv": ["{cli_bin}", "example", "{goal_text}"],
+        "effect_class": "local_execution",
+    }
+    records = [
+        {
+            "id": capability_id,
+            "provider_state": {"ready": True},
+            "intent_routes": [route],
+        }
+        for capability_id in ("first", "second")
+    ]
+
+    with pytest.raises(ValueError, match="ambiguous capability intent route"):
+        resolve_capability_intent_route_from_records(
+            "wish for something",
+            records=records,
+            cli_bin="loopx",
+        )
+
+
+@pytest.mark.parametrize(
+    ("intent_routes", "expected_error"),
+    [
+        ("wish", "intent_routes must be a list"),
+        (
+            [
+                {
+                    "route_id": "wish",
+                    "match_kind": "contains",
+                    "aliases": ["wish"],
+                    "command_argv": ["{cli_bin}", "{goal_text}"],
+                }
+            ],
+            "unsupported match_kind",
+        ),
+        (
+            [
+                {
+                    "route_id": "wish",
+                    "match_kind": "normalized_prefix",
+                    "aliases": ["wish"],
+                    "command_argv": ["{cli_bin}", "auto-research", "start"],
+                }
+            ],
+            "must contain exactly one `{goal_text}`",
+        ),
+        (
+            [
+                {
+                    "route_id": "wish",
+                    "match_kind": "normalized_prefix",
+                    "aliases": ["wish"],
+                    "command_argv": ["external-command", "{goal_text}"],
+                }
+            ],
+            "must begin with `{cli_bin}`",
+        ),
+    ],
+)
+def test_capability_registry_rejects_invalid_intent_routes(
+    intent_routes: object,
+    expected_error: str,
+) -> None:
+    registry = CapabilityRegistry()
+    registry.register_provider(
+        {
+            "id": "test-provider",
+            "origin": "builtin",
+            "declared": True,
+            "installed": True,
+            "enabled": True,
+            "ready": True,
+        }
+    )
+    with pytest.raises(ValueError, match=expected_error):
+        registry.register_capability(
+            {
+                "id": "test-capability",
+                "origin": "builtin",
+                "visibility": "internal",
+                "provider_id": "test-provider",
+                "title": "Test capability",
+                "status": "test",
+                "user_value": "Validate intent routes.",
+                "next_real_step": "Reject malformed configuration.",
+                "intent_routes": intent_routes,
+            }
+        )
+
+
+def test_extension_capability_cannot_claim_a_loopx_intent_alias(
+    tmp_path: Path,
+) -> None:
+    manifest = _write_manifest(tmp_path / "extension.toml")
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8")
+        + """
+intent_routes = [
+  { route_id = "wish", match_kind = "normalized_prefix", aliases = ["wish"], command_argv = ["{cli_bin}", "{goal_text}"] }
+]
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="intent_routes are reserved for built-in capabilities",
+    ):
+        build_capability_catalog_packet([manifest])
 
 
 def test_issue_fix_capability_exposes_discovered_issue_promotion() -> None:

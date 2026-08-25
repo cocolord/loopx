@@ -29,6 +29,29 @@ AUTO_RESEARCH_CATALOG_ENTRY: dict[str, Any] = {
         "history, evidence, and continuation contracts."
     ),
     "entry_command": "loopx auto-research <open-question>",
+    "intent_routes": [
+        {
+            "route_id": "wish",
+            "match_kind": "normalized_clause_prefix",
+            "aliases": [
+                "我许愿",
+                "许愿",
+                "使用 Auto Research",
+                "启动 Auto Research",
+                "Use Auto Research",
+                "Start Auto Research",
+                "auto-research",
+            ],
+            "command_argv": [
+                "{cli_bin}",
+                "auto-research",
+                "start",
+                "{goal_text}",
+                "--execute",
+            ],
+            "effect_class": "local_multi_agent_launch",
+        }
+    ],
     "commands": [
         {
             "command": "loopx auto-research <open-question>",

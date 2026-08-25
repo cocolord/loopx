@@ -94,6 +94,16 @@ The contract also includes the next one-command launch surface:
 loopx auto-research start "<open question>" --execute
 ```
 
+The generic `/loopx` entry also recognizes the capability-owned clause-leading aliases
+`许愿`, `我许愿`, `使用 Auto Research`, `启动 Auto Research`, `Use Auto
+Research`, `Start Auto Research`, and `auto-research`. `start-goal` resolves
+those aliases from the capability catalog before ordinary Goal selection and
+returns a typed `capability_intent_route` containing the exact command above.
+Generic research requests and requests that only discuss Auto Research remain
+on the normal Goal route. Explicit Goal controls such as `--goal-id`,
+`--agent-id`, `--new-peer`, `--fine-grained`, or `--capability-route` also
+retain precedence over the alias.
+
 Without `--execute`, `start` returns the same contract-anchored runner packet as
 a dry-run preview. With `--execute`, it creates an isolated research frontier
 and starts the visible Codex TUI lanes through the generic multi-agent kernel.

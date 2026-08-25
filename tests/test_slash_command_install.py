@@ -50,6 +50,10 @@ def test_host_materialization_installs_generated_loopx_entry_skill(
     assert "The CLI, not the model, owns parsing" in skill_text
     assert "Never split or recompose" in skill_text
     assert "never infer a route from issue/PR wording or URLs" in skill_text
+    assert "If the result contains a typed `capability_intent_route`" in skill_text
+    assert "execute its exact `entry_command`" in skill_text
+    assert "使用 Auto Research" not in skill_text
+    assert "许愿" not in skill_text
     assert "`ordered_steps` and `goal_start_contract` as authoritative" in skill_text
     assert "surface the exact pasteable gate" in skill_text
     assert "follow its exact CLI `interaction_contract` or quota command first" in skill_text
@@ -79,6 +83,9 @@ def test_host_materialization_can_bind_exact_managed_agent_surface(
     assert "--host-surface <exact-current-host>" not in skill_text
     assert "--slash-command-arguments" in skill_text
     assert "The CLI, not the model, owns parsing" in skill_text
+    assert "If the result contains a typed `capability_intent_route`" in skill_text
+    assert "使用 Auto Research" not in skill_text
+    assert "许愿" not in skill_text
     assert "`ordered_steps` and `goal_start_contract` as authoritative" in skill_text
     assert "never infer a route" in skill_text
     assert "follow its exact CLI `interaction_contract` or quota command first" in skill_text

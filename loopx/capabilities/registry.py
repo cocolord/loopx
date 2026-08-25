@@ -5,6 +5,7 @@ from copy import deepcopy
 from typing import Any
 
 from .documentation import normalize_documentation_contract
+from .intent_route import normalize_capability_intent_routes
 
 
 CAPABILITY_ORIGINS = frozenset({"builtin", "extension"})
@@ -111,6 +112,15 @@ class CapabilityRegistry:
         normalized["origin"] = origin
         normalized["visibility"] = visibility
         normalized["provider_id"] = provider_id
+        if record.get("intent_routes") is not None:
+            if origin != "builtin":
+                raise ValueError(
+                    f"{context} intent_routes are reserved for built-in capabilities"
+                )
+            normalized["intent_routes"] = normalize_capability_intent_routes(
+                record.get("intent_routes"),
+                context=f"{context} intent_routes",
+            )
         documentation_value = record.get("documentation")
         if documentation_value is None:
             if origin == "builtin" and visibility == "public":
