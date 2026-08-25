@@ -164,14 +164,16 @@ def run_external_agent_phase(
             command,
             cwd=workspace,
             env=_solver_environment(environment),
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
             stdout=None,
             stderr=None,
             start_new_session=os.name == "posix",
             creationflags=isolated_process_creation_flags(),
+            text=True,
         )
         try:
-            exit_code = process.wait(timeout=timeout_seconds)
+            process.communicate(instruction, timeout=timeout_seconds)
+            exit_code = process.returncode
         except subprocess.TimeoutExpired:
             terminate_process_tree(process)
             return _result(

@@ -63,6 +63,38 @@ def test_external_agent_phase_runs_solver_with_request_reference(
     assert "python" not in rendered
 
 
+def test_external_agent_phase_sends_instruction_to_solver_stdin(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    request_path = tmp_path / "request.json"
+    result_path = tmp_path / "result.json"
+    instruction = str(_request(workspace)["instruction"])
+    request_path.write_text(json.dumps(_request(workspace)), encoding="utf-8")
+
+    solver = [
+        sys.executable,
+        "-c",
+        (
+            "import sys\n"
+            "from pathlib import Path\n"
+            "Path('instruction.txt').write_text(sys.stdin.read(), encoding='utf-8')\n"
+        ),
+    ]
+    result = execute_external_agent_request(
+        request_path=request_path,
+        result_path=result_path,
+        solver_command=solver,
+        execute=True,
+    )
+
+    assert result["status"] == "succeeded"
+    assert (workspace / "instruction.txt").read_text(encoding="utf-8") == instruction
+
+
 def test_external_agent_phase_does_not_inherit_ambient_secrets(
     tmp_path: Path,
     monkeypatch,
