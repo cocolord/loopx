@@ -17,6 +17,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ...process_tree import isolated_process_creation_flags, terminate_process_tree
+
 EXTERNAL_AGENT_REQUEST_SCHEMA_VERSION = "external_agent_request_v1"
 EXTERNAL_AGENT_RESULT_SCHEMA_VERSION = "external_agent_result_v1"
 LOOPX_EXTERNAL_AGENT_PHASE_RECEIPT_SCHEMA_VERSION = (
@@ -24,6 +26,19 @@ LOOPX_EXTERNAL_AGENT_PHASE_RECEIPT_SCHEMA_VERSION = (
 )
 _MAX_TIMEOUT_SECONDS = 86_400.0
 _RESULT_STATUSES = {"succeeded", "failed", "timed_out"}
+_SOLVER_ENVIRONMENT_ALLOWLIST = (
+    "COMSPEC",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "PATHEXT",
+    "SYSTEMDRIVE",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "WINDIR",
+)
 
 
 def _sha256(value: str) -> str:
@@ -40,7 +55,9 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return value
 
 
-def _validate_request(value: Mapping[str, Any]) -> tuple[str, Path, float]:
+def _validate_request(
+    value: Mapping[str, Any],
+) -> tuple[str, Path, float]:
     if value.get("schema_version") != EXTERNAL_AGENT_REQUEST_SCHEMA_VERSION:
         raise ValueError("external_agent_request_schema_unsupported")
 
@@ -51,9 +68,14 @@ def _validate_request(value: Mapping[str, Any]) -> tuple[str, Path, float]:
     workspace_value = value.get("workspace")
     if not isinstance(workspace_value, str) or not workspace_value.strip():
         raise ValueError("external_agent_request_workspace_missing")
-    workspace = Path(workspace_value)
+    try:
+        workspace = Path.cwd()
+    except OSError as exc:
+        raise ValueError("external_agent_runner_workspace_invalid") from exc
     if not workspace.is_absolute() or not workspace.is_dir():
-        raise ValueError("external_agent_request_workspace_invalid")
+        raise ValueError("external_agent_runner_workspace_invalid")
+    if workspace_value != str(workspace):
+        raise ValueError("external_agent_request_workspace_mismatch")
 
     timeout_value = value.get("timeout_seconds")
     if isinstance(timeout_value, bool) or not isinstance(timeout_value, (int, float)):
@@ -72,6 +94,16 @@ def _validate_solver_command(value: Sequence[str]) -> list[str]:
     if len(command) != len(value) or not command:
         raise ValueError("external_agent_solver_command_invalid")
     return command
+
+
+def _solver_environment(environment: Mapping[str, str]) -> dict[str, str]:
+    safe_environment = {
+        key: os.environ[key]
+        for key in _SOLVER_ENVIRONMENT_ALLOWLIST
+        if key in os.environ
+    }
+    safe_environment.update(environment)
+    return safe_environment
 
 
 def _result(
@@ -128,25 +160,28 @@ def run_external_agent_phase(
         environment["LOOPX_EXTERNAL_AGENT_REQUEST"] = str(request_path)
     started = time.monotonic()
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=workspace,
-            env={**os.environ, **environment},
+            env=_solver_environment(environment),
             stdin=subprocess.DEVNULL,
             stdout=None,
             stderr=None,
-            timeout=timeout_seconds,
-            check=False,
+            start_new_session=os.name == "posix",
+            creationflags=isolated_process_creation_flags(),
         )
-    except subprocess.TimeoutExpired:
-        return _result(
-            status="timed_out",
-            exit_code=124,
-            duration_ms=int((time.monotonic() - started) * 1000),
-            instruction=instruction,
-            command=command,
-            classification="solver_timeout",
-        )
+        try:
+            exit_code = process.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            terminate_process_tree(process)
+            return _result(
+                status="timed_out",
+                exit_code=124,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                instruction=instruction,
+                command=command,
+                classification="solver_timeout",
+            )
     except OSError:
         return _result(
             status="failed",
@@ -158,14 +193,14 @@ def run_external_agent_phase(
         )
 
     return _result(
-        status="succeeded" if completed.returncode == 0 else "failed",
-        exit_code=completed.returncode,
+        status="succeeded" if exit_code == 0 else "failed",
+        exit_code=exit_code,
         duration_ms=int((time.monotonic() - started) * 1000),
         instruction=instruction,
         command=command,
         classification=(
             "solver_completed"
-            if completed.returncode == 0
+            if exit_code == 0
             else "solver_exited_nonzero"
         ),
     )

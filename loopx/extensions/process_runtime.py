@@ -3,16 +3,19 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import os
-import signal
 import subprocess
 import threading
 import time
 from pathlib import Path
 from typing import BinaryIO
 
+from ..process_tree import (
+    PROCESS_TERMINATE_GRACE_SECONDS,
+    isolated_process_creation_flags,
+    terminate_process_tree,
+)
 
 _PROCESS_IO_CHUNK_BYTES = 64 * 1024
-_PROCESS_TERMINATE_GRACE_SECONDS = 1.0
 
 
 @dataclass(frozen=True)
@@ -20,66 +23,6 @@ class CappedProcessResult:
     returncode: int
     stdout: bytes
     failure_kind: str | None = None
-
-
-def _wait_for_process(process: subprocess.Popen[bytes], timeout: float) -> bool:
-    try:
-        process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return False
-    return True
-
-
-def _terminate_posix_process_group(process: subprocess.Popen[bytes]) -> None:
-    process_group_id = process.pid
-    try:
-        os.killpg(process_group_id, signal.SIGTERM)
-    except ProcessLookupError:
-        process.wait()
-        return
-    _wait_for_process(process, _PROCESS_TERMINATE_GRACE_SECONDS)
-    try:
-        os.killpg(process_group_id, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    if process.poll() is None:
-        process.kill()
-        process.wait()
-
-
-def _terminate_windows_process_tree(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
-    subprocess.run(
-        ["taskkill", "/PID", str(process.pid), "/T"],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    if _wait_for_process(process, _PROCESS_TERMINATE_GRACE_SECONDS):
-        return
-    subprocess.run(
-        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    process.wait()
-
-
-def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
-    if os.name == "posix":
-        _terminate_posix_process_group(process)
-        return
-    if os.name == "nt":  # pragma: no cover - exercised on Windows hosts.
-        _terminate_windows_process_tree(process)
-        return
-    if process.poll() is not None:  # pragma: no cover - unsupported platform fallback.
-        return
-    process.terminate()
-    if not _wait_for_process(process, _PROCESS_TERMINATE_GRACE_SECONDS):
-        process.kill()
-        process.wait()
 
 
 def run_capped_process(
@@ -93,11 +36,6 @@ def run_capped_process(
 ) -> CappedProcessResult:
     """Run a provider while bounding both output streams during execution."""
 
-    process_options: dict[str, object] = {}
-    if os.name == "posix":
-        process_options["start_new_session"] = True
-    elif os.name == "nt":  # pragma: no cover - exercised on Windows hosts.
-        process_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     process = subprocess.Popen(
         list(argv),
         stdin=subprocess.PIPE,
@@ -106,11 +44,15 @@ def run_capped_process(
         bufsize=0,
         env=dict(env) if env is not None else None,
         cwd=cwd,
-        **process_options,
+        start_new_session=os.name == "posix",
+        creationflags=isolated_process_creation_flags(),
     )
     assert process.stdin is not None
     assert process.stdout is not None
     assert process.stderr is not None
+    process_stdin = process.stdin
+    process_stdout = process.stdout
+    process_stderr = process.stderr
 
     stdout = bytearray()
     stderr = bytearray()
@@ -144,26 +86,26 @@ def run_capped_process(
 
     def write_stdin() -> None:
         try:
-            process.stdin.write(stdin)
+            process_stdin.write(stdin)
         except (BrokenPipeError, OSError, ValueError):
             pass
         finally:
             try:
-                process.stdin.close()
+                process_stdin.close()
             except (OSError, ValueError):
                 pass
 
     threads = [
         threading.Thread(
             target=read_stream,
-            args=(process.stdout, stdout),
+            args=(process_stdout, stdout),
             kwargs={"overflow_kind": "response_too_large"},
             name="loopx-extension-stdout-reader",
             daemon=True,
         ),
         threading.Thread(
             target=read_stream,
-            args=(process.stderr, stderr),
+            args=(process_stderr, stderr),
             kwargs={"overflow_kind": "stderr_too_large"},
             name="loopx-extension-stderr-reader",
             daemon=True,
@@ -183,16 +125,16 @@ def run_capped_process(
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             timed_out = True
-            _terminate_process_tree(process)
+            terminate_process_tree(process)
             break
         if limit_event.wait(timeout=min(0.05, remaining)):
-            _terminate_process_tree(process)
+            terminate_process_tree(process)
             break
 
     returncode = process.wait()
     for thread in threads:
-        thread.join(timeout=_PROCESS_TERMINATE_GRACE_SECONDS)
-    for stream in (process.stdout, process.stderr):
+        thread.join(timeout=PROCESS_TERMINATE_GRACE_SECONDS)
+    for stream in (process_stdout, process_stderr):
         try:
             stream.close()
         except (OSError, ValueError):

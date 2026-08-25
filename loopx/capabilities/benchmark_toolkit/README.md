@@ -24,7 +24,12 @@ The command writes one `external_agent_result_v1` result with hashes and
 bounded lifecycle fields only. It does not provision a task, start Docker,
 access a verifier, calculate a score, upload a result, or grant model or
 credential authority. The solver command is runner-owned and executes in the
-request's task-visible workspace.
+runner-selected current directory; the request workspace must match that
+directory exactly. The solver receives only platform lookup, locale,
+temporary-directory, and phase-specific environment variables; ambient
+credentials are not inherited. A provider that needs credentials must define a
+separate explicit authorization contract rather than widening this generic
+boundary.
 
 ## Source revision admission
 
