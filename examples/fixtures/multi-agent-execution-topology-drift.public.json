@@ -1,0 +1,92 @@
+{
+  "schema_version": "multi_agent_control_plane_reconciliation_fixture_v0",
+  "goal": {
+    "goal_id": "example-pr-program",
+    "orchestration": {
+      "mode": "default",
+      "spawn_allowed": false,
+      "max_children": 3
+    }
+  },
+  "planned_control_plane": {
+    "aggregate_todo_id": "todo_repair_program",
+    "task_orchestration_contract": null,
+    "admitted_lane_count": 0,
+    "registered_peer_session_count": 0,
+    "active_task_lease_count": 0
+  },
+  "observed_host_execution": {
+    "worker_count": 4,
+    "workers": [
+      {
+        "worker_ref": "worker-review-a",
+        "requested_work": "review one isolated pull-request head",
+        "workspace_kind": "independent_git_worktree",
+        "permitted_effect_classes": [
+          "local_read",
+          "remote_pull_request_write"
+        ],
+        "receipt_present": false
+      },
+      {
+        "worker_ref": "worker-review-b",
+        "requested_work": "review one isolated pull-request head",
+        "workspace_kind": "independent_git_worktree",
+        "permitted_effect_classes": [
+          "local_read",
+          "remote_pull_request_write"
+        ],
+        "receipt_present": false
+      },
+      {
+        "worker_ref": "worker-repair-a",
+        "requested_work": "rebase and repair one pull-request branch",
+        "workspace_kind": "independent_git_worktree",
+        "permitted_effect_classes": [
+          "held_workspace_write",
+          "remote_branch_write",
+          "remote_pull_request_write"
+        ],
+        "receipt_present": false
+      },
+      {
+        "worker_ref": "worker-repair-b",
+        "requested_work": "rebase and repair one pull-request branch",
+        "workspace_kind": "independent_git_worktree",
+        "permitted_effect_classes": [
+          "held_workspace_write",
+          "remote_branch_write",
+          "remote_pull_request_write"
+        ],
+        "receipt_present": false
+      }
+    ]
+  },
+  "observed_settlement": {
+    "completed_todo_ids": [
+      "todo_repair_program"
+    ],
+    "lane_evidence_receipt_count": 0,
+    "settled_by": "coordinator"
+  },
+  "expected_reconciliation": {
+    "status": "drifted",
+    "reason_codes": [
+      "unadmitted_child_spawn",
+      "aggregate_todo_not_decomposed",
+      "missing_todo_lineage",
+      "durable_session_unbound",
+      "worker_receipt_missing",
+      "aggregate_settlement_without_lane_evidence"
+    ],
+    "required_topology": "durable_peer_sessions",
+    "why": "Every worker brief permits durable remote effects or later review follow-up."
+  },
+  "boundary": {
+    "raw_transcripts_copied": false,
+    "raw_tool_outputs_copied": false,
+    "credentials_copied": false,
+    "private_links_copied": false,
+    "local_paths_copied": false
+  }
+}
