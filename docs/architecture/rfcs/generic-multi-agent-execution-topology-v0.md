@@ -56,9 +56,10 @@ becomes a LoopX peer merely because it appears as another card or process.
 - **Capability id:** none. This is a kernel execution contract, not a
   user-facing capability.
 - **Control-plane owner:** existing child admission and
-  `loopx/control_plane/agents/multi_agent/` observation code, with settlement
+  `loopx/control_plane/turn_driver/` host observation code, with settlement
   enforcement remaining in the established typed control-plane transaction
-  boundary.
+  boundary. The relocated `demo/multi_agent/` package is a source-checkout
+  showcase and does not own this shipped Turn contract.
 - **Provider owner:** each host adapter owns child lifecycle and emits
   observations; it does not own Goal, Todo, quota, or acceptance truth.
 - **Domain capabilities:** may supply task semantics, expected artifacts, and
@@ -219,6 +220,7 @@ Required drift reason codes:
 
 - `unadmitted_child_spawn`;
 - `aggregate_todo_not_decomposed`;
+- `child_capacity_exceeded`;
 - `execution_kind_mismatch`;
 - `missing_todo_lineage`;
 - `source_state_stale`;
@@ -232,6 +234,15 @@ The reconciliation result is evidence for settlement, not a second work
 ledger. Existing Todos and Turn settlement remain
 authoritative.
 
+Capacity and effect limits are independent parts of the execution envelope.
+Reconciliation must therefore fail closed when the observed child count
+exceeds `max_children`, even if every child otherwise has current admission,
+lineage, workspace, and evidence. It must likewise fail closed when an
+otherwise aligned receipt reports an effect outside
+`allowed_effect_classes`. Public characterization keeps one otherwise-aligned
+negative case for each invariant so another drift reason cannot mask either
+violation.
+
 ## Existing Owner Map
 
 The first runtime implementation should extend these owners rather than create
@@ -243,7 +254,7 @@ a parallel orchestration stack:
 | Host operation planning | `control_plane/turn_driver/driver.py` | Emit only operations admitted by the selected topology and carry a stable bundle/lane correlation id. |
 | Parent work ownership | Existing Todo, workspace guard, and continuation contracts | Keep final acceptance and durable effects with the registered agent; do not recreate ownership in child adapters. |
 | Child observation | Host adapters | Return opaque worker/workspace facts and typed effect classes without raw traces. |
-| Reconciliation projection | `control_plane/agents/multi_agent/` | Join planned lanes and observed receipts as a read model; do not mutate Todo state here. |
+| Reconciliation projection | `control_plane/turn_driver/child_execution_topology.py` | Join planned lanes and observed receipts as a read model; do not mutate Todo state here. |
 | Completion and spend | Existing typed Turn/Todo settlement boundary | After observation-only qualification, enforce that every lane has a legal terminal disposition before aggregate settlement. |
 | Operator display | `agent_management_projection_v0` and the local Agent workspace | Render planned versus observed topology and drift; never become a dispatcher or source of truth. |
 

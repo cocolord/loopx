@@ -5,7 +5,11 @@
     "orchestration": {
       "mode": "default",
       "spawn_allowed": false,
-      "max_children": 3
+      "max_children": 3,
+      "allowed_effect_classes": [
+        "local_read",
+        "held_workspace_write"
+      ]
     }
   },
   "planned_control_plane": {
@@ -21,7 +25,10 @@
         "worker_ref": "worker-review-a",
         "requested_work": "review one isolated pull-request head",
         "workspace_kind": "independent_git_worktree",
-        "permitted_effect_classes": [
+        "requested_effect_classes": [
+          "local_read"
+        ],
+        "observed_effect_classes": [
           "local_read"
         ],
         "receipt_present": false
@@ -30,7 +37,10 @@
         "worker_ref": "worker-review-b",
         "requested_work": "review one isolated pull-request head",
         "workspace_kind": "independent_git_worktree",
-        "permitted_effect_classes": [
+        "requested_effect_classes": [
+          "local_read"
+        ],
+        "observed_effect_classes": [
           "local_read"
         ],
         "receipt_present": false
@@ -39,7 +49,12 @@
         "worker_ref": "worker-repair-a",
         "requested_work": "rebase and repair one pull-request branch",
         "workspace_kind": "independent_git_worktree",
-        "permitted_effect_classes": [
+        "requested_effect_classes": [
+          "held_workspace_write",
+          "remote_branch_write",
+          "remote_pull_request_write"
+        ],
+        "observed_effect_classes": [
           "held_workspace_write",
           "remote_branch_write",
           "remote_pull_request_write"
@@ -50,7 +65,12 @@
         "worker_ref": "worker-repair-b",
         "requested_work": "rebase and repair one pull-request branch",
         "workspace_kind": "independent_git_worktree",
-        "permitted_effect_classes": [
+        "requested_effect_classes": [
+          "held_workspace_write",
+          "remote_branch_write",
+          "remote_pull_request_write"
+        ],
+        "observed_effect_classes": [
           "held_workspace_write",
           "remote_branch_write",
           "remote_pull_request_write"
@@ -71,13 +91,68 @@
     "reason_codes": [
       "unadmitted_child_spawn",
       "aggregate_todo_not_decomposed",
+      "child_capacity_exceeded",
       "missing_todo_lineage",
+      "side_effect_boundary_exceeded",
       "worker_receipt_missing",
       "aggregate_settlement_without_lane_evidence"
     ],
     "required_topology": "ephemeral_children",
     "why": "All four workers belong to the same registered agent lane, but the aggregate work was not materialized as admitted Todo lanes and the repair children exceeded the held-result effect boundary."
   },
+  "otherwise_aligned_negative_cases": [
+    {
+      "case_id": "child_capacity_exceeded_only",
+      "execution_envelope": {
+        "max_children": 1,
+        "allowed_effect_classes": [
+          "local_read"
+        ]
+      },
+      "planned_lane_count": 2,
+      "observed_worker_count": 2,
+      "all_lanes_admitted": true,
+      "all_todo_lineage_current": true,
+      "all_workspaces_match": true,
+      "all_receipts_terminal": true,
+      "requested_effect_classes": [
+        "local_read"
+      ],
+      "observed_effect_classes": [
+        "local_read"
+      ],
+      "expected_reason_codes": [
+        "child_capacity_exceeded"
+      ]
+    },
+    {
+      "case_id": "side_effect_boundary_exceeded_only",
+      "execution_envelope": {
+        "max_children": 1,
+        "allowed_effect_classes": [
+          "local_read",
+          "held_workspace_write"
+        ]
+      },
+      "planned_lane_count": 1,
+      "observed_worker_count": 1,
+      "all_lanes_admitted": true,
+      "all_todo_lineage_current": true,
+      "all_workspaces_match": true,
+      "all_receipts_terminal": true,
+      "requested_effect_classes": [
+        "held_workspace_write",
+        "remote_branch_write"
+      ],
+      "observed_effect_classes": [
+        "held_workspace_write",
+        "remote_branch_write"
+      ],
+      "expected_reason_codes": [
+        "side_effect_boundary_exceeded"
+      ]
+    }
+  ],
   "boundary": {
     "raw_transcripts_copied": false,
     "raw_tool_outputs_copied": false,

@@ -99,6 +99,13 @@ or resumed child. A conversational "multi-agent is allowed"
 must be converted into a typed current-Turn allowance or reviewed Goal policy;
 the host tool's availability is not that authorization.
 
+Reconciliation treats concurrency and effects as separate fail-closed
+invariants. `child_capacity_exceeded` applies when observed child execution is
+above `max_children`, even if every lane and receipt is otherwise aligned.
+`side_effect_boundary_exceeded` applies when an otherwise aligned child reports
+an effect outside the envelope's `allowed_effect_classes`; an isolated
+worktree does not make a remote effect permissible.
+
 Prefer ephemeral children for bounded mapping, independent review, validation,
 and disjoint local implementation. A child result remains held in its isolated
 worktree until the registered agent validates and accepts it. Durable external

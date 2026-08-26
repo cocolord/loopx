@@ -67,8 +67,12 @@ TOPOLOGY_REQUIRED_PHRASES = (
     "`multi_agent_control_plane_reconciliation_v0`",
     "`unadmitted_child_spawn`",
     "`aggregate_todo_not_decomposed`",
+    "`child_capacity_exceeded`",
     "`side_effect_boundary_exceeded`",
     "`aggregate_settlement_without_lane_evidence`",
+    "`loopx/control_plane/turn_driver/` host observation code",
+    "`control_plane/turn_driver/child_execution_topology.py`",
+    "`demo/multi_agent/` package is a source-checkout",
     "No runtime behavior changes in this slice.",
     "a research-specific coordinator or worker protocol",
     "This contract does not coordinate",
@@ -111,25 +115,82 @@ def main() -> int:
     planned = drift_fixture["planned_control_plane"]
     observed = drift_fixture["observed_host_execution"]
     expected = drift_fixture["expected_reconciliation"]
-    assert drift_fixture["goal"]["orchestration"]["spawn_allowed"] is False
+    orchestration = drift_fixture["goal"]["orchestration"]
+    assert orchestration["spawn_allowed"] is False
     assert planned["task_orchestration_contract"] is None
     assert planned["admitted_lane_count"] == 0
     assert planned["materialized_child_todo_count"] == 0
     assert observed["worker_count"] == len(observed["workers"]) == 4
+    assert observed["worker_count"] > orchestration["max_children"]
     assert all(worker["receipt_present"] is False for worker in observed["workers"])
-    assert sum(
-        "remote_pull_request_write" in worker["permitted_effect_classes"]
+    observed_effects = {
+        effect
         for worker in observed["workers"]
-    ) == 2
+        for effect in worker["observed_effect_classes"]
+    }
+    requested_effects = {
+        effect
+        for worker in observed["workers"]
+        for effect in worker["requested_effect_classes"]
+    }
+    allowed_effects = set(orchestration["allowed_effect_classes"])
+    assert requested_effects == observed_effects
+    assert observed_effects - allowed_effects == {
+        "remote_branch_write",
+        "remote_pull_request_write",
+    }
     assert expected["status"] == "drifted"
     assert expected["required_topology"] == "ephemeral_children"
     assert set(expected["reason_codes"]) == {
         "unadmitted_child_spawn",
         "aggregate_todo_not_decomposed",
+        "child_capacity_exceeded",
         "missing_todo_lineage",
+        "side_effect_boundary_exceeded",
         "worker_receipt_missing",
         "aggregate_settlement_without_lane_evidence",
     }
+    negative_cases = {
+        case["case_id"]: case
+        for case in drift_fixture["otherwise_aligned_negative_cases"]
+    }
+    assert set(negative_cases) == {
+        "child_capacity_exceeded_only",
+        "side_effect_boundary_exceeded_only",
+    }
+    for case in negative_cases.values():
+        assert case["all_lanes_admitted"] is True
+        assert case["all_todo_lineage_current"] is True
+        assert case["all_workspaces_match"] is True
+        assert case["all_receipts_terminal"] is True
+    capacity_case = negative_cases["child_capacity_exceeded_only"]
+    assert (
+        capacity_case["observed_worker_count"]
+        == capacity_case["planned_lane_count"]
+        > capacity_case["execution_envelope"]["max_children"]
+    )
+    assert set(capacity_case["observed_effect_classes"]) <= set(
+        capacity_case["execution_envelope"]["allowed_effect_classes"]
+    )
+    assert (
+        capacity_case["requested_effect_classes"]
+        == capacity_case["observed_effect_classes"]
+    )
+    assert capacity_case["expected_reason_codes"] == ["child_capacity_exceeded"]
+    effect_case = negative_cases["side_effect_boundary_exceeded_only"]
+    assert (
+        effect_case["observed_worker_count"]
+        == effect_case["planned_lane_count"]
+        <= effect_case["execution_envelope"]["max_children"]
+    )
+    assert set(effect_case["observed_effect_classes"]) - set(
+        effect_case["execution_envelope"]["allowed_effect_classes"]
+    ) == {"remote_branch_write"}
+    assert (
+        effect_case["requested_effect_classes"]
+        == effect_case["observed_effect_classes"]
+    )
+    assert effect_case["expected_reason_codes"] == ["side_effect_boundary_exceeded"]
     assert all(value is False for value in drift_fixture["boundary"].values())
     print("codex-subagent-orchestration-contract-smoke ok")
     return 0
