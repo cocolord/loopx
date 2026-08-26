@@ -11,7 +11,10 @@ from loopx.capabilities.catalog import (
     build_capability_detail_packet,
     build_capability_registry,
 )
-from loopx.capabilities.intent_route import resolve_capability_intent_route_from_records
+from loopx.capabilities.intent_route import (
+    normalize_capability_intent_routes,
+    resolve_capability_intent_route_from_records,
+)
 from loopx.capabilities.registry import CapabilityRegistry
 from loopx.capabilities.context_providers import (
     OpenVikingContextProvider,
@@ -533,6 +536,89 @@ def test_capability_intent_route_rejects_ambiguous_capabilities() -> None:
             records=records,
             cli_bin="loopx",
         )
+
+
+def test_capability_registry_rejects_same_capability_route_alias_ambiguity() -> None:
+    registry = CapabilityRegistry()
+    registry.register_provider(
+        {
+            "id": "test-provider",
+            "origin": "builtin",
+            "declared": True,
+            "installed": True,
+            "enabled": True,
+            "ready": True,
+        }
+    )
+    with pytest.raises(ValueError, match="duplicate normalized alias `go`"):
+        registry.register_capability(
+            {
+                "id": "test-capability",
+                "origin": "builtin",
+                "visibility": "internal",
+                "provider_id": "test-provider",
+                "title": "Test capability",
+                "status": "test",
+                "user_value": "Reject ambiguous routes.",
+                "next_real_step": "Keep route aliases unique.",
+                "intent_routes": [
+                    {
+                        "route_id": "first",
+                        "match_kind": "normalized_prefix",
+                        "aliases": ["ＧＯ"],
+                        "command_argv": [
+                            "{cli_bin}",
+                            "first",
+                            "{goal_text}",
+                        ],
+                    },
+                    {
+                        "route_id": "second",
+                        "match_kind": "normalized_prefix",
+                        "aliases": ["go"],
+                        "command_argv": [
+                            "{cli_bin}",
+                            "second",
+                            "{goal_text}",
+                        ],
+                    },
+                ],
+            }
+        )
+
+
+def test_capability_intent_route_prefers_longest_distinct_alias() -> None:
+    record = {
+        "id": "test-capability",
+        "provider_state": {"ready": True},
+        "intent_routes": normalize_capability_intent_routes(
+            [
+                {
+                    "route_id": "short",
+                    "match_kind": "normalized_prefix",
+                    "aliases": ["go"],
+                    "command_argv": ["{cli_bin}", "short", "{goal_text}"],
+                },
+                {
+                    "route_id": "long",
+                    "match_kind": "normalized_prefix",
+                    "aliases": ["go deep"],
+                    "command_argv": ["{cli_bin}", "long", "{goal_text}"],
+                },
+            ],
+            context="test intent_routes",
+        ),
+    }
+
+    route = resolve_capability_intent_route_from_records(
+        "go deep into the evidence",
+        records=[record],
+        cli_bin="loopx",
+    )
+
+    assert route is not None
+    assert route["route_id"] == "long"
+    assert route["entry_command"] == "loopx long 'go deep into the evidence'"
 
 
 @pytest.mark.parametrize(

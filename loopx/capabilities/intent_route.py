@@ -38,6 +38,7 @@ def normalize_capability_intent_routes(
         raise ValueError(f"{context} must be a list")
     normalized_routes: list[dict[str, Any]] = []
     seen_route_ids: set[str] = set()
+    seen_aliases: dict[str, str] = {}
     for index, route_value in enumerate(value):
         route_context = f"{context}[{index}]"
         if not isinstance(route_value, Mapping):
@@ -72,6 +73,15 @@ def normalize_capability_intent_routes(
         ]
         if len(set(normalized_aliases)) != len(normalized_aliases):
             raise ValueError(f"{route_context} has duplicate aliases")
+        for alias in normalized_aliases:
+            normalized_alias = _normalized_text(alias)
+            previous_route_id = seen_aliases.get(normalized_alias)
+            if previous_route_id is not None:
+                raise ValueError(
+                    f"{context} has duplicate normalized alias `{normalized_alias}` "
+                    f"across routes `{previous_route_id}` and `{route_id}`"
+                )
+            seen_aliases[normalized_alias] = route_id
         command_argv = route_value.get("command_argv")
         if not isinstance(command_argv, list) or not command_argv:
             raise ValueError(f"{route_context} requires non-empty command_argv")
