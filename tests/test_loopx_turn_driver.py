@@ -23,6 +23,9 @@ from loopx.control_plane.turn_driver import (
     run_loopx_turn_once,
 )
 from loopx.control_plane.turn_driver.codex_cli import _store_codex_cli_session
+from loopx.control_plane.turn_driver.child_execution_topology import (
+    ChildExecutionTopologyError,
+)
 from loopx.control_plane.turn_driver.executor import BuiltInHostError
 from loopx.control_plane.quota.live_decision import bind_scheduler_followup_cli_routes
 from loopx.todos import complete_goal_todo
@@ -216,6 +219,9 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
             "required_write_scopes": [],
         },
     }
+    topology = payload["multi_agent_execution_topology"]
+    lane = topology["lanes"][0]
+    source_state_ref = "sha256:fixture"
     assert payload["child_operations"] == [
         {
             "schema_version": "loopx_child_host_operation_v0",
@@ -238,8 +244,70 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
             "brief": brief,
             "result_channel": "public_safe_typed_evidence",
             "writeback_owner": "task_coordinator",
+            "bundle_id": topology["bundle_id"],
+            "lane_id": lane["lane_id"],
+            "execution_kind": "ephemeral_child",
+            "source_state_ref": source_state_ref,
+            "effect_boundary": "held_evidence_only",
+            "workspace_ref": None,
         }
     ]
+    assert topology == {
+        "schema_version": "multi_agent_execution_topology_v0",
+        "goal_id": "fixture-goal",
+        "bundle_id": topology["bundle_id"],
+        "coordinator_agent_id": "codex-fixture",
+        "source_state_ref": source_state_ref,
+        "topology": "ephemeral_children",
+        "execution_envelope": {
+            "source": "task_orchestration_contract_v2",
+            "expires_with_turn": True,
+            "max_children": 1,
+            "allowed_effect_classes": ["local_read"],
+        },
+        "rationale_codes": ["admitted_ephemeral_child_lanes"],
+        "lanes": [
+            {
+                "lane_id": lane["lane_id"],
+                "todo_id": "todo_child001",
+                "execution_kind": "ephemeral_child",
+                "admission_ref": "task_orchestration_contract_v2:todo_child001",
+                "effect_boundary": "held_evidence_only",
+                "allowed_effect_classes": ["local_read"],
+                "workspace_requirement": "not_required",
+                "workspace_ref": None,
+            }
+        ],
+    }
+
+
+def test_turn_plan_rejects_child_operations_above_admitted_capacity() -> None:
+    envelope = _adaptive_envelope()
+    orchestration = envelope["task_orchestration_contract"]
+    assert isinstance(orchestration, dict)
+    orchestration["max_children"] = 1
+    lanes = orchestration["eligible_child_lanes"]
+    assert isinstance(lanes, list)
+    lanes.append(
+        {
+            "todo_id": "todo_child002",
+            "task_domain": "validation",
+            "execution_kind": "ephemeral_child",
+            "child_brief": {
+                "todo_id": "todo_child002",
+                "objective": "Validate another independent fixture.",
+                "task_domain": "validation",
+            },
+        }
+    )
+
+    with pytest.raises(ChildExecutionTopologyError) as exc_info:
+        build_loopx_turn_plan(
+            envelope,
+            host="codex-cli",
+            execution_mode="interactive-visible",
+        )
+    assert exc_info.value.reason_code == "child_capacity_exceeded"
 
 
 def test_turn_plan_uses_adaptive_primary_todo_for_bundle_lineage() -> None:
@@ -294,6 +362,14 @@ def test_turn_plan_uses_adaptive_primary_todo_for_bundle_lineage() -> None:
         == same_primary_plan["transaction"]["turn_key"]
     )
     assert (
+        payload["multi_agent_execution_topology"]["source_state_ref"]
+        != same_primary_plan["multi_agent_execution_topology"]["source_state_ref"]
+    )
+    assert (
+        payload["multi_agent_execution_topology"]["bundle_id"]
+        == same_primary_plan["multi_agent_execution_topology"]["bundle_id"]
+    )
+    assert (
         payload["transaction"]["turn_key"]
         != changed_action_plan["transaction"]["turn_key"]
     )
@@ -317,6 +393,9 @@ def test_turn_plan_exposes_only_qualified_claude_child_contexts() -> None:
             "required_write_scopes": [],
         },
     }
+    topology = payload["multi_agent_execution_topology"]
+    lane = topology["lanes"][0]
+    source_state_ref = topology["source_state_ref"]
 
     assert payload["child_operations"][0] == {
         "schema_version": "loopx_child_host_operation_v0",
@@ -334,6 +413,12 @@ def test_turn_plan_exposes_only_qualified_claude_child_contexts() -> None:
         "brief": brief,
         "result_channel": "public_safe_typed_evidence",
         "writeback_owner": "task_coordinator",
+        "bundle_id": topology["bundle_id"],
+        "lane_id": lane["lane_id"],
+        "execution_kind": "ephemeral_child",
+        "source_state_ref": source_state_ref,
+        "effect_boundary": "held_evidence_only",
+        "workspace_ref": None,
     }
 
 
@@ -396,6 +481,7 @@ def test_generic_host_does_not_project_unqualified_child_operations() -> None:
 
     assert payload["ok"] is True
     assert "child_operations" not in payload
+    assert "multi_agent_execution_topology" not in payload
 
 
 def test_turn_host_request_carries_typed_child_operations() -> None:
@@ -408,6 +494,10 @@ def test_turn_host_request_carries_typed_child_operations() -> None:
     request = build_loopx_turn_host_request(plan)
 
     assert request["child_operations"] == plan["child_operations"]
+    assert (
+        request["multi_agent_execution_topology"]
+        == plan["multi_agent_execution_topology"]
+    )
     assert request["child_operations"][0]["available_contexts"][0] == {
         "context": "fresh",
         "native_operation": "spawn_agent",

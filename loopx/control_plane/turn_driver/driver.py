@@ -6,6 +6,10 @@ from enum import Enum
 from hashlib import sha256
 from typing import Any
 
+from .child_execution_topology import (
+    bind_child_operations_to_topology,
+    build_multi_agent_execution_topology,
+)
 from ..quota.turn_envelope import turn_envelope_action_signature_document
 from ..scheduler.execution_context import (
     scheduler_execution_context_for_turn,
@@ -356,10 +360,31 @@ def build_loopx_turn_plan(
         LoopXTurnRoute.REPAIR_REQUIRED,
         LoopXTurnRoute.REPLAN_REQUIRED,
     }
-    child_operations = (
+    raw_child_operations = (
         _child_host_operations(envelope, host=host) if would_invoke_host else []
     )
     context_projection = execution_context.projection()
+    transaction = build_loopx_turn_transaction_plan(
+        planned=would_invoke_host,
+        lineage=lineage,
+        host=host,
+        execution_mode=execution_mode,
+        scheduler_owner=str(context_projection.get("scheduler_owner") or ""),
+        session_action=str(session.get("action") or "none"),
+        turn_instance_id=turn_instance_id,
+    )
+    execution_topology = build_multi_agent_execution_topology(
+        turn_envelope=envelope,
+        child_operations=raw_child_operations,
+        turn_key=str(transaction.get("turn_key") or ""),
+        source_state_ref=str(
+            _mapping(envelope.get("action_signature")).get("source_hash") or ""
+        ),
+    )
+    child_operations = bind_child_operations_to_topology(
+        raw_child_operations,
+        execution_topology,
+    )
     payload = {
         "ok": route is not LoopXTurnRoute.CONTRACT_ERROR,
         "schema_version": LOOPX_TURN_PLAN_SCHEMA_VERSION,
@@ -381,15 +406,7 @@ def build_loopx_turn_plan(
             "selected_todo": selected_todo or None,
         },
         "turn_envelope": envelope,
-        "transaction": build_loopx_turn_transaction_plan(
-            planned=would_invoke_host,
-            lineage=lineage,
-            host=host,
-            execution_mode=execution_mode,
-            scheduler_owner=str(context_projection.get("scheduler_owner") or ""),
-            session_action=str(session.get("action") or "none"),
-            turn_instance_id=turn_instance_id,
-        ),
+        "transaction": transaction,
         "effects": {
             "host_invoked": False,
             "state_written": False,
@@ -410,4 +427,6 @@ def build_loopx_turn_plan(
     }
     if child_operations:
         payload["child_operations"] = child_operations
+    if execution_topology:
+        payload["multi_agent_execution_topology"] = execution_topology
     return payload
