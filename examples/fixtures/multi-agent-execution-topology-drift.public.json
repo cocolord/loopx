@@ -12,8 +12,7 @@
     "aggregate_todo_id": "todo_repair_program",
     "task_orchestration_contract": null,
     "admitted_lane_count": 0,
-    "registered_peer_session_count": 0,
-    "active_task_lease_count": 0
+    "materialized_child_todo_count": 0
   },
   "observed_host_execution": {
     "worker_count": 4,
@@ -23,8 +22,7 @@
         "requested_work": "review one isolated pull-request head",
         "workspace_kind": "independent_git_worktree",
         "permitted_effect_classes": [
-          "local_read",
-          "remote_pull_request_write"
+          "local_read"
         ],
         "receipt_present": false
       },
@@ -33,8 +31,7 @@
         "requested_work": "review one isolated pull-request head",
         "workspace_kind": "independent_git_worktree",
         "permitted_effect_classes": [
-          "local_read",
-          "remote_pull_request_write"
+          "local_read"
         ],
         "receipt_present": false
       },
@@ -75,12 +72,11 @@
       "unadmitted_child_spawn",
       "aggregate_todo_not_decomposed",
       "missing_todo_lineage",
-      "durable_session_unbound",
       "worker_receipt_missing",
       "aggregate_settlement_without_lane_evidence"
     ],
-    "required_topology": "durable_peer_sessions",
-    "why": "Every worker brief permits durable remote effects or later review follow-up."
+    "required_topology": "ephemeral_children",
+    "why": "All four workers belong to the same registered agent lane, but the aggregate work was not materialized as admitted Todo lanes and the repair children exceeded the held-result effect boundary."
   },
   "boundary": {
     "raw_transcripts_copied": false,

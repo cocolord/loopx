@@ -43,6 +43,10 @@ REQUIRED_PHRASES = (
     "`todo_id` is the work item being claimed",
     '"agent_model": "peer_v1"',
     "independent worktrees",
+    "subagents that parallelize multiple Todos inside one registered agent lane",
+    "does not describe orchestration among multiple registered LoopX agents",
+    "Multiple registered LoopX agents remain equal peers",
+    "Subagent cards or host workers must never be reclassified as peer agents",
     "Review remains `action_kind=review`",
     "Dormant registered agents and closed, blocked, or deferred todos are not coordinator candidates.",
     "multi_agent_execution_topology_v0",
@@ -56,8 +60,6 @@ TOPOLOGY_REQUIRED_PHRASES = (
     "Status: Draft",
     "`serial`",
     "`ephemeral_children`",
-    "`durable_peer_sessions`",
-    "`hybrid`",
     "`task_orchestration_contract_v2`",
     "`task_orchestration_contract_v1`",
     "`multi_agent_execution_topology_v0`",
@@ -65,11 +67,13 @@ TOPOLOGY_REQUIRED_PHRASES = (
     "`multi_agent_control_plane_reconciliation_v0`",
     "`unadmitted_child_spawn`",
     "`aggregate_todo_not_decomposed`",
-    "`durable_session_unbound`",
     "`side_effect_boundary_exceeded`",
     "`aggregate_settlement_without_lane_evidence`",
     "No runtime behavior changes in this slice.",
     "a research-specific coordinator or worker protocol",
+    "This contract does not coordinate",
+    "multiple registered LoopX agents",
+    "The correction is not to call the children LoopX agents",
 )
 
 FORBIDDEN_PHRASES = (
@@ -110,19 +114,19 @@ def main() -> int:
     assert drift_fixture["goal"]["orchestration"]["spawn_allowed"] is False
     assert planned["task_orchestration_contract"] is None
     assert planned["admitted_lane_count"] == 0
+    assert planned["materialized_child_todo_count"] == 0
     assert observed["worker_count"] == len(observed["workers"]) == 4
     assert all(worker["receipt_present"] is False for worker in observed["workers"])
-    assert any(
+    assert sum(
         "remote_pull_request_write" in worker["permitted_effect_classes"]
         for worker in observed["workers"]
-    )
+    ) == 2
     assert expected["status"] == "drifted"
-    assert expected["required_topology"] == "durable_peer_sessions"
+    assert expected["required_topology"] == "ephemeral_children"
     assert set(expected["reason_codes"]) == {
         "unadmitted_child_spawn",
         "aggregate_todo_not_decomposed",
         "missing_todo_lineage",
-        "durable_session_unbound",
         "worker_receipt_missing",
         "aggregate_settlement_without_lane_evidence",
     }

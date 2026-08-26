@@ -1,18 +1,19 @@
-# Generic Multi-Agent Execution Topology v0
+# Agent-Lane Subagent Execution Topology v0
 
 Status: Draft
 
 ## Decision
 
-LoopX should strengthen one domain-neutral multi-agent control path instead of
-adding product-specific coordinators for research, coding, review, or other
-capabilities.
+LoopX should strengthen one domain-neutral subagent control path for parallel
+work inside one registered agent lane. This contract does not coordinate
+multiple registered LoopX agents.
 
-The control plane decides whether a task bundle stays serial, uses ephemeral
-host child workers, activates durable peer sessions, or combines both. The host
-executes that decision and returns compact receipts. LoopX then reconciles the
-observed workers, sessions, workspaces, effects, and evidence against the
-admitted topology before accepting completion or quota spend.
+The control plane decides whether one agent lane stays serial or uses
+ephemeral host child workers to advance multiple admitted Todos in parallel.
+The host executes that decision and returns compact receipts. LoopX then
+reconciles the observed workers, workspaces, effects, and evidence against the
+admitted child lanes before the registered agent accepts completion or spends
+quota.
 
 `spawn_agent`, a native Task tool, or any equivalent host primitive is execution
 capacity. Its presence does not grant LoopX admission, authority, or proof that
@@ -20,7 +21,7 @@ the resulting work remains aligned with the control plane.
 
 ## Problem
 
-LoopX already has most of the required parts:
+LoopX already has the two distinct orchestration layers:
 
 - `task_orchestration_contract_v2` admits bounded ephemeral child lanes;
 - `task_orchestration_contract_v1` describes explicitly coordinated registered
@@ -30,15 +31,14 @@ LoopX already has most of the required parts:
 - controlled writeback preserves LoopX as the durable authority;
 - independent worktrees isolate repository-writing lanes.
 
-The missing seam is end-to-end topology accountability. A host can still launch
-children directly, assign broad work, and later let the coordinator summarize
-all results under one aggregate Todo. The code changes may be valid and the
-worktrees may be isolated, but LoopX cannot prove:
+This RFC concerns only the first layer. The missing seam is end-to-end
+accountability for child workers inside one agent lane. A host can still launch
+children directly, assign broad work, and later let the registered agent
+summarize all results under one aggregate Todo. The code changes may be valid
+and the worktrees may be isolated, but LoopX cannot prove:
 
 - that child execution was admitted by the current quota decision;
 - which Todo and state revision each worker received;
-- whether a worker was intentionally ephemeral or should have been a durable
-  peer session;
 - which workspace and external effects belong to each lane;
 - whether every returned result was accepted, rejected, or left orphaned; or
 - whether the aggregate completion describes the work that actually happened.
@@ -46,52 +46,56 @@ worktrees may be isolated, but LoopX cannot prove:
 That is work/control-plane drift. It is not fixed by adding more agents, a
 research-specific scheduler, or a second task store.
 
+Registered-peer coordination is a separate concern. It uses
+`task_orchestration_contract_v1`, registered `peer_v1` identities, Todo
+ownership, session liveness, and explicit peer activation. A host child never
+becomes a LoopX peer merely because it appears as another card or process.
+
 ## Placement
 
 - **Capability id:** none. This is a kernel execution contract, not a
   user-facing capability.
-- **Control-plane owner:** `loopx/control_plane/agents/multi_agent/`, with
-  settlement enforcement remaining in the established typed control-plane
-  transaction boundary.
-- **Provider owner:** each host adapter owns process/session lifecycle and emits
-  observations; it does not own Goal, Todo, lease, quota, or acceptance truth.
+- **Control-plane owner:** existing child admission and
+  `loopx/control_plane/agents/multi_agent/` observation code, with settlement
+  enforcement remaining in the established typed control-plane transaction
+  boundary.
+- **Provider owner:** each host adapter owns child lifecycle and emits
+  observations; it does not own Goal, Todo, quota, or acceptance truth.
 - **Domain capabilities:** may supply task semantics, expected artifacts, and
-  validation, but must not define their own coordinator, scheduler, worker
-  lifecycle, or session authority.
+  validation, but must not define their own coordinator, scheduler, or child
+  lifecycle.
 
 The nearest existing owner is sufficient. No `auto-research`,
 `deep-research`, issue-fix, or benchmark-specific orchestration module is
 needed.
 
-## Execution Topologies
+## Agent-Lane Execution Topologies
 
-The coordinator selects the least durable topology that can complete the work
-without losing recovery, attribution, or authority.
+The registered agent selects the least complex topology that can advance its
+current Todo frontier without losing attribution or authority.
 
 | Topology | Use when | Control-plane identity | Allowed effects |
 | --- | --- | --- | --- |
 | `serial` | Fewer than two independent ready lanes exist, scopes overlap, or coordination cost exceeds the expected gain. | Current registered peer and selected Todo. | Existing Todo and Turn boundaries. |
-| `ephemeral_children` | Work is bounded by the parent Turn, independently retryable, needs no later user interaction, and returns held evidence for coordinator review. | Coordinator identity plus one admitted child lane per Todo; the child is not a registered peer. | Read-only work and isolated local workspace changes. No remote or production effect in v0. |
-| `durable_peer_sessions` | Work may outlive the parent Turn, needs resume or follow-up, owns a long-running lane, or performs durable external effects. | Registered `peer_v1` identity, claimed or leased Todo, and bound host session per lane. | Effects allowed by that peer's Goal, Todo, lease, and host contract. |
-| `hybrid` | A bundle combines short evidence gathering with independently recoverable implementation or delivery. | Ephemeral child lanes and durable peer lanes remain distinct. | Each lane follows its own boundary; evidence does not transfer authority. |
+| `ephemeral_children` | At least two independent Todos belong to the same agent lane and can finish inside the parent Turn or return held work for parent acceptance. | One registered agent identity plus one admitted child lane per Todo; children are not LoopX agents. | Effects admitted by the child contract. In v0, durable remote effects stay with the registered agent after child result acceptance. |
 
 Examples:
 
-- repository mapping and an independent read-only review can use ephemeral
-  children;
-- a local patch may use an ephemeral child only while the result stays held in
-  an isolated worktree and the coordinator owns validation and acceptance;
-- pushing a branch, changing pull-request state, posting a review, deploying,
-  monitoring for later feedback, or continuing across turns requires a durable
-  peer session by default;
-- an ephemeral child never becomes a durable peer merely because it ran for a
-  long time or produced a useful result.
+- repository mapping and an independent validation Todo in the same agent lane
+  can use ephemeral children;
+- two disjoint implementation Todos can use separate child worktrees while the
+  registered agent retains final validation, push, review-request, and
+  writeback ownership;
+- a child that cannot finish returns held evidence or a held patch; the
+  registered agent resumes the Todo or performs the authorized durable effect;
+- multiple registered LoopX agents cooperating on separate long-lived lanes
+  use the peer orchestration contract, not this topology.
 
 ## Boundary Versus Strategy
 
 Human or Goal policy defines the execution envelope:
 
-- whether child spawning or durable peer activation is allowed;
+- whether child spawning is allowed;
 - maximum concurrency and cost;
 - allowed task domains, repositories, write scopes, and effect classes;
 - whether a current-turn allowance expires with the Turn or persists on the
@@ -103,7 +107,7 @@ Inside that envelope, the coordinator owns strategy:
 - whether parallelism is useful now;
 - how many lanes to run;
 - which admitted lane remains local;
-- whether an eligible lane uses fresh, resume, or a durable peer session; and
+- whether an eligible child uses fresh or resume; and
 - when to stop, retry, reject, or reconcile.
 
 A natural-language statement that multi-agent work is acceptable is not itself
@@ -114,17 +118,19 @@ LoopX still admits no child lane.
 
 ## Topology Plan
 
-`multi_agent_execution_topology_v0` is a proposed read model over existing
-admission contracts. It does not replace them or create new authority.
+`multi_agent_execution_topology_v0` is the compatibility schema name used by
+the current host observation slice. Semantically it is a read model for
+subagent execution inside one registered agent lane. It does not model
+registered-peer orchestration, replace admission, or create new authority.
 
 ```json
 {
   "schema_version": "multi_agent_execution_topology_v0",
   "goal_id": "example-goal",
   "bundle_id": "bundle_7d2f",
-  "coordinator_agent_id": "codex-coordinator",
+  "agent_id": "codex-maintainer",
   "source_state_ref": "sha256:current-control-plane-state",
-  "topology": "hybrid",
+  "topology": "ephemeral_children",
   "execution_envelope": {
     "source": "goal_policy_or_current_turn_authorization",
     "expires_with_turn": true,
@@ -132,8 +138,7 @@ admission contracts. It does not replace them or create new authority.
     "allowed_effect_classes": ["local_read", "held_workspace_write"]
   },
   "rationale_codes": [
-    "parallel_independent_lanes",
-    "durable_external_effect_requires_peer_session"
+    "parallel_independent_todos"
   ],
   "lanes": [
     {
@@ -142,14 +147,6 @@ admission contracts. It does not replace them or create new authority.
       "execution_kind": "ephemeral_child",
       "admission_ref": "task_orchestration_contract_v2:todo_review",
       "effect_boundary": "held_evidence_only"
-    },
-    {
-      "lane_id": "lane-repair",
-      "todo_id": "todo_repair",
-      "execution_kind": "durable_peer_session",
-      "agent_id": "codex-repair-peer",
-      "admission_ref": "task_orchestration_contract_v1:todo_repair",
-      "effect_boundary": "todo_lease_and_goal_authority"
     }
   ]
 }
@@ -161,19 +158,20 @@ The plan must reference, not copy, the authoritative admission:
   lane; free-form decomposition inside the host is not an admitted bundle;
 - an ephemeral lane references an admitted
   `task_orchestration_contract_v2` child;
-- a durable lane references an actionable
-  `task_orchestration_contract_v1` peer lane and its Todo claim or lease;
 - a serial lane references the selected Turn Todo;
 - the execution envelope references typed user/Goal policy rather than inferred
   chat permission; and
 - absence of the required admission makes the lane non-executable.
+
+`task_orchestration_contract_v1` remains the separate contract for registered
+peer agents. Its lanes must not be inserted into this child topology.
 
 The coordinator may choose a more conservative topology than the plan permits.
 It may not choose a more powerful one.
 
 ## Host Execution Receipt
 
-Every launched child or activated session returns one
+Every launched child returns one
 `multi_agent_host_execution_receipt_v0`:
 
 ```json
@@ -196,17 +194,16 @@ Every launched child or activated session returns one
 }
 ```
 
-For a durable peer session, `agent_id`, `session_ref`, and the active Todo lease
-reference are required. For an ephemeral child, `agent_id` and durable
-`session_ref` are absent; `worker_ref` is only a host observation and grants no
-LoopX identity.
+The registered parent agent is identified by the topology plan and current
+Turn. The child receipt has no `agent_id` or durable `session_ref`;
+`worker_ref` is only a host observation and grants no LoopX identity.
 
 Receipts contain compact refs and typed effect classes, never raw prompts,
 transcripts, tool output, credentials, private links, or local absolute paths.
 
 ## Reconciliation
 
-Before the coordinator completes the bundle or spends quota,
+Before the registered agent completes the bundle or spends quota,
 `multi_agent_control_plane_reconciliation_v0` compares the topology plan with
 host receipts and current LoopX state.
 
@@ -215,7 +212,7 @@ The read model classifies each lane as:
 - `aligned`: admitted execution, current lineage, expected workspace/effects,
   and accepted evidence;
 - `incomplete`: admitted work is still running or has no terminal receipt;
-- `rejected`: the coordinator inspected the result and did not accept it;
+- `rejected`: the registered agent inspected the result and did not accept it;
 - `drifted`: observed execution contradicts the admitted topology or authority.
 
 Required drift reason codes:
@@ -224,8 +221,6 @@ Required drift reason codes:
 - `aggregate_todo_not_decomposed`;
 - `execution_kind_mismatch`;
 - `missing_todo_lineage`;
-- `durable_session_unbound`;
-- `task_lease_missing_or_stale`;
 - `source_state_stale`;
 - `workspace_mismatch`;
 - `side_effect_boundary_exceeded`;
@@ -234,7 +229,7 @@ Required drift reason codes:
 - `aggregate_settlement_without_lane_evidence`.
 
 The reconciliation result is evidence for settlement, not a second work
-ledger. Existing Todos, leases, sessions, and Turn settlement remain
+ledger. Existing Todos and Turn settlement remain
 authoritative.
 
 ## Existing Owner Map
@@ -245,11 +240,10 @@ a parallel orchestration stack:
 | Concern | Existing owner | Required change |
 | --- | --- | --- |
 | Child admission | `control_plane/quota/task_orchestration_admission.py` | Add the bounded effect and durability facts needed by topology selection; keep domain names out. |
-| Peer activation | `control_plane/quota/task_orchestration.py` | Reuse explicit coordinator, peer liveness, Todo ownership, and `peer_agent_activation`. |
 | Host operation planning | `control_plane/turn_driver/driver.py` | Emit only operations admitted by the selected topology and carry a stable bundle/lane correlation id. |
-| Durable work ownership | Existing Todo claim, task lease, workspace guard, and continuation contracts | Require these unchanged for durable peer sessions; do not recreate them in host adapters. |
-| Session observation | `session_runtime_loopx_projection_v0` and host adapters | Return opaque worker/session/workspace facts and typed effect classes without raw traces. |
-| Reconciliation projection | `control_plane/agents/multi_agent/` | Join planned lanes and observed receipts as a read model; do not mutate Todo or session state here. |
+| Parent work ownership | Existing Todo, workspace guard, and continuation contracts | Keep final acceptance and durable effects with the registered agent; do not recreate ownership in child adapters. |
+| Child observation | Host adapters | Return opaque worker/workspace facts and typed effect classes without raw traces. |
+| Reconciliation projection | `control_plane/agents/multi_agent/` | Join planned lanes and observed receipts as a read model; do not mutate Todo state here. |
 | Completion and spend | Existing typed Turn/Todo settlement boundary | After observation-only qualification, enforce that every lane has a legal terminal disposition before aggregate settlement. |
 | Operator display | `agent_management_projection_v0` and the local Agent workspace | Render planned versus observed topology and drift; never become a dispatcher or source of truth. |
 
@@ -269,8 +263,8 @@ When drift is detected:
 4. independently read back any durable external effect before accepting it;
 5. reject or quarantine results that exceeded their effect or workspace
    boundary;
-6. create a durable peer Todo/session only for remaining work that still needs
-   recovery or follow-up;
+6. return unfinished work to the registered agent's Todo frontier for resume or
+   explicit peer handoff through the separate peer contract;
 7. block aggregate completion and spend until every planned lane is aligned,
    rejected, or explicitly cancelled.
 
@@ -279,14 +273,15 @@ readback. That does not make the original execution topology compliant.
 
 ## Generalized Four-Lane Case
 
-A coordinator owns one aggregate pull-request repair Todo. It launches four
-host children in separate worktrees:
+A registered agent owns one aggregate pull-request repair Todo and should first
+materialize four child-eligible Todos. It then launches four host children in
+separate worktrees:
 
-- two children are described as exact-head validation, but their briefs also
-  permit branch updates and review requests;
-- two children explicitly rebase branches and perform remote pull-request
-  effects;
-- the coordinator later completes one aggregate Todo with all four outcomes.
+- two children validate exact heads and return evidence;
+- two children rebase and repair branches but leave the resulting commits held
+  in their worktrees;
+- the registered agent validates the returned evidence and commits, performs
+  any authorized remote branch or pull-request effects, and settles each Todo.
 
 The worktree isolation is real, and the code outcomes may be valid. The
 topology is still drifted when:
@@ -296,16 +291,16 @@ topology is still drifted when:
 - the aggregate Todo was not decomposed into four LoopX Todo lanes before
   launch;
 - no child lane is bound to an admitted Todo;
-- the two side-effecting lanes have no registered peer identity, lease, or
-  session binding; and
-- only the coordinator's aggregate completion appears in LoopX.
+- child briefs permit durable remote effects outside the admitted child
+  boundary; and
+- only the aggregate completion appears in LoopX.
 
-Because every lane's brief permits durable external effects and later review
-follow-up, the correct topology is four durable peer sessions. A validation
-lane may use an ephemeral child only after its brief is narrowed to read-only
-evidence with no branch update, review request, monitor, or later continuation.
-Every lane returns a receipt, and the coordinator settles only accepted bundle
-evidence.
+The correction is not to call the children LoopX agents. The aggregate work
+must become four Todos in the same agent lane, each child must reference one
+admitted Todo and return a receipt, and durable remote effects remain with the
+registered agent. If a Todo truly needs an independent long-lived LoopX agent,
+that Todo leaves this subagent topology and enters the separate peer
+orchestration contract.
 
 ## Implementation Slices
 
@@ -319,7 +314,7 @@ No runtime behavior changes in this slice.
 
 ### Slice 1: observation-only reconciliation
 
-- let host adapters emit compact worker/session execution receipts;
+- let host adapters emit compact child execution receipts;
 - join receipts to the current topology, Todo, workspace, and state revision;
 - expose drift in status and the local Agent workspace;
 - do not block existing execution yet.
@@ -331,17 +326,9 @@ No runtime behavior changes in this slice.
 - keep Python and host adapters as input/output bridges rather than a second
   authority.
 
-### Slice 3: durable session activation
+### Slice 3: operator experience
 
-- implement only for hosts that can create or resume a session and return a
-  stable binding;
-- require registered peer identity, claim or lease, independent workspace, and
-  controlled writeback;
-- keep unsupported hosts fail-closed or serial.
-
-### Slice 4: operator experience
-
-- show planned versus observed lanes, execution kind, owner, workspace, status,
+- show planned versus observed child lanes, workspace, status,
   effects, and accepted evidence;
 - allow the operator to inspect or cancel through existing typed actions;
 - keep the UI a projection, never a dispatcher or second source of truth.
@@ -349,11 +336,11 @@ No runtime behavior changes in this slice.
 ## Non-Goals
 
 - a research-specific coordinator or worker protocol;
-- automatic conversion of every sub-agent into a durable session;
+- registered-peer orchestration, session activation, or peer recovery;
 - a second scheduler, task store, evidence store, or Agent hierarchy;
 - automatic coordinator election for registered peers;
 - raw host transcript ingestion;
-- direct UI mutation of claims, leases, sessions, or settlement;
+- direct UI mutation of Todos or settlement;
 - a broad TypeScript rewrite before a second runtime consumer exists.
 
 ## Acceptance
@@ -362,14 +349,14 @@ The design is ready for runtime implementation only when:
 
 1. a host cannot claim compliant child execution without a current admitted
    child lane;
-2. durable side-effecting work is attributable to a registered peer, Todo
-   claim or lease, host session, and workspace;
-3. every observed worker or session maps to exactly one planned lane;
+2. every child lane belongs to one registered agent lane and one admitted Todo;
+3. every observed worker maps to exactly one planned child lane;
 4. every planned lane is aligned, rejected, cancelled, or explicitly
    incomplete before aggregate settlement;
 5. stale state, missing receipts, workspace mismatch, and effect-boundary
    violations produce typed drift instead of optimistic completion;
 6. Auto Research, Deep Research, Issue Fix, and future products can supply
-   domain work without importing or forking orchestration mechanics; and
+   domain Todos without importing or forking child orchestration mechanics;
+   registered-peer coordination remains separately owned; and
 7. the public projection remains compact and contains no raw transcript,
    credential, private link, or local absolute path.
