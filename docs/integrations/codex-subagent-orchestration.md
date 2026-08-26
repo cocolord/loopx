@@ -73,6 +73,49 @@ Without `subagent_spawn`, LoopX preserves the existing
 long-lived peer identity, leases, worktrees, and multi-round collaboration
 explicit instead of turning them into the default child-worker mechanism.
 
+### Execution Topology Selection
+
+Admission and execution topology are separate decisions. An admitted child
+lane says that bounded host-child work is allowed; it does not say that every
+kind of work belongs in an ephemeral child.
+
+The coordinator records or consumes
+`multi_agent_execution_topology_v0` before launch:
+
+- `serial` keeps tightly coupled work in the current registered peer;
+- `ephemeral_children` uses host children that end with the parent Turn and
+  return held evidence only;
+- `durable_peer_sessions` uses registered peers with Todo claim or lease,
+  session binding, and independent recovery;
+- `hybrid` keeps short evidence work ephemeral while durable effectful work
+  runs in peer sessions.
+
+If the selected Todo describes an aggregate batch, the coordinator first
+materializes one ordinary LoopX Todo per executable lane. Host-side prose
+decomposition is not a substitute: `task_orchestration_contract_v2` needs real
+Todo candidates to admit, and durable peers need real Todos to claim or lease.
+
+The user or Goal policy defines the allowed envelope: child/peer permission,
+maximum concurrency, domains, repositories, scopes, effect classes, and user
+gates. Inside that envelope, the coordinator decides whether parallelism is
+useful, how many lanes to run, and whether an admitted lane uses a fresh child,
+resume, or durable peer session. A conversational "multi-agent is allowed"
+must be converted into a typed current-Turn allowance or reviewed Goal policy;
+the host tool's availability is not that authorization.
+
+Prefer ephemeral children for bounded read-only mapping, independent review,
+and validation. A local patch may remain ephemeral only while the result is
+held in its isolated worktree and the coordinator owns acceptance. Work that
+may outlive the parent Turn, requires later user interaction, or performs a
+durable external effect such as pushing a branch, changing a pull-request
+state, publishing, deploying, or starting a monitor uses a durable peer session
+by default.
+
+The complete decision and reconciliation contract is
+[`generic_multi_agent_execution_topology_v0`](../architecture/rfcs/generic-multi-agent-execution-topology-v0.md).
+It is a generic kernel contract. Domain capabilities may supply work semantics
+and validation, but must not add their own coordinator or scheduler.
+
 ## Fresh, Fork, Or Resume
 
 The temporary task coordinator chooses a worker context from the work shape:
@@ -82,7 +125,8 @@ The temporary task coordinator chooses a worker context from the work shape:
 | Broad mapping, prior-art search, risk discovery | Fresh worker | Objective, authority source, allowed sources, boundary, expected output, non-goals |
 | Independent review or adversarial validation | Fresh worker | Claim under review, exact evidence, validation command, acceptance and merge rules |
 | Failed-smoke repair or review-comment follow-up | Resume or fork | Worktree, failing evidence, latest patch, next bounded repair |
-| Disjoint implementation | Fresh worker in an independent worktree | Claimed todo, allowed paths, write scope, validation, continuation policy |
+| Disjoint local implementation whose result remains held | Fresh worker in an independent worktree | Admitted Todo, allowed paths, write scope, validation, held-result boundary |
+| Branch push, PR mutation, publication, deployment, or later follow-up | Durable peer session | Registered agent, claim or lease, session binding, workspace, authority, and controlled writeback |
 | Long-running claimed lane | Resume the registered peer task | Agent id, todo or lease, latest accepted evidence |
 | Production action or emergency rollback | No automatic worker | Operator approval, stop condition, reversible command plan |
 
@@ -149,9 +193,11 @@ allows one pending lease for `(goal_id, todo_id)`. `goal_id` is the shared
 control-plane lane; `todo_id` is the work item being claimed. A host child may
 carry the claim context in its brief, but it does not become a ranked agent.
 
-Repository-writing peers and child workers use independent worktrees. Overlap
-is resolved through task boundaries and repository policy, not through a
-permanent controller. Completion uses typed continuation:
+Repository-writing peers and child workers use independent worktrees. A
+worktree proves filesystem isolation; it does not prove LoopX admission,
+identity, claim, lease, session continuity, or external-effect authority.
+Overlap is resolved through task boundaries and repository policy, not through
+a permanent controller. Completion uses typed continuation:
 
 - `independent_handoff`: leave the successor available to peers;
 - `same_agent_non_delivery`: keep a non-delivery follow-up with the same peer.
@@ -159,6 +205,37 @@ permanent controller. Completion uses typed continuation:
 Review remains `action_kind=review` over `independent_handoff`. Add the author
 to `excluded_agents` only when the successor should stay open for eligible peers
 but must not be reclaimed by that author.
+
+## Host Execution Receipts And Reconciliation
+
+Every child launch or durable peer activation should return one compact
+`multi_agent_host_execution_receipt_v0`. The receipt binds the observed host
+worker or session to:
+
+- `bundle_id`, `lane_id`, `goal_id`, and `todo_id`;
+- the admitted execution kind;
+- the source control-plane state revision;
+- an opaque workspace reference;
+- typed effect classes and public-safe evidence references; and
+- terminal status without raw transcript or tool output.
+
+Durable peer receipts additionally require the registered `agent_id`, bound
+session reference, and active Todo lease reference. An ephemeral child receipt
+must not invent those durable identities.
+
+Before aggregate Todo completion or quota spend, the coordinator compares the
+topology plan, host receipts, and current LoopX state through
+`multi_agent_control_plane_reconciliation_v0`. Missing admission, stale
+lineage, unbound durable sessions, missing or stale leases, workspace mismatch,
+effect-boundary violations, missing worker receipts, orphaned results, and
+aggregate settlement without lane evidence are typed drift. The coordinator
+may independently verify and retain useful output, but it cannot relabel the
+original topology as compliant.
+
+The first implementation slice is observation-only. Settlement enforcement
+belongs in the established typed control-plane transaction owner after the
+receipt shape has a second real host consumer; host adapters and Python
+facades remain bridges rather than a second source of truth.
 
 ## Enabling Bounded Orchestration
 
@@ -258,14 +335,25 @@ context (`fresh`, `fork`, or `resume`), accepted or rejected evidence, leases,
 worktrees, quota state, and typed continuation. They must not reconstruct a
 durable leader from a temporary coordination event.
 
+The operator view should also distinguish planned from observed topology. Four
+visible child cards prove host activity, not four registered LoopX peers. A
+compliant view joins each card to its admitted lane and shows whether the work
+is `aligned`, `incomplete`, `rejected`, or `drifted`.
+
 ## Safety Rules
 
 - Do not spawn when quota or the selected user gate blocks the task.
+- Do not spawn without a current admitted child lane, even when the host tool
+  itself is available.
 - Do not infer permissions from an agent name, profile label, or old prompt.
 - Do not launch a fresh worker without a complete task brief.
 - Do not put credentials, private links, raw logs, or production material in a
   public handoff packet.
 - Keep implementation scopes disjoint and use independent worktrees.
+- Keep durable external effects in registered peer sessions unless a later
+  reviewed contract explicitly admits a narrower effect class.
+- Reconcile every planned lane and observed worker before aggregate completion
+  or spend.
 - Let repository policy decide review and merge; peer identity grants neither.
 - Let one temporary coordinator accept bundle evidence and write one spend
   event after validated progress.
