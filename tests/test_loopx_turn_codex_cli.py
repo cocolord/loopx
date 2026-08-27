@@ -10,6 +10,7 @@ import pytest
 
 from loopx.control_plane.turn_driver.codex_cli import (
     CODEX_CLI_SESSION_SCHEMA_VERSION,
+    _prompt,
     codex_cli_result_schema,
     codex_cli_session_binding,
     load_codex_cli_session,
@@ -112,6 +113,11 @@ def test_codex_cli_result_schema_requires_only_bounded_contract_fields() -> None
         "properties"
     ]
     assert "task_packet_digest" in receipt_properties
+    assert receipt_properties["context_mode"]["enum"] == [
+        "forked_snapshot",
+        "fresh",
+        "resume",
+    ]
     assert {
         field: schema["properties"][field]["maxLength"]
         for field in (
@@ -128,6 +134,16 @@ def test_codex_cli_result_schema_requires_only_bounded_contract_fields() -> None
         "vision_unchanged_reason": 240,
         "summary": 400,
     }
+
+
+def test_codex_cli_prompt_requires_explicit_child_context_isolation() -> None:
+    request = _request()
+
+    prompt = _prompt(request)
+
+    assert "pass native_arguments.fork_context explicitly" in prompt
+    assert "fresh means false, does not inherit the parent conversation" in prompt
+    assert "forked_snapshot means true" in prompt
 
 
 def test_codex_cli_host_starts_then_resumes_opaque_session(

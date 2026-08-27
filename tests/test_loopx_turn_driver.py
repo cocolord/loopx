@@ -24,7 +24,7 @@ from loopx.control_plane.turn_driver import (
 )
 from loopx.control_plane.turn_driver.codex_cli import _store_codex_cli_session
 from loopx.control_plane.turn_driver.child_execution_topology import (
-    ChildExecutionTopologyError,
+    CHILD_FALLBACK_ACTIONS,
 )
 from loopx.control_plane.turn_driver.executor import BuiltInHostError
 from loopx.control_plane.quota.live_decision import bind_scheduler_followup_cli_routes
@@ -253,11 +253,17 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
                     "context": "fresh",
                     "native_operation": "spawn_agent",
                     "requires_session": False,
+                    "context_inheritance": (
+                        "task_packet_without_parent_conversation"
+                    ),
+                    "native_arguments": {"fork_context": False},
                 },
                 {
                     "context": "resume",
                     "native_operation": "resume_agent",
                     "requires_session": True,
+                    "context_inheritance": "existing_child_session",
+                    "native_arguments": {},
                 },
             ],
             "brief": brief,
@@ -311,10 +317,19 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
         "report completed scope and evidence",
         "do not write LoopX state or spend quota",
     ]
+    assert task_packet["context"] == {
+        "mode": "fresh",
+        "inheritance": "task_packet_without_parent_conversation",
+        "host": "codex-cli",
+        "native_operation": "spawn_agent",
+        "native_arguments": {"fork_context": False},
+        "requires_session": False,
+        "context_creation_owner": "host_runtime",
+    }
     assert task_packet["guard"] == {
         "schema_version": "child_execution_guard_v0",
         "pre_spawn": "require_complete_task_packet",
-        "on_deviation": "stop_and_quarantine_child",
+        "on_deviation": "project_stop_and_quarantine_child",
         "evidence_disposition": "candidate_until_parent_accepts",
         "parent_blocked": False,
         "parent_continuation": "continue",
@@ -328,7 +343,66 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
     assert lane["task_packet_digest"].startswith("sha256:")
 
 
-def test_turn_plan_rejects_incomplete_child_task_packet() -> None:
+def test_turn_plan_rejects_incomplete_child_lane_without_blocking_parent() -> None:
+    envelope = _adaptive_envelope()
+    orchestration = envelope["task_orchestration_contract"]
+    assert isinstance(orchestration, dict)
+    defaults = orchestration["child_brief_defaults"]
+    assert isinstance(defaults, dict)
+    defaults.pop("acceptance")
+    lanes = orchestration["eligible_child_lanes"]
+    assert isinstance(lanes, list)
+    lanes.append(
+        {
+            "todo_id": "todo_child002",
+            "task_domain": "validation",
+            "execution_kind": "ephemeral_child",
+            "child_brief": {
+                "todo_id": "todo_child002",
+                "objective": "Validate another independent fixture.",
+                "action_kind": "validate",
+                "task_domain": "validation",
+                "required_capabilities": [],
+                "task_repository": None,
+                "required_write_scopes": [],
+                "workspace_isolation": "not_required",
+                "acceptance": ["return one bounded validation result"],
+            },
+        }
+    )
+
+    payload = build_loopx_turn_plan(
+        envelope,
+        host="codex-cli",
+        execution_mode="interactive-visible",
+    )
+
+    assert payload["ok"] is True
+    assert payload["route"]["kind"] == LoopXTurnRoute.READY_FOR_HOST.value
+    assert [item["todo_id"] for item in payload["child_operations"]] == [
+        "todo_child002"
+    ]
+    topology = payload["multi_agent_execution_topology"]
+    assert topology["topology"] == "ephemeral_children"
+    assert [lane["todo_id"] for lane in topology["lanes"]] == ["todo_child002"]
+    assert topology["pre_spawn_rejections"] == [
+        {
+            "schema_version": "child_execution_rejection_v0",
+            "todo_id": "todo_child001",
+            "stage": "pre_spawn",
+            "reason_codes": ["child_task_packet_incomplete"],
+            "launch_allowed": False,
+            "recommended_child_action": "do_not_launch",
+            "parent_blocked": False,
+            "parent_continuation": "continue",
+            "fallback_actions": list(CHILD_FALLBACK_ACTIONS),
+        }
+    ]
+
+
+def test_turn_plan_falls_back_to_serial_when_every_child_packet_is_incomplete() -> (
+    None
+):
     envelope = _adaptive_envelope()
     orchestration = envelope["task_orchestration_contract"]
     assert isinstance(orchestration, dict)
@@ -336,17 +410,28 @@ def test_turn_plan_rejects_incomplete_child_task_packet() -> None:
     assert isinstance(defaults, dict)
     defaults.pop("acceptance")
 
-    with pytest.raises(ChildExecutionTopologyError) as exc_info:
-        build_loopx_turn_plan(
-            envelope,
-            host="codex-cli",
-            execution_mode="interactive-visible",
-        )
+    payload = build_loopx_turn_plan(
+        envelope,
+        host="codex-cli",
+        execution_mode="interactive-visible",
+    )
 
-    assert exc_info.value.reason_code == "child_task_packet_incomplete"
+    assert payload["ok"] is True
+    assert payload["route"]["kind"] == LoopXTurnRoute.READY_FOR_HOST.value
+    assert "child_operations" not in payload
+    topology = payload["multi_agent_execution_topology"]
+    assert topology["topology"] == "serial"
+    assert topology["rationale_codes"] == [
+        "parent_serial_fallback",
+        "child_launch_rejected",
+    ]
+    assert topology["lanes"] == []
+    assert topology["pre_spawn_rejections"][0]["parent_blocked"] is False
 
 
-def test_turn_plan_rejects_child_operations_above_admitted_capacity() -> None:
+def test_turn_plan_rejects_excess_child_lane_without_blocking_admitted_sibling() -> (
+    None
+):
     envelope = _adaptive_envelope()
     orchestration = envelope["task_orchestration_contract"]
     assert isinstance(orchestration, dict)
@@ -366,13 +451,91 @@ def test_turn_plan_rejects_child_operations_above_admitted_capacity() -> None:
         }
     )
 
-    with pytest.raises(ChildExecutionTopologyError) as exc_info:
-        build_loopx_turn_plan(
-            envelope,
-            host="codex-cli",
-            execution_mode="interactive-visible",
-        )
-    assert exc_info.value.reason_code == "child_capacity_exceeded"
+    payload = build_loopx_turn_plan(
+        envelope,
+        host="codex-cli",
+        execution_mode="interactive-visible",
+    )
+
+    assert payload["ok"] is True
+    assert [item["todo_id"] for item in payload["child_operations"]] == [
+        "todo_child001"
+    ]
+    topology = payload["multi_agent_execution_topology"]
+    assert [lane["todo_id"] for lane in topology["lanes"]] == ["todo_child001"]
+    rejection = topology["pre_spawn_rejections"][0]
+    assert rejection["todo_id"] == "todo_child002"
+    assert rejection["reason_codes"] == ["child_capacity_exceeded"]
+    assert rejection["parent_blocked"] is False
+    assert rejection["fallback_actions"] == list(CHILD_FALLBACK_ACTIONS)
+
+
+def test_turn_plan_exposes_forked_snapshot_only_when_explicitly_selected() -> None:
+    envelope = _adaptive_envelope()
+    orchestration = envelope["task_orchestration_contract"]
+    assert isinstance(orchestration, dict)
+    defaults = orchestration["child_brief_defaults"]
+    assert isinstance(defaults, dict)
+    defaults["context_policy"] = {
+        "selection_owner": "task_coordinator",
+        "default": "forked_snapshot",
+        "allowed": ["fresh", "forked_snapshot"],
+    }
+
+    payload = build_loopx_turn_plan(
+        envelope,
+        host="codex-cli",
+        execution_mode="interactive-visible",
+    )
+
+    operation = payload["child_operations"][0]
+    assert operation["recommended_context"] == "forked_snapshot"
+    assert operation["available_contexts"] == [
+        {
+            "context": "fresh",
+            "native_operation": "spawn_agent",
+            "requires_session": False,
+            "context_inheritance": "task_packet_without_parent_conversation",
+            "native_arguments": {"fork_context": False},
+        },
+        {
+            "context": "forked_snapshot",
+            "native_operation": "spawn_agent",
+            "requires_session": False,
+            "context_inheritance": "parent_conversation_snapshot",
+            "native_arguments": {"fork_context": True},
+        },
+    ]
+    assert operation["task_packet"]["context"]["native_arguments"] == {
+        "fork_context": True
+    }
+
+
+def test_turn_plan_rejects_context_not_supported_by_selected_host() -> None:
+    envelope = _adaptive_envelope()
+    orchestration = envelope["task_orchestration_contract"]
+    assert isinstance(orchestration, dict)
+    defaults = orchestration["child_brief_defaults"]
+    assert isinstance(defaults, dict)
+    defaults["context_policy"] = {
+        "selection_owner": "task_coordinator",
+        "default": "forked_snapshot",
+        "allowed": ["fresh", "forked_snapshot"],
+    }
+
+    payload = build_loopx_turn_plan(
+        envelope,
+        host="claude-code",
+        execution_mode="interactive-visible",
+    )
+
+    assert payload["ok"] is True
+    assert "child_operations" not in payload
+    rejection = payload["multi_agent_execution_topology"][
+        "pre_spawn_rejections"
+    ][0]
+    assert rejection["reason_codes"] == ["child_task_packet_incomplete"]
+    assert rejection["parent_blocked"] is False
 
 
 def test_turn_plan_uses_adaptive_primary_todo_for_bundle_lineage() -> None:
@@ -473,6 +636,8 @@ def test_turn_plan_exposes_only_qualified_claude_child_contexts() -> None:
                 "context": "fresh",
                 "native_operation": "Task",
                 "requires_session": False,
+                "context_inheritance": "task_packet_without_parent_conversation",
+                "native_arguments": {},
             }
         ],
         "brief": brief,
@@ -569,6 +734,8 @@ def test_turn_host_request_carries_typed_child_operations() -> None:
         "context": "fresh",
         "native_operation": "spawn_agent",
         "requires_session": False,
+        "context_inheritance": "task_packet_without_parent_conversation",
+        "native_arguments": {"fork_context": False},
     }
     assert request["result_contract"]["stdout"] == "one public-safe JSON object"
 
