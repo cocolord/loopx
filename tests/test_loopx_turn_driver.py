@@ -248,24 +248,7 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
             "host": "codex-cli",
             "selection_owner": "task_coordinator",
             "recommended_context": "fresh",
-            "available_contexts": [
-                {
-                    "context": "fresh",
-                    "native_operation": "spawn_agent",
-                    "requires_session": False,
-                    "context_inheritance": (
-                        "task_packet_without_parent_conversation"
-                    ),
-                    "native_arguments": {"fork_context": False},
-                },
-                {
-                    "context": "resume",
-                    "native_operation": "resume_agent",
-                    "requires_session": True,
-                    "context_inheritance": "existing_child_session",
-                    "native_arguments": {},
-                },
-            ],
+            "available_contexts": ["fresh", "resume"],
             "brief": brief,
             "result_channel": "public_safe_typed_evidence",
             "writeback_owner": "task_coordinator",
@@ -277,6 +260,12 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
             "task_packet": task_packet,
             "effect_boundary": "held_evidence_only",
             "workspace_ref": None,
+            "host_adapter": {
+                "host": "codex-cli",
+                "native_operation": "spawn_agent",
+                "arguments": {"fork_context": False},
+                "requires_session": False,
+            },
         }
     ]
     assert topology == {
@@ -319,12 +308,7 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
     ]
     assert task_packet["context"] == {
         "mode": "fresh",
-        "inheritance": "task_packet_without_parent_conversation",
-        "host": "codex-cli",
-        "native_operation": "spawn_agent",
-        "native_arguments": {"fork_context": False},
-        "requires_session": False,
-        "context_creation_owner": "host_runtime",
+        "inheritance": "none",
     }
     assert task_packet["guard"] == {
         "schema_version": "child_execution_guard_v0",
@@ -490,24 +474,16 @@ def test_turn_plan_exposes_forked_snapshot_only_when_explicitly_selected() -> No
 
     operation = payload["child_operations"][0]
     assert operation["recommended_context"] == "forked_snapshot"
-    assert operation["available_contexts"] == [
-        {
-            "context": "fresh",
-            "native_operation": "spawn_agent",
-            "requires_session": False,
-            "context_inheritance": "task_packet_without_parent_conversation",
-            "native_arguments": {"fork_context": False},
-        },
-        {
-            "context": "forked_snapshot",
-            "native_operation": "spawn_agent",
-            "requires_session": False,
-            "context_inheritance": "parent_conversation_snapshot",
-            "native_arguments": {"fork_context": True},
-        },
-    ]
-    assert operation["task_packet"]["context"]["native_arguments"] == {
-        "fork_context": True
+    assert operation["available_contexts"] == ["fresh", "forked_snapshot"]
+    assert operation["task_packet"]["context"] == {
+        "mode": "forked_snapshot",
+        "inheritance": "parent_conversation_snapshot",
+    }
+    assert operation["host_adapter"] == {
+        "host": "codex-cli",
+        "native_operation": "spawn_agent",
+        "arguments": {"fork_context": True},
+        "requires_session": False,
     }
 
 
@@ -536,6 +512,29 @@ def test_turn_plan_rejects_context_not_supported_by_selected_host() -> None:
     ][0]
     assert rejection["reason_codes"] == ["child_task_packet_incomplete"]
     assert rejection["parent_blocked"] is False
+
+
+def test_task_packet_digest_is_independent_of_host_adapter() -> None:
+    envelope = _adaptive_envelope()
+
+    codex = build_loopx_turn_plan(
+        envelope,
+        host="codex-cli",
+        execution_mode="interactive-visible",
+    )
+    claude = build_loopx_turn_plan(
+        envelope,
+        host="claude-code",
+        execution_mode="interactive-visible",
+    )
+
+    codex_operation = codex["child_operations"][0]
+    claude_operation = claude["child_operations"][0]
+    assert codex_operation["task_packet"] == claude_operation["task_packet"]
+    assert codex_operation["task_packet_digest"] == claude_operation[
+        "task_packet_digest"
+    ]
+    assert codex_operation["host_adapter"] != claude_operation["host_adapter"]
 
 
 def test_turn_plan_uses_adaptive_primary_todo_for_bundle_lineage() -> None:
@@ -631,15 +630,7 @@ def test_turn_plan_exposes_only_qualified_claude_child_contexts() -> None:
         "host": "claude-code",
         "selection_owner": "task_coordinator",
         "recommended_context": "fresh",
-        "available_contexts": [
-            {
-                "context": "fresh",
-                "native_operation": "Task",
-                "requires_session": False,
-                "context_inheritance": "task_packet_without_parent_conversation",
-                "native_arguments": {},
-            }
-        ],
+        "available_contexts": ["fresh"],
         "brief": brief,
         "result_channel": "public_safe_typed_evidence",
         "writeback_owner": "task_coordinator",
@@ -651,6 +642,12 @@ def test_turn_plan_exposes_only_qualified_claude_child_contexts() -> None:
         "task_packet": lane["task_packet"],
         "effect_boundary": "held_evidence_only",
         "workspace_ref": None,
+        "host_adapter": {
+            "host": "claude-code",
+            "native_operation": "Task",
+            "arguments": {},
+            "requires_session": False,
+        },
     }
 
 
@@ -730,12 +727,12 @@ def test_turn_host_request_carries_typed_child_operations() -> None:
         request["multi_agent_execution_topology"]
         == plan["multi_agent_execution_topology"]
     )
-    assert request["child_operations"][0]["available_contexts"][0] == {
-        "context": "fresh",
+    assert request["child_operations"][0]["available_contexts"][0] == "fresh"
+    assert request["child_operations"][0]["host_adapter"] == {
+        "host": "codex-cli",
         "native_operation": "spawn_agent",
+        "arguments": {"fork_context": False},
         "requires_session": False,
-        "context_inheritance": "task_packet_without_parent_conversation",
-        "native_arguments": {"fork_context": False},
     }
     assert request["result_contract"]["stdout"] == "one public-safe JSON object"
 
