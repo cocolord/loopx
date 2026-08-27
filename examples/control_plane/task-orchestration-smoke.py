@@ -371,7 +371,7 @@ def main() -> int:
     codex_request = build_loopx_turn_host_request(codex_plan)
     assert [
         item for item in codex_request["child_operations"][0]["available_contexts"]
-    ] == ["fresh", "resume"]
+    ] == ["fresh"]
     assert codex_request["child_operations"][0]["host_adapter"] == {
         "host": "codex-cli",
         "native_operation": "spawn_agent",

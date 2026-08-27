@@ -412,9 +412,7 @@ def _child_brief_defaults(
             "cancel": "task_coordinator_or_host_timeout",
         },
         "child_guard_policy": "prevention_first_v0",
-        "validation_policy": (
-            "run todo-scoped validation when applicable and report commands/results"
-        ),
+        "validation_policy": "child reports evidence; parent runs declared todo gate",
         "acceptance": [
             "report completed scope and evidence",
             "report validation result and residual risk",
@@ -433,6 +431,11 @@ def _eligible_child_lane(lane: _NormalizedAdmissionLane) -> dict[str, Any]:
         item.get("required_capabilities")
     )
     required_write_scopes = list(lane.required_write_scopes)
+    validation_declared = bool(
+        item.get("validation_command") is not None
+        or item.get("validation_command_argv") is not None
+        or item.get("completion_validation_required") is True
+    )
     child_brief = {
         "todo_id": lane.todo_id,
         "objective": protocol_action_text(
@@ -452,7 +455,7 @@ def _eligible_child_lane(lane: _NormalizedAdmissionLane) -> dict[str, Any]:
         ),
         "target_key": str(item.get("target_key") or "").strip() or None,
     }
-    if item.get("validation_command") or item.get("validation_command_argv"):
+    if validation_declared:
         child_brief["validation_declared"] = True
         child_brief["validation_label"] = (
             str(item.get("validation_label") or "").strip() or None
