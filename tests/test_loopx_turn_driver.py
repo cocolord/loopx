@@ -136,11 +136,24 @@ def _adaptive_envelope() -> dict[str, object]:
         "child_brief_defaults": {
             "schema_version": "subagent_control_plane_handoff_v0",
             "parent_goal_id": "fixture-goal",
+            "authority_artifact": "quota_should_run.goal_boundary",
+            "latest_state_ref": "quota_should_run.action_signature.source_hash",
             "context_policy": {
                 "selection_owner": "task_coordinator",
                 "default": "fresh",
                 "allowed": ["fresh", "resume"],
             },
+            "expected_output": "public_safe_evidence",
+            "execution_policy": {
+                "timeout": "bounded_by_host_turn",
+                "cancel": "task_coordinator_or_host_timeout",
+            },
+            "child_guard_policy": "prevention_first_v0",
+            "validation_policy": "report validation commands and results",
+            "acceptance": [
+                "report completed scope and evidence",
+                "do not write LoopX state or spend quota",
+            ],
         },
         "eligible_child_lanes": [
             {
@@ -150,7 +163,12 @@ def _adaptive_envelope() -> dict[str, object]:
                 "child_brief": {
                     "todo_id": "todo_child001",
                     "objective": "Validate one independent fixture.",
+                    "action_kind": "validate",
                     "task_domain": "validation",
+                    "required_capabilities": [],
+                    "task_repository": None,
+                    "required_write_scopes": [],
+                    "workspace_isolation": "not_required",
                 },
             }
         ],
@@ -221,6 +239,7 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
     }
     topology = payload["multi_agent_execution_topology"]
     lane = topology["lanes"][0]
+    task_packet = lane["task_packet"]
     source_state_ref = "sha256:fixture"
     assert payload["child_operations"] == [
         {
@@ -248,6 +267,8 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
             "lane_id": lane["lane_id"],
             "execution_kind": "ephemeral_child",
             "source_state_ref": source_state_ref,
+            "task_packet_digest": lane["task_packet_digest"],
+            "task_packet": task_packet,
             "effect_boundary": "held_evidence_only",
             "workspace_ref": None,
         }
@@ -276,9 +297,53 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
                 "allowed_effect_classes": ["local_read"],
                 "workspace_requirement": "not_required",
                 "workspace_ref": None,
+                "task_packet": task_packet,
+                "task_packet_digest": lane["task_packet_digest"],
             }
         ],
     }
+    assert task_packet["schema_version"] == "child_execution_task_packet_v0"
+    assert task_packet["objective"] == "Validate one independent fixture."
+    assert task_packet["action_kind"] == "validate"
+    assert task_packet["deliverable"] == "public_safe_evidence"
+    assert task_packet["acceptance_mode"] == "parent_review_only"
+    assert task_packet["acceptance"] == [
+        "report completed scope and evidence",
+        "do not write LoopX state or spend quota",
+    ]
+    assert task_packet["guard"] == {
+        "schema_version": "child_execution_guard_v0",
+        "pre_spawn": "require_complete_task_packet",
+        "on_deviation": "stop_and_quarantine_child",
+        "evidence_disposition": "candidate_until_parent_accepts",
+        "parent_blocked": False,
+        "parent_continuation": "continue",
+        "fallback_actions": [
+            "retry_fresh",
+            "replace_child",
+            "serial_takeover",
+            "ignore_optional_result",
+        ],
+    }
+    assert lane["task_packet_digest"].startswith("sha256:")
+
+
+def test_turn_plan_rejects_incomplete_child_task_packet() -> None:
+    envelope = _adaptive_envelope()
+    orchestration = envelope["task_orchestration_contract"]
+    assert isinstance(orchestration, dict)
+    defaults = orchestration["child_brief_defaults"]
+    assert isinstance(defaults, dict)
+    defaults.pop("acceptance")
+
+    with pytest.raises(ChildExecutionTopologyError) as exc_info:
+        build_loopx_turn_plan(
+            envelope,
+            host="codex-cli",
+            execution_mode="interactive-visible",
+        )
+
+    assert exc_info.value.reason_code == "child_task_packet_incomplete"
 
 
 def test_turn_plan_rejects_child_operations_above_admitted_capacity() -> None:
@@ -417,6 +482,8 @@ def test_turn_plan_exposes_only_qualified_claude_child_contexts() -> None:
         "lane_id": lane["lane_id"],
         "execution_kind": "ephemeral_child",
         "source_state_ref": source_state_ref,
+        "task_packet_digest": lane["task_packet_digest"],
+        "task_packet": lane["task_packet"],
         "effect_boundary": "held_evidence_only",
         "workspace_ref": None,
     }
