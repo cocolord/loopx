@@ -10,10 +10,12 @@ multiple registered LoopX agents.
 
 The control plane decides whether one agent lane stays serial or uses
 ephemeral host child workers to advance multiple admitted Todos in parallel.
-The host executes that decision and returns compact receipts. LoopX then
-reconciles the observed workers, workspaces, effects, and evidence against the
-admitted child lanes before the registered agent accepts completion or spends
-quota.
+Before launch, LoopX compiles each admitted child lane into a complete typed
+task packet. The host executes only that packet and returns compact receipts.
+LoopX then reconciles the observed worker, workspace, effects, packet digest,
+and evidence. A drifting child is stopped or quarantined locally; it never
+blocks the registered parent agent from retrying, replacing the child, taking
+the Todo back serially, or ignoring an optional result.
 
 `spawn_agent`, a native Task tool, or any equivalent host primitive is execution
 capacity. Its presence does not grant LoopX admission, authority, or proof that
@@ -56,12 +58,13 @@ becomes a LoopX peer merely because it appears as another card or process.
 - **Capability id:** none. This is a kernel execution contract, not a
   user-facing capability.
 - **Control-plane owner:** existing child admission and
-  `loopx/control_plane/turn_driver/` host observation code, with settlement
-  enforcement remaining in the established typed control-plane transaction
-  boundary. The relocated `demo/multi_agent/` package is a source-checkout
-  showcase and does not own this shipped Turn contract.
+  `loopx/control_plane/turn_driver/` task-packet, receipt, and reconciliation
+  code. The relocated `demo/multi_agent/` package is a source-checkout showcase
+  and does not own this shipped Turn contract.
 - **Provider owner:** each host adapter owns child lifecycle and emits
-  observations; it does not own Goal, Todo, quota, or acceptance truth.
+  observations. A provider that supports live tool interception also enforces
+  the packet's tool/effect boundary, but it does not own Goal, Todo, quota, or
+  acceptance truth.
 - **Domain capabilities:** may supply task semantics, expected artifacts, and
   validation, but must not define their own coordinator, scheduler, or child
   lifecycle.
@@ -108,7 +111,8 @@ Inside that envelope, the coordinator owns strategy:
 - whether parallelism is useful now;
 - how many lanes to run;
 - which admitted lane remains local;
-- whether an eligible child uses fresh or resume; and
+- whether an eligible child uses fresh context, an explicitly allowed parent
+  snapshot, or an existing child session; and
 - when to stop, retry, reject, or reconcile.
 
 A natural-language statement that multi-agent work is acceptable is not itself
@@ -129,7 +133,7 @@ registered-peer orchestration, replace admission, or create new authority.
   "schema_version": "multi_agent_execution_topology_v0",
   "goal_id": "example-goal",
   "bundle_id": "bundle_7d2f",
-  "agent_id": "codex-maintainer",
+  "coordinator_agent_id": "codex-maintainer",
   "source_state_ref": "sha256:current-control-plane-state",
   "topology": "ephemeral_children",
   "execution_envelope": {
@@ -147,7 +151,72 @@ registered-peer orchestration, replace admission, or create new authority.
       "todo_id": "todo_review",
       "execution_kind": "ephemeral_child",
       "admission_ref": "task_orchestration_contract_v2:todo_review",
-      "effect_boundary": "held_evidence_only"
+      "effect_boundary": "held_evidence_only",
+      "allowed_effect_classes": ["local_read"],
+      "workspace_requirement": "not_required",
+      "workspace_ref": null,
+      "task_packet_digest": "sha256:child-task-packet",
+      "task_packet": {
+        "schema_version": "child_execution_task_packet_v0",
+        "todo_id": "todo_review",
+        "objective": "Review one admitted pull-request head.",
+        "action_kind": "review",
+        "target_key": null,
+        "deliverable": "public_safe_evidence",
+        "acceptance": [
+          "report completed scope and evidence",
+          "do not write LoopX state or spend quota"
+        ],
+        "context_refs": [
+          "quota_should_run.goal_boundary",
+          "quota_should_run.action_signature.source_hash",
+          "sha256:current-control-plane-state"
+        ],
+        "task_domain": "review",
+        "task_repository": null,
+        "allowed_capabilities": [],
+        "allowed_write_scopes": [],
+        "allowed_effect_classes": ["local_read"],
+        "forbidden_effect_classes": [
+          "credential_use",
+          "external_write",
+          "held_workspace_write",
+          "monitor",
+          "network_read",
+          "production_action"
+        ],
+        "workspace_requirement": "not_required",
+        "workspace_ref": null,
+        "context": {
+          "mode": "fresh",
+          "inheritance": "none"
+        },
+        "execution_budget": {
+          "timeout": "bounded_by_host_turn",
+          "cancel": "task_coordinator_or_host_timeout"
+        },
+        "output_contract": "public_safe_evidence",
+        "acceptance_mode": "parent_review_only",
+        "validation": {
+          "declared": false,
+          "label": null,
+          "policy": "report validation commands and results"
+        },
+        "guard": {
+          "schema_version": "child_execution_guard_v0",
+          "pre_spawn": "require_complete_task_packet",
+          "on_deviation": "project_stop_and_quarantine_child",
+          "evidence_disposition": "candidate_until_parent_accepts",
+          "parent_blocked": false,
+          "parent_continuation": "continue",
+          "fallback_actions": [
+            "retry_fresh",
+            "replace_child",
+            "serial_takeover",
+            "ignore_optional_result"
+          ]
+        }
+      }
     }
   ]
 }
@@ -170,6 +239,72 @@ peer agents. Its lanes must not be inserted into this child topology.
 The coordinator may choose a more conservative topology than the plan permits.
 It may not choose a more powerful one.
 
+## Child Execution Guard
+
+Drift prevention starts when the registered agent delegates the Todo, not when
+the child finishes. Before launch, LoopX must compile one
+`child_execution_task_packet_v0` from the admitted Todo and shared handoff
+defaults. The packet is launchable only when it contains:
+
+- one `todo_id`, objective, `action_kind`, deliverable, and acceptance list;
+- current authority and source-state references;
+- explicit allowed capabilities, write scopes, effect classes, workspace
+  requirement, and execution budget;
+- a provider-neutral selected context mode and inheritance contract;
+- an output contract plus either declared validation or
+  `acceptance_mode=parent_review_only`; and
+- `child_execution_guard_v0` with local failure handling and parent fallback.
+
+Missing or contradictory fields produce a child-local pre-spawn rejection with
+`child_task_packet_incomplete`; no host operation is emitted for that child.
+Other valid children and the parent Turn remain runnable. When every child is
+rejected, the topology falls back to `serial`. Capacity overflow is handled the
+same way with `child_capacity_exceeded`. Each accepted packet is hashed, and
+the exact `task_packet_digest` must be returned in the child receipt. A
+mismatched digest is `task_packet_mismatch`.
+
+Context creation is a Harness/host capability, not a LoopX control-plane
+implementation. LoopX signs only the provider-neutral context contract and
+validates the observation:
+
+- `fresh` is the default and means `inheritance=none`;
+- `forked_snapshot` is exposed only when the runtime reports
+  `subagent_context_fork` and means
+  `inheritance=parent_conversation_snapshot`;
+- `resume` is exposed only when the runtime reports `subagent_resume` and means
+  `inheritance=existing_child_session`.
+
+The Harness adapter owns the native mapping outside the task packet. The Codex
+adapter currently maps `fresh` to `spawn_agent(fork_context=false)` and
+`forked_snapshot` to `spawn_agent(fork_context=true)`; another host may use
+different primitives without changing the packet digest.
+
+The receipt records the actual `context_mode`. A mismatch between planned and
+observed context is `context_mode_mismatch` and quarantines that child's
+evidence.
+
+The Guard is intentionally fail-local:
+
+- aligned output remains candidate evidence until the parent accepts it;
+- drifted, rejected, cancelled, duplicate, or orphaned output is quarantined;
+- the recommended child disposition may be `stop_child` or `wait_for_child`;
+- `parent_blocked` remains `false` and `parent_continuation` remains
+  `continue`; and
+- the parent may `retry_fresh`, `replace_child`, `serial_takeover`, or
+  `ignore_optional_result`.
+
+The current runtime enforces task-packet completeness before emitting each
+child operation. It validates receipt-to-packet, context, workspace, and effect
+observations, then projects evidence disposition and fallback to the parent.
+It does not yet enforce evidence acceptance, live tool interception, or
+automatic host child termination; those require a consuming host or settlement
+adapter and are not claimed by this slice.
+
+In this slice, `evidence_disposition=quarantined` is a reconciliation
+classification. The normalized host result still retains the compact receipt;
+the registered parent must not accept that evidence, but automatic removal from
+every downstream consumer waits for an explicit evidence-acceptance owner.
+
 ## Host Execution Receipt
 
 Every launched child returns one
@@ -185,8 +320,9 @@ Every launched child returns one
   "execution_kind": "ephemeral_child",
   "runtime_id": "codex_app",
   "worker_ref": "opaque-host-worker-ref",
-  "session_ref": null,
   "source_state_ref": "sha256:current-control-plane-state",
+  "task_packet_digest": "sha256:child-task-packet",
+  "context_mode": "fresh",
   "workspace_ref": "opaque-workspace-ref",
   "status": "completed",
   "effect_classes": ["local_read"],
@@ -196,24 +332,27 @@ Every launched child returns one
 ```
 
 The registered parent agent is identified by the topology plan and current
-Turn. The child receipt has no `agent_id` or durable `session_ref`;
-`worker_ref` is only a host observation and grants no LoopX identity.
+Turn. The child receipt has no `agent_id`, peer claim, lease, or durable
+session identity; `worker_ref` is only a host observation and grants no LoopX
+identity.
 
 Receipts contain compact refs and typed effect classes, never raw prompts,
 transcripts, tool output, credentials, private links, or local absolute paths.
 
 ## Reconciliation
 
-Before the registered agent completes the bundle or spends quota,
 `multi_agent_control_plane_reconciliation_v0` compares the topology plan with
-host receipts and current LoopX state.
+host receipts and projects which child evidence may be shown to the registered
+parent for acceptance.
 
 The read model classifies each lane as:
 
-- `aligned`: admitted execution, current lineage, expected workspace/effects,
-  and accepted evidence;
+- `aligned`: admitted execution, current lineage, expected packet,
+  workspace/effects, and candidate evidence;
 - `incomplete`: admitted work is still running or has no terminal receipt;
 - `rejected`: the registered agent inspected the result and did not accept it;
+- `cancelled`: the child was intentionally stopped and its evidence remains
+  quarantined;
 - `drifted`: observed execution contradicts the admitted topology or authority.
 
 Required drift reason codes:
@@ -224,24 +363,27 @@ Required drift reason codes:
 - `execution_kind_mismatch`;
 - `missing_todo_lineage`;
 - `source_state_stale`;
+- `task_packet_mismatch`;
+- `context_mode_mismatch`;
 - `workspace_mismatch`;
 - `side_effect_boundary_exceeded`;
 - `worker_receipt_missing`;
 - `orphaned_worker_result`;
 - `aggregate_settlement_without_lane_evidence`.
 
-The reconciliation result is evidence for settlement, not a second work
-ledger. Existing Todos and Turn settlement remain
-authoritative.
+The reconciliation result is an evidence-admission and child-recovery read
+model, not a second work ledger. Existing Todos, parent reasoning, and Turn
+settlement remain authoritative. A child result never becomes accepted evidence
+without parent review.
 
 Capacity and effect limits are independent parts of the execution envelope.
-Reconciliation must therefore fail closed when the observed child count
-exceeds `max_children`, even if every child otherwise has current admission,
-lineage, workspace, and evidence. It must likewise fail closed when an
-otherwise aligned receipt reports an effect outside
-`allowed_effect_classes`. Public characterization keeps one otherwise-aligned
-negative case for each invariant so another drift reason cannot mask either
-violation.
+Capacity fails closed before launch: topology construction emits no operation
+for child lanes above `max_children` and records
+`child_capacity_exceeded`. A host-reported extra worker is instead
+`unadmitted_child_spawn` plus
+`orphaned_worker_result`. An otherwise aligned receipt that reports an effect
+outside `allowed_effect_classes` becomes child-local drift and its evidence is
+quarantined.
 
 ## Existing Owner Map
 
@@ -250,34 +392,37 @@ a parallel orchestration stack:
 
 | Concern | Existing owner | Required change |
 | --- | --- | --- |
-| Child admission | `control_plane/quota/task_orchestration_admission.py` | Add the bounded effect and durability facts needed by topology selection; keep domain names out. |
-| Host operation planning | `control_plane/turn_driver/driver.py` | Emit only operations admitted by the selected topology and carry a stable bundle/lane correlation id. |
+| Child admission | `control_plane/quota/task_orchestration_admission.py` | Supply compact shared Guard policy and Todo-derived task facts; keep domain names out. |
+| Task-packet guard | `control_plane/turn_driver/child_execution_topology.py` | Reject only the invalid child before launch unless objective, acceptance, context, scope, effects, budget, output, and fallback are complete; bind packet and context observations to the receipt. |
+| Host operation planning | `control_plane/turn_driver/driver.py` | Emit only Guard-qualified provider-neutral operations, default to clean child context, and carry stable bundle/lane/task-packet correlation. |
+| Harness adapter mapping | `control_plane/turn_driver/child_host_adapter.py` plus each concrete host runner | Translate `fresh`, `forked_snapshot`, or `resume` into host-native operations and arguments without changing the generic task packet. |
 | Parent work ownership | Existing Todo, workspace guard, and continuation contracts | Keep final acceptance and durable effects with the registered agent; do not recreate ownership in child adapters. |
-| Child observation | Host adapters | Return opaque worker/workspace facts and typed effect classes without raw traces. |
-| Reconciliation projection | `control_plane/turn_driver/child_execution_topology.py` | Join planned lanes and observed receipts as a read model; do not mutate Todo state here. |
-| Completion and spend | Existing typed Turn/Todo settlement boundary | After observation-only qualification, enforce that every lane has a legal terminal disposition before aggregate settlement. |
+| Child execution | Host adapters | Execute the packet, return opaque worker/workspace facts and typed effects, and enforce live tool boundaries when supported. |
+| Reconciliation projection | `control_plane/turn_driver/child_execution_topology.py` | Join planned lanes and observed receipts, quarantine drifting evidence, and project child-local recovery without mutating Todo state. |
+| Parent continuation | Registered parent agent plus existing Todo/Turn owners | Continue independently of child drift; accept evidence, retry, replace, take over serially, or ignore optional output. |
 | Operator display | `agent_management_projection_v0` and the local Agent workspace | Render planned versus observed topology and drift; never become a dispatcher or source of truth. |
 
-The deterministic final gate belongs in TypeScript when settlement enforcement
-lands because TypeScript already owns the migrated Turn and Todo transaction
-semantics. The initial topology and reconciliation read models may remain in
-Python while they are observational. This is a bounded Strangler Fig step, not
-a reason to rewrite the multi-agent kernel.
+This Guard does not add a global child barrier to TypeScript settlement.
+Parent completion remains governed by the parent's own Todo acceptance and
+evidence. A parent that still needs a child deliverable has an unmet acceptance
+condition; the child does not acquire authority to block the parent runtime.
 
 ## Failure And Repair
 
 When drift is detected:
 
-1. stop launching additional lanes from the stale bundle;
-2. do not retroactively register an ephemeral child as a peer;
-3. retain only compact host receipts and public-safe evidence refs;
+1. stop or quarantine only the affected child when the host supports that
+   lifecycle action;
+2. do not launch an incomplete task packet or retroactively register a child as
+   a peer;
+3. retain only compact receipts and quarantine the child's evidence refs;
 4. independently read back any durable external effect before accepting it;
-5. reject or quarantine results that exceeded their effect or workspace
-   boundary;
-6. return unfinished work to the registered agent's Todo frontier for resume or
-   explicit peer handoff through the separate peer contract;
-7. block aggregate completion and spend until every planned lane is aligned,
-   rejected, or explicitly cancelled.
+5. keep the registered parent and unaffected children runnable;
+6. let the parent retry fresh, replace the child, take the Todo back serially,
+   ignore optional output, or explicitly hand off long-lived work through the
+   separate peer contract; and
+7. complete the parent Todo only when the parent's own acceptance is satisfied,
+   not because every child produced a successful result.
 
 An already-valid repository result may remain useful after independent
 readback. That does not make the original execution topology compliant.
@@ -321,26 +466,31 @@ orchestration contract.
 - add a public synthetic four-lane fixture or contract smoke;
 - record the real incident only in ignored/local LoopX evidence.
 
-No runtime behavior changes in this slice.
+This slice itself introduced no runtime behavior.
 
-### Slice 1: observation-only reconciliation
+### Slice 1: observation and prevention-first Guard
 
 - let host adapters emit compact child execution receipts;
+- require a complete typed task packet before launch;
+- make clean child context explicit and inherited context capability-gated;
+- bind receipts to the exact task-packet digest and context mode;
+- quarantine drifting evidence while keeping the parent runnable;
 - join receipts to the current topology, Todo, workspace, and state revision;
 - expose drift in status and the local Agent workspace;
-- do not block existing execution yet.
+- do not add a parent settlement barrier.
 
-### Slice 2: settlement enforcement
+### Slice 2: live host containment
 
-- require aligned lane receipts before aggregate completion or quota spend;
-- put the final deterministic gate in the established typed settlement owner;
-- keep Python and host adapters as input/output bridges rather than a second
-  authority.
+- enforce tool, write-scope, effect, timeout, and cancellation boundaries in
+  host adapters;
+- stop a deviating child before it can continue spending work;
+- preserve typed fallback to retry, replacement, or serial takeover; and
+- never convert host containment into parent-agent authority.
 
 ### Slice 3: operator experience
 
 - show planned versus observed child lanes, workspace, status,
-  effects, and accepted evidence;
+  effects, candidate evidence, quarantined evidence, and parent fallback;
 - allow the operator to inspect or cancel through existing typed actions;
 - keep the UI a projection, never a dispatcher or second source of truth.
 
@@ -361,13 +511,15 @@ The design is ready for runtime implementation only when:
 1. a host cannot claim compliant child execution without a current admitted
    child lane;
 2. every child lane belongs to one registered agent lane and one admitted Todo;
-3. every observed worker maps to exactly one planned child lane;
-4. every planned lane is aligned, rejected, cancelled, or explicitly
-   incomplete before aggregate settlement;
-5. stale state, missing receipts, workspace mismatch, and effect-boundary
-   violations produce typed drift instead of optimistic completion;
-6. Auto Research, Deep Research, Issue Fix, and future products can supply
+3. every launched child has a complete typed task packet; clean context is the
+   default; and every receipt binds its exact digest and context mode;
+4. every observed worker maps to exactly one planned child lane;
+5. stale state, missing receipts, task-packet mismatch, workspace mismatch, and
+   effect-boundary violations quarantine only the affected evidence;
+6. child drift never blocks the registered parent from fallback or unrelated
+   work, and child output still requires parent acceptance;
+7. Auto Research, Deep Research, Issue Fix, and future products can supply
    domain Todos without importing or forking child orchestration mechanics;
    registered-peer coordination remains separately owned; and
-7. the public projection remains compact and contains no raw transcript,
+8. the public projection remains compact and contains no raw transcript,
    credential, private link, or local absolute path.
