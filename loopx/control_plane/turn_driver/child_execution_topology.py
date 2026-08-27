@@ -18,6 +18,7 @@ MULTI_AGENT_CONTROL_PLANE_RECONCILIATION_SCHEMA_VERSION = (
 )
 CHILD_EXECUTION_TASK_PACKET_SCHEMA_VERSION = "child_execution_task_packet_v0"
 CHILD_EXECUTION_GUARD_SCHEMA_VERSION = "child_execution_guard_v0"
+CHILD_EXECUTION_REJECTION_SCHEMA_VERSION = "child_execution_rejection_v0"
 MAX_CHILD_EXECUTION_RECEIPTS = 32
 MAX_EFFECT_CLASSES = 8
 MAX_EVIDENCE_REFS = 12
@@ -36,6 +37,7 @@ KNOWN_EFFECT_CLASSES = frozenset(
         "monitor",
     }
 )
+CHILD_CONTEXT_MODES = frozenset({"fresh", "forked_snapshot", "resume"})
 CHILD_FALLBACK_ACTIONS = (
     "retry_fresh",
     "replace_child",
@@ -55,6 +57,7 @@ _RECEIPT_FIELDS = frozenset(
         "worker_ref",
         "source_state_ref",
         "task_packet_digest",
+        "context_mode",
         "workspace_ref",
         "status",
         "effect_classes",
@@ -172,7 +175,7 @@ def _child_guard_policy(brief: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": CHILD_EXECUTION_GUARD_SCHEMA_VERSION,
         "pre_spawn": "require_complete_task_packet",
-        "on_deviation": "stop_and_quarantine_child",
+        "on_deviation": "project_stop_and_quarantine_child",
         "evidence_disposition": "candidate_until_parent_accepts",
         "parent_blocked": False,
         "parent_continuation": "continue",
@@ -180,8 +183,63 @@ def _child_guard_policy(brief: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _child_context_contract(operation: Mapping[str, Any]) -> dict[str, Any]:
+    mode = _required_text(
+        operation.get("recommended_context"),
+        field="recommended_context",
+    )
+    available_contexts = operation.get("available_contexts")
+    if not isinstance(available_contexts, list):
+        raise ChildExecutionTopologyError(
+            reason_code="child_task_packet_incomplete",
+            detail="available_contexts must be explicit",
+        )
+    selected = next(
+        (
+            _mapping(candidate)
+            for candidate in available_contexts
+            if isinstance(candidate, Mapping) and candidate.get("context") == mode
+        ),
+        {},
+    )
+    if not selected:
+        raise ChildExecutionTopologyError(
+            reason_code="child_task_packet_incomplete",
+            detail="recommended_context is not available on the selected host",
+        )
+    native_operation = _required_text(
+        selected.get("native_operation"),
+        field="available_contexts[].native_operation",
+    )
+    inheritance = _required_text(
+        selected.get("context_inheritance"),
+        field="available_contexts[].context_inheritance",
+    )
+    native_arguments = _mapping(selected.get("native_arguments"))
+    if native_operation == "spawn_agent":
+        expected_fork_context = mode == "forked_snapshot"
+        if native_arguments.get("fork_context") is not expected_fork_context:
+            raise ChildExecutionTopologyError(
+                reason_code="child_task_packet_incomplete",
+                detail=(
+                    "spawn_agent context must set fork_context explicitly "
+                    f"for {mode}"
+                ),
+            )
+    return {
+        "mode": mode,
+        "inheritance": inheritance,
+        "host": _required_text(operation.get("host"), field="host"),
+        "native_operation": native_operation,
+        "native_arguments": native_arguments,
+        "requires_session": selected.get("requires_session") is True,
+        "context_creation_owner": "host_runtime",
+    }
+
+
 def _child_task_packet(
     *,
+    operation: Mapping[str, Any],
     brief: Mapping[str, Any],
     todo_id: str,
     source_state_ref: str,
@@ -219,6 +277,7 @@ def _child_task_packet(
             field="validation_policy",
         ),
     }
+    execution_policy = brief.get("execution_policy")
     task_packet = {
         "schema_version": CHILD_EXECUTION_TASK_PACKET_SCHEMA_VERSION,
         "todo_id": todo_id,
@@ -252,10 +311,9 @@ def _child_task_packet(
         ),
         "workspace_requirement": workspace_requirement,
         "workspace_ref": workspace_ref,
-        "execution_budget": dict(
-            brief.get("execution_policy")
-            if isinstance(brief.get("execution_policy"), Mapping)
-            else {}
+        "context": _child_context_contract(operation),
+        "execution_budget": (
+            dict(execution_policy) if isinstance(execution_policy, Mapping) else {}
         ),
         "output_contract": _required_text(
             brief.get("expected_output"),
@@ -278,6 +336,90 @@ def _child_task_packet(
     return task_packet
 
 
+def _child_pre_spawn_rejection(
+    operation: Mapping[str, Any],
+    *,
+    reason_code: str,
+) -> dict[str, Any]:
+    try:
+        todo_id = _opaque_ref(
+            operation.get("todo_id"),
+            field="pre_spawn_rejection.todo_id",
+            required=False,
+        )
+    except ValueError:
+        todo_id = None
+    return {
+        "schema_version": CHILD_EXECUTION_REJECTION_SCHEMA_VERSION,
+        "todo_id": todo_id,
+        "stage": "pre_spawn",
+        "reason_codes": [reason_code],
+        "launch_allowed": False,
+        "recommended_child_action": "do_not_launch",
+        "parent_blocked": False,
+        "parent_continuation": "continue",
+        "fallback_actions": list(CHILD_FALLBACK_ACTIONS),
+    }
+
+
+def _child_execution_lane(
+    operation: Mapping[str, Any],
+    *,
+    bundle_id: str,
+    source_state_ref: str,
+) -> dict[str, Any]:
+    todo_id = _opaque_ref(
+        operation.get("todo_id"),
+        field="topology.lanes[].todo_id",
+    )
+    assert todo_id is not None
+    brief = _mapping(operation.get("brief"))
+    write_scopes = brief.get("required_write_scopes")
+    has_workspace_write = isinstance(write_scopes, list) and bool(write_scopes)
+    required_capabilities = brief.get("required_capabilities")
+    uses_network = (
+        isinstance(required_capabilities, list)
+        and "network" in required_capabilities
+    )
+    effect_boundary = (
+        "held_workspace_write" if has_workspace_write else "held_evidence_only"
+    )
+    allowed_effect_classes = ["local_read"]
+    if uses_network:
+        allowed_effect_classes.append("network_read")
+    if has_workspace_write:
+        allowed_effect_classes.append("held_workspace_write")
+    lane_id = multi_agent_lane_id(
+        bundle_id=bundle_id,
+        todo_id=todo_id,
+    )
+    workspace_ref = f"workspace:{lane_id}" if has_workspace_write else None
+    workspace_requirement = (
+        "independent_git_worktree" if has_workspace_write else "not_required"
+    )
+    task_packet = _child_task_packet(
+        operation=operation,
+        brief=brief,
+        todo_id=todo_id,
+        source_state_ref=source_state_ref,
+        allowed_effect_classes=allowed_effect_classes,
+        workspace_requirement=workspace_requirement,
+        workspace_ref=workspace_ref,
+    )
+    return {
+        "lane_id": lane_id,
+        "todo_id": todo_id,
+        "execution_kind": "ephemeral_child",
+        "admission_ref": f"task_orchestration_contract_v2:{todo_id}",
+        "effect_boundary": effect_boundary,
+        "allowed_effect_classes": allowed_effect_classes,
+        "workspace_requirement": workspace_requirement,
+        "workspace_ref": workspace_ref,
+        "task_packet": task_packet,
+        "task_packet_digest": _sha256_ref(task_packet),
+    }
+
+
 def build_multi_agent_execution_topology(
     *,
     turn_envelope: Mapping[str, Any],
@@ -293,7 +435,7 @@ def build_multi_agent_execution_topology(
         or orchestration.get("mode") != "adaptive"
     ):
         return None
-    source_state_ref = _opaque_ref(
+    normalized_source_state_ref = _opaque_ref(
         source_state_ref,
         field="topology.source_state_ref",
     )
@@ -305,7 +447,7 @@ def build_multi_agent_execution_topology(
         orchestration.get("coordinator_agent_id") or turn_envelope.get("agent_id"),
         field="topology.coordinator_agent_id",
     )
-    assert source_state_ref is not None
+    assert normalized_source_state_ref is not None
     assert goal_id is not None
     assert coordinator_agent_id is not None
     bundle_id = multi_agent_bundle_id(turn_key=turn_key)
@@ -317,84 +459,59 @@ def build_multi_agent_execution_topology(
         and configured_max_children > 0
         else len(child_operations)
     )
-    if len(child_operations) > max_children:
-        raise ChildExecutionTopologyError(
-            reason_code="child_capacity_exceeded",
-            detail=(
-                f"{len(child_operations)} child operations exceed "
-                f"max_children={max_children}"
-            ),
-        )
     lanes: list[dict[str, Any]] = []
+    pre_spawn_rejections: list[dict[str, Any]] = []
     allowed_effect_classes: set[str] = set()
     for operation in child_operations:
-        todo_id = _opaque_ref(
-            operation.get("todo_id"),
-            field="topology.lanes[].todo_id",
-        )
-        assert todo_id is not None
-        brief = _mapping(operation.get("brief"))
-        write_scopes = brief.get("required_write_scopes")
-        has_workspace_write = isinstance(write_scopes, list) and bool(write_scopes)
-        required_capabilities = brief.get("required_capabilities")
-        uses_network = (
-            isinstance(required_capabilities, list)
-            and "network" in required_capabilities
-        )
-        effect_boundary = (
-            "held_workspace_write" if has_workspace_write else "held_evidence_only"
-        )
-        lane_effect_classes = ["local_read"]
-        if uses_network:
-            lane_effect_classes.append("network_read")
-        if has_workspace_write:
-            lane_effect_classes.append("held_workspace_write")
-        allowed_effect_classes.update(lane_effect_classes)
-        lane_id = multi_agent_lane_id(
-            bundle_id=bundle_id,
-            todo_id=todo_id,
-        )
-        workspace_ref = f"workspace:{lane_id}" if has_workspace_write else None
-        workspace_requirement = (
-            "independent_git_worktree" if has_workspace_write else "not_required"
-        )
-        task_packet = _child_task_packet(
-            brief=brief,
-            todo_id=todo_id,
-            source_state_ref=source_state_ref,
-            allowed_effect_classes=lane_effect_classes,
-            workspace_requirement=workspace_requirement,
-            workspace_ref=workspace_ref,
-        )
-        lanes.append(
-            {
-                "lane_id": lane_id,
-                "todo_id": todo_id,
-                "execution_kind": "ephemeral_child",
-                "admission_ref": f"task_orchestration_contract_v2:{todo_id}",
-                "effect_boundary": effect_boundary,
-                "allowed_effect_classes": lane_effect_classes,
-                "workspace_requirement": workspace_requirement,
-                "workspace_ref": workspace_ref,
-                "task_packet": task_packet,
-                "task_packet_digest": _sha256_ref(task_packet),
-            }
-        )
+        if len(lanes) >= max_children:
+            pre_spawn_rejections.append(
+                _child_pre_spawn_rejection(
+                    operation,
+                    reason_code="child_capacity_exceeded",
+                )
+            )
+            continue
+        try:
+            lane = _child_execution_lane(
+                operation,
+                bundle_id=bundle_id,
+                source_state_ref=normalized_source_state_ref,
+            )
+        except (ChildExecutionTopologyError, ValueError):
+            pre_spawn_rejections.append(
+                _child_pre_spawn_rejection(
+                    operation,
+                    reason_code="child_task_packet_incomplete",
+                )
+            )
+            continue
+        allowed_effect_classes.update(lane["allowed_effect_classes"])
+        lanes.append(lane)
+    rationale_codes = (
+        ["admitted_ephemeral_child_lanes"] if lanes else ["parent_serial_fallback"]
+    )
+    if pre_spawn_rejections:
+        rationale_codes.append("child_launch_rejected")
     return {
         "schema_version": MULTI_AGENT_EXECUTION_TOPOLOGY_SCHEMA_VERSION,
         "goal_id": goal_id,
         "bundle_id": bundle_id,
         "coordinator_agent_id": coordinator_agent_id,
-        "source_state_ref": source_state_ref,
-        "topology": "ephemeral_children",
+        "source_state_ref": normalized_source_state_ref,
+        "topology": "ephemeral_children" if lanes else "serial",
         "execution_envelope": {
             "source": "task_orchestration_contract_v2",
             "expires_with_turn": True,
             "max_children": max_children,
             "allowed_effect_classes": sorted(allowed_effect_classes),
         },
-        "rationale_codes": ["admitted_ephemeral_child_lanes"],
+        "rationale_codes": rationale_codes,
         "lanes": lanes,
+        **(
+            {"pre_spawn_rejections": pre_spawn_rejections}
+            if pre_spawn_rejections
+            else {}
+        ),
     }
 
 
@@ -409,32 +526,25 @@ def bind_child_operations_to_topology(
         for lane in topology.get("lanes") or []
         if isinstance(lane, Mapping)
     }
-    return [
-        {
-            **dict(operation),
-            "bundle_id": topology.get("bundle_id"),
-            "lane_id": _mapping(
-                lanes_by_todo.get(str(operation.get("todo_id") or ""))
-            ).get("lane_id"),
-            "execution_kind": _mapping(
-                lanes_by_todo.get(str(operation.get("todo_id") or ""))
-            ).get("execution_kind"),
-            "source_state_ref": topology.get("source_state_ref"),
-            "task_packet_digest": _mapping(
-                lanes_by_todo.get(str(operation.get("todo_id") or ""))
-            ).get("task_packet_digest"),
-            "task_packet": _mapping(
-                lanes_by_todo.get(str(operation.get("todo_id") or ""))
-            ).get("task_packet"),
-            "effect_boundary": _mapping(
-                lanes_by_todo.get(str(operation.get("todo_id") or ""))
-            ).get("effect_boundary"),
-            "workspace_ref": _mapping(
-                lanes_by_todo.get(str(operation.get("todo_id") or ""))
-            ).get("workspace_ref"),
-        }
-        for operation in child_operations
-    ]
+    bound_operations: list[dict[str, Any]] = []
+    for operation in child_operations:
+        lane = _mapping(lanes_by_todo.get(str(operation.get("todo_id") or "")))
+        if not lane:
+            continue
+        bound_operations.append(
+            {
+                **dict(operation),
+                "bundle_id": topology.get("bundle_id"),
+                "lane_id": lane.get("lane_id"),
+                "execution_kind": lane.get("execution_kind"),
+                "source_state_ref": topology.get("source_state_ref"),
+                "task_packet_digest": lane.get("task_packet_digest"),
+                "task_packet": _mapping(lane.get("task_packet")),
+                "effect_boundary": lane.get("effect_boundary"),
+                "workspace_ref": lane.get("workspace_ref"),
+            }
+        )
+    return bound_operations
 
 
 def multi_agent_host_request_projection(
@@ -474,6 +584,10 @@ def child_execution_receipts_json_schema() -> dict[str, Any]:
         "worker_ref": {"type": "string", "maxLength": 192},
         "source_state_ref": {"type": "string", "maxLength": 192},
         "task_packet_digest": {"type": "string", "maxLength": 192},
+        "context_mode": {
+            "type": "string",
+            "enum": sorted(CHILD_CONTEXT_MODES),
+        },
         "workspace_ref": nullable_ref,
         "status": {
             "type": "string",
@@ -536,6 +650,9 @@ def normalize_multi_agent_host_execution_receipts(
         execution_kind = str(raw.get("execution_kind") or "").strip()
         if execution_kind not in EXECUTION_KINDS:
             raise ValueError(f"{field}.execution_kind is unsupported")
+        context_mode = str(raw.get("context_mode") or "").strip()
+        if context_mode not in CHILD_CONTEXT_MODES:
+            raise ValueError(f"{field}.context_mode is unsupported")
         status = str(raw.get("status") or "").strip()
         if status not in RECEIPT_STATUSES:
             raise ValueError(f"{field}.status is unsupported")
@@ -568,6 +685,7 @@ def normalize_multi_agent_host_execution_receipts(
                 raw.get("task_packet_digest"),
                 field=f"{field}.task_packet_digest",
             ),
+            "context_mode": context_mode,
             "workspace_ref": _opaque_ref(
                 raw.get("workspace_ref"),
                 field=f"{field}.workspace_ref",
@@ -599,6 +717,151 @@ def normalize_multi_agent_host_execution_receipts(
     return receipts
 
 
+def _lane_reason_codes(
+    *,
+    topology: Mapping[str, Any],
+    lane: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    duplicate_count: int,
+) -> list[str]:
+    reasons: list[str] = []
+    if duplicate_count:
+        reasons.append("orphaned_worker_result")
+    if receipt.get("bundle_id") != topology.get("bundle_id"):
+        reasons.append("orphaned_worker_result")
+    if receipt.get("goal_id") != topology.get("goal_id"):
+        reasons.append("missing_todo_lineage")
+    if receipt.get("todo_id") != lane.get("todo_id"):
+        reasons.append("missing_todo_lineage")
+    if receipt.get("execution_kind") != lane.get("execution_kind"):
+        reasons.append("execution_kind_mismatch")
+    if receipt.get("source_state_ref") != topology.get("source_state_ref"):
+        reasons.append("source_state_stale")
+    if receipt.get("task_packet_digest") != lane.get("task_packet_digest"):
+        reasons.append("task_packet_mismatch")
+    expected_context_mode = _mapping(
+        _mapping(lane.get("task_packet")).get("context")
+    ).get("mode")
+    if receipt.get("context_mode") != expected_context_mode:
+        reasons.append("context_mode_mismatch")
+    allowed_effects = set(lane.get("allowed_effect_classes") or [])
+    if any(
+        effect not in allowed_effects for effect in receipt.get("effect_classes") or []
+    ):
+        reasons.append("side_effect_boundary_exceeded")
+    if receipt.get("status") == "completed" and not receipt.get("evidence_refs"):
+        reasons.append("aggregate_settlement_without_lane_evidence")
+    if (
+        lane.get("workspace_requirement") == "independent_git_worktree"
+        and receipt.get("workspace_ref") != lane.get("workspace_ref")
+    ):
+        reasons.append("workspace_mismatch")
+    return sorted(set(reasons))
+
+
+def _lane_status(
+    receipt: Mapping[str, Any] | None,
+    *,
+    reason_codes: Sequence[str],
+) -> str:
+    if receipt is None or receipt.get("status") == "running":
+        return "incomplete"
+    if reason_codes:
+        return "drifted"
+    if receipt.get("status") == "cancelled":
+        return "cancelled"
+    if receipt.get("status") in {"failed", "rejected"}:
+        return "rejected"
+    return "aligned"
+
+
+def _lane_reconciliation(
+    *,
+    topology: Mapping[str, Any],
+    lane: Mapping[str, Any],
+    observed: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    receipt = observed[0] if observed else None
+    duplicate_receipts = [dict(item) for item in observed[1:]]
+    reason_codes = (
+        ["worker_receipt_missing"]
+        if receipt is None
+        else _lane_reason_codes(
+            topology=topology,
+            lane=lane,
+            receipt=receipt,
+            duplicate_count=len(duplicate_receipts),
+        )
+    )
+    status = _lane_status(receipt, reason_codes=reason_codes)
+    result = {
+        "lane_id": str(lane.get("lane_id") or ""),
+        "todo_id": lane.get("todo_id"),
+        "execution_kind": lane.get("execution_kind"),
+        "status": status,
+        "reason_codes": reason_codes,
+        "receipt_present": receipt is not None,
+        "evidence_disposition": (
+            "quarantined"
+            if status in {"drifted", "rejected", "cancelled"}
+            else "candidate"
+            if status == "incomplete"
+            else "candidate_for_parent_acceptance"
+        ),
+        "recommended_child_action": (
+            "stop_child"
+            if status in {"drifted", "rejected", "cancelled"}
+            else "wait_for_child"
+            if status == "incomplete"
+            else "return_to_parent"
+        ),
+        "parent_blocked": False,
+        "parent_continuation": "continue",
+        "fallback_actions": list(
+            _mapping(_mapping(lane.get("task_packet")).get("guard")).get(
+                "fallback_actions"
+            )
+            or []
+        ),
+    }
+    if receipt is not None:
+        result.update(
+            {
+                "worker_ref": receipt.get("worker_ref"),
+                "workspace_ref": receipt.get("workspace_ref"),
+                "effect_classes": list(receipt.get("effect_classes") or []),
+                (
+                    "quarantined_evidence_refs"
+                    if status in {"drifted", "rejected", "cancelled"}
+                    else "candidate_evidence_refs"
+                ): list(receipt.get("evidence_refs") or []),
+            }
+        )
+    return result, duplicate_receipts
+
+
+def _orphaned_receipt_projection(
+    receipt: Mapping[str, Any],
+    *,
+    unadmitted: bool,
+) -> dict[str, Any]:
+    return {
+        "lane_id": str(receipt.get("lane_id") or "") or None,
+        "worker_ref": receipt.get("worker_ref"),
+        "reason_codes": (
+            ["unadmitted_child_spawn", "orphaned_worker_result"]
+            if unadmitted
+            else ["orphaned_worker_result"]
+        ),
+        "evidence_disposition": "quarantined",
+        "recommended_child_action": "stop_child",
+        "parent_blocked": False,
+        "parent_continuation": "continue",
+        "fallback_actions": list(CHILD_FALLBACK_ACTIONS),
+        "quarantined_evidence_refs": list(receipt.get("evidence_refs") or []),
+    }
+
+
 def reconcile_multi_agent_execution(
     topology: Mapping[str, Any] | None,
     receipts: Sequence[Mapping[str, Any]],
@@ -616,162 +879,41 @@ def reconcile_multi_agent_execution(
             dict(receipt)
         )
     lane_results: list[dict[str, Any]] = []
-    aligned_count = 0
-    incomplete_count = 0
-    rejected_count = 0
-    cancelled_count = 0
-    drifted_count = 0
+    status_counts = {
+        "aligned": 0,
+        "incomplete": 0,
+        "rejected": 0,
+        "cancelled": 0,
+        "drifted": 0,
+    }
     duplicate_receipts: list[dict[str, Any]] = []
     for lane in planned_lanes:
         lane_id = str(lane.get("lane_id") or "")
         observed = receipts_by_lane.pop(lane_id, [])
-        reasons: list[str] = []
-        receipt = observed[0] if observed else None
-        if receipt is None:
-            status = "incomplete"
-            reasons.append("worker_receipt_missing")
-            incomplete_count += 1
-        else:
-            if len(observed) > 1:
-                reasons.append("orphaned_worker_result")
-                duplicate_receipts.extend(observed[1:])
-            if receipt.get("bundle_id") != topology.get("bundle_id"):
-                reasons.append("orphaned_worker_result")
-            if receipt.get("goal_id") != topology.get("goal_id"):
-                reasons.append("missing_todo_lineage")
-            if receipt.get("todo_id") != lane.get("todo_id"):
-                reasons.append("missing_todo_lineage")
-            if receipt.get("execution_kind") != lane.get("execution_kind"):
-                reasons.append("execution_kind_mismatch")
-            if receipt.get("source_state_ref") != topology.get("source_state_ref"):
-                reasons.append("source_state_stale")
-            if receipt.get("task_packet_digest") != lane.get("task_packet_digest"):
-                reasons.append("task_packet_mismatch")
-            allowed_effects = set(lane.get("allowed_effect_classes") or [])
-            if any(
-                effect not in allowed_effects
-                for effect in receipt.get("effect_classes") or []
-            ):
-                reasons.append("side_effect_boundary_exceeded")
-            if receipt.get("status") == "completed" and not receipt.get(
-                "evidence_refs"
-            ):
-                reasons.append("aggregate_settlement_without_lane_evidence")
-            if lane.get(
-                "workspace_requirement"
-            ) == "independent_git_worktree" and receipt.get(
-                "workspace_ref"
-            ) != lane.get("workspace_ref"):
-                reasons.append("workspace_mismatch")
-            reasons = sorted(set(reasons))
-            receipt_status = str(receipt.get("status") or "")
-            if reasons:
-                status = "drifted"
-                drifted_count += 1
-            elif receipt_status == "running":
-                status = "incomplete"
-                incomplete_count += 1
-            elif receipt_status == "cancelled":
-                status = "cancelled"
-                cancelled_count += 1
-            elif receipt_status in {"failed", "rejected"}:
-                status = "rejected"
-                rejected_count += 1
-            else:
-                status = "aligned"
-                aligned_count += 1
-        lane_results.append(
-            {
-                "lane_id": lane_id,
-                "todo_id": lane.get("todo_id"),
-                "execution_kind": lane.get("execution_kind"),
-                "status": status,
-                "reason_codes": reasons,
-                "receipt_present": receipt is not None,
-                "evidence_disposition": (
-                    "quarantined"
-                    if status in {"drifted", "rejected", "cancelled"}
-                    else "candidate"
-                    if status == "incomplete"
-                    else "candidate_for_parent_acceptance"
-                ),
-                "recommended_child_action": (
-                    "stop_child"
-                    if status in {"drifted", "rejected", "cancelled"}
-                    else "wait_for_child"
-                    if status == "incomplete"
-                    else "return_to_parent"
-                ),
-                "parent_blocked": False,
-                "parent_continuation": "continue",
-                "fallback_actions": list(
-                    _mapping(_mapping(lane.get("task_packet")).get("guard")).get(
-                        "fallback_actions"
-                    )
-                    or []
-                ),
-                **(
-                    {
-                        "worker_ref": receipt.get("worker_ref"),
-                        "workspace_ref": receipt.get("workspace_ref"),
-                        "effect_classes": list(receipt.get("effect_classes") or []),
-                        **(
-                            {
-                                "quarantined_evidence_refs": list(
-                                    receipt.get("evidence_refs") or []
-                                )
-                            }
-                            if status in {"drifted", "rejected", "cancelled"}
-                            else {
-                                "candidate_evidence_refs": list(
-                                    receipt.get("evidence_refs") or []
-                                )
-                            }
-                        ),
-                    }
-                    if receipt is not None
-                    else {}
-                ),
-            }
+        lane_result, duplicates = _lane_reconciliation(
+            topology=topology or {},
+            lane=lane,
+            observed=observed,
         )
+        lane_results.append(lane_result)
+        duplicate_receipts.extend(duplicates)
+        status_counts[str(lane_result["status"])] += 1
     orphaned_receipts = [
-        {
-            "lane_id": lane_id or None,
-            "worker_ref": receipt.get("worker_ref"),
-            "reason_codes": [
-                "unadmitted_child_spawn",
-                "orphaned_worker_result",
-            ],
-            "evidence_disposition": "quarantined",
-            "recommended_child_action": "stop_child",
-            "parent_blocked": False,
-            "parent_continuation": "continue",
-            "fallback_actions": list(CHILD_FALLBACK_ACTIONS),
-            "quarantined_evidence_refs": list(
-                receipt.get("evidence_refs") or []
-            ),
-        }
+        _orphaned_receipt_projection(receipt, unadmitted=True)
         for lane_id, lane_receipts in sorted(receipts_by_lane.items())
         for receipt in lane_receipts
     ]
     orphaned_receipts.extend(
-        {
-            "lane_id": str(receipt.get("lane_id") or "") or None,
-            "worker_ref": receipt.get("worker_ref"),
-            "reason_codes": ["orphaned_worker_result"],
-            "evidence_disposition": "quarantined",
-            "recommended_child_action": "stop_child",
-            "parent_blocked": False,
-            "parent_continuation": "continue",
-            "fallback_actions": list(CHILD_FALLBACK_ACTIONS),
-            "quarantined_evidence_refs": list(
-                receipt.get("evidence_refs") or []
-            ),
-        }
+        _orphaned_receipt_projection(receipt, unadmitted=False)
         for receipt in duplicate_receipts
     )
     orphaned_count = len(orphaned_receipts)
-    return {
+    pre_spawn_rejections = [
+        dict(item)
+        for item in (topology or {}).get("pre_spawn_rejections") or []
+        if isinstance(item, Mapping)
+    ]
+    payload = {
         "schema_version": MULTI_AGENT_CONTROL_PLANE_RECONCILIATION_SCHEMA_VERSION,
         "bundle_id": (topology or {}).get("bundle_id"),
         "topology_present": bool(topology),
@@ -779,10 +921,12 @@ def reconcile_multi_agent_execution(
         "settlement_enforced": False,
         "child_guard": {
             "schema_version": CHILD_EXECUTION_GUARD_SCHEMA_VERSION,
-            "enforced_boundaries": [
-                "pre_spawn_task_packet",
+            "enforced_boundaries": ["pre_spawn_task_packet"],
+            "validated_observations": [
                 "receipt_task_packet_binding",
-                "evidence_admission",
+                "context_mode_binding",
+                "workspace_boundary",
+                "effect_boundary",
             ],
             "projected_dispositions": [
                 "stop_child",
@@ -791,6 +935,7 @@ def reconcile_multi_agent_execution(
                 "fallback_actions",
             ],
             "unsupported_boundaries": [
+                "evidence_acceptance_enforcement",
                 "live_host_tool_interception",
                 "automatic_host_child_termination",
             ],
@@ -800,24 +945,26 @@ def reconcile_multi_agent_execution(
         "parent_continuation": "continue",
         "status": (
             "drifted"
-            if drifted_count or orphaned_count
+            if status_counts["drifted"] or orphaned_count
             else "incomplete"
-            if incomplete_count
+            if status_counts["incomplete"]
+            else "guarded"
+            if pre_spawn_rejections
             else "reconciled"
         ),
         "counts": {
             "planned": len(planned_lanes),
+            "pre_spawn_rejected": len(pre_spawn_rejections),
             "observed": len(receipts),
-            "aligned": aligned_count,
-            "incomplete": incomplete_count,
-            "rejected": rejected_count,
-            "cancelled": cancelled_count,
-            "drifted": drifted_count,
+            **status_counts,
             "orphaned": orphaned_count,
         },
         "lanes": lane_results,
         "orphaned_receipts": orphaned_receipts,
     }
+    if pre_spawn_rejections:
+        payload["pre_spawn_rejections"] = pre_spawn_rejections
+    return payload
 
 
 def observe_multi_agent_host_result(

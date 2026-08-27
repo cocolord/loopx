@@ -20,6 +20,7 @@ from .projection_repair import write_scope_allowed
 
 
 SUBAGENT_SPAWN_CAPABILITY = "subagent_spawn"
+SUBAGENT_CONTEXT_FORK_CAPABILITY = "subagent_context_fork"
 SUBAGENT_RESUME_CAPABILITY = "subagent_resume"
 READ_ONLY_ACTION_KINDS = frozenset(
     {
@@ -390,6 +391,8 @@ def _child_brief_defaults(
     available_capabilities: list[str],
 ) -> dict[str, Any]:
     allowed_contexts = ["fresh"]
+    if SUBAGENT_CONTEXT_FORK_CAPABILITY in available_capabilities:
+        allowed_contexts.append("forked_snapshot")
     if SUBAGENT_RESUME_CAPABILITY in available_capabilities:
         allowed_contexts.append("resume")
     return {

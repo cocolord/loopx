@@ -25,11 +25,32 @@ SUPPORTED_HOSTS = {"codex-cli", "claude-code", "generic-cli"}
 SUPPORTED_EXECUTION_MODES = {"interactive-visible", "isolated-headless"}
 HOST_CHILD_CONTEXT_OPERATIONS = {
     "codex-cli": {
-        "fresh": ("spawn_agent", False),
-        "resume": ("resume_agent", True),
+        "fresh": {
+            "native_operation": "spawn_agent",
+            "requires_session": False,
+            "context_inheritance": "task_packet_without_parent_conversation",
+            "native_arguments": {"fork_context": False},
+        },
+        "forked_snapshot": {
+            "native_operation": "spawn_agent",
+            "requires_session": False,
+            "context_inheritance": "parent_conversation_snapshot",
+            "native_arguments": {"fork_context": True},
+        },
+        "resume": {
+            "native_operation": "resume_agent",
+            "requires_session": True,
+            "context_inheritance": "existing_child_session",
+            "native_arguments": {},
+        },
     },
     "claude-code": {
-        "fresh": ("Task", False),
+        "fresh": {
+            "native_operation": "Task",
+            "requires_session": False,
+            "context_inheritance": "task_packet_without_parent_conversation",
+            "native_arguments": {},
+        },
     },
 }
 REPLAN_ACTIONS = {
@@ -273,6 +294,8 @@ def _child_host_operations(
     if brief_defaults.get("schema_version") != "subagent_control_plane_handoff_v0":
         return []
     operations = HOST_CHILD_CONTEXT_OPERATIONS.get(host, {})
+    if not operations:
+        return []
     child_operations: list[dict[str, Any]] = []
     for lane in lanes:
         if not isinstance(lane, Mapping):
@@ -289,18 +312,10 @@ def _child_host_operations(
         if not isinstance(allowed_contexts, list):
             allowed_contexts = [recommended]
         available_contexts = [
-            {
-                "context": context,
-                "native_operation": operations[context][0],
-                "requires_session": operations[context][1],
-            }
+            {"context": context, **operations[context]}
             for context in allowed_contexts
             if context in operations
         ]
-        if not available_contexts:
-            continue
-        if recommended not in {item["context"] for item in available_contexts}:
-            recommended = str(available_contexts[0]["context"])
         child_operations.append(
             {
                 "schema_version": LOOPX_CHILD_HOST_OPERATION_SCHEMA_VERSION,
