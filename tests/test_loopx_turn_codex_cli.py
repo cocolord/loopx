@@ -141,9 +141,10 @@ def test_codex_cli_prompt_requires_explicit_child_context_isolation() -> None:
 
     prompt = _prompt(request)
 
-    assert "pass native_arguments.fork_context explicitly" in prompt
-    assert "fresh means false, does not inherit the parent conversation" in prompt
-    assert "forked_snapshot means true" in prompt
+    assert "execute the separate host_adapter projection" in prompt
+    assert "fresh maps to fork_context=false" in prompt
+    assert "forked_snapshot maps to fork_context=true" in prompt
+    assert "never infer native arguments inside the generic LoopX task packet" in prompt
 
 
 def test_codex_cli_host_starts_then_resumes_opaque_session(
