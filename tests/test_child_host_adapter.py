@@ -25,13 +25,6 @@ from loopx.control_plane.turn_driver.child_host_adapter import (
             False,
             id="explicit_parent_snapshot",
         ),
-        pytest.param(
-            "resume",
-            "resume_agent",
-            {},
-            True,
-            id="existing_child_session",
-        ),
     ],
 )
 def test_codex_child_context_adapter_maps_modes(
@@ -55,7 +48,6 @@ def test_host_child_context_adapter_exposes_only_supported_modes() -> None:
     assert supported_child_context_modes("codex-cli") == (
         "fresh",
         "forked_snapshot",
-        "resume",
     )
     assert supported_child_context_modes("claude-code") == ("fresh",)
     assert supported_child_context_modes("generic-cli") == ()
@@ -63,6 +55,29 @@ def test_host_child_context_adapter_exposes_only_supported_modes() -> None:
         project_child_context_adapter(
             host="claude-code",
             context_mode="forked_snapshot",
+        )
+        is None
+    )
+
+
+def test_child_context_adapter_returns_isolated_native_arguments() -> None:
+    first = project_child_context_adapter(
+        host="codex-cli",
+        context_mode="fresh",
+    )
+    assert first is not None
+    first["arguments"]["fork_context"] = True
+
+    second = project_child_context_adapter(
+        host="codex-cli",
+        context_mode="fresh",
+    )
+    assert second is not None
+    assert second["arguments"] == {"fork_context": False}
+    assert (
+        project_child_context_adapter(
+            host="codex-cli",
+            context_mode="resume",
         )
         is None
     )

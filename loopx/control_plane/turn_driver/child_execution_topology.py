@@ -247,12 +247,25 @@ def _child_task_packet(
             reason_code="child_task_packet_incomplete",
             detail="acceptance must be a non-empty string list",
         )
+    validation_declared = brief.get("validation_declared") is True
     validation = {
-        "declared": brief.get("validation_declared") is True,
+        "declared": validation_declared,
+        "authority_ref": (
+            f"todo:{todo_id}:completion_validation"
+            if validation_declared
+            else None
+        ),
+        "execution_owner": "registered_parent",
+        "command_disclosed": False,
         "label": str(brief.get("validation_label") or "").strip() or None,
-        "policy": _required_text(
-            brief.get("validation_policy"),
-            field="validation_policy",
+        "policy": (
+            "registered parent runs declared todo completion validation; "
+            "child reports relevant validation evidence"
+            if validation_declared
+            else _required_text(
+                brief.get("validation_policy"),
+                field="validation_policy",
+            )
         ),
     }
     execution_policy = brief.get("execution_policy")
@@ -298,7 +311,7 @@ def _child_task_packet(
             field="expected_output",
         ),
         "acceptance_mode": (
-            "declared_validation_then_parent_review"
+            "parent_validation_then_review"
             if validation["declared"]
             else "parent_review_only"
         ),

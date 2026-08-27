@@ -248,7 +248,7 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
             "host": "codex-cli",
             "selection_owner": "task_coordinator",
             "recommended_context": "fresh",
-            "available_contexts": ["fresh", "resume"],
+            "available_contexts": ["fresh"],
             "brief": brief,
             "result_channel": "public_safe_typed_evidence",
             "writeback_owner": "task_coordinator",
@@ -487,6 +487,42 @@ def test_turn_plan_exposes_forked_snapshot_only_when_explicitly_selected() -> No
     }
 
 
+def test_turn_plan_keeps_declared_validation_with_registered_parent() -> None:
+    envelope = _adaptive_envelope()
+    orchestration = envelope["task_orchestration_contract"]
+    assert isinstance(orchestration, dict)
+    lanes = orchestration["eligible_child_lanes"]
+    assert isinstance(lanes, list)
+    child_brief = lanes[0]["child_brief"]
+    assert isinstance(child_brief, dict)
+    child_brief.update(
+        validation_declared=True,
+        validation_label="child regression",
+    )
+
+    payload = build_loopx_turn_plan(
+        envelope,
+        host="codex-cli",
+        execution_mode="interactive-visible",
+    )
+
+    validation = payload["child_operations"][0]["task_packet"]["validation"]
+    assert validation == {
+        "declared": True,
+        "authority_ref": "todo:todo_child001:completion_validation",
+        "execution_owner": "registered_parent",
+        "command_disclosed": False,
+        "label": "child regression",
+        "policy": (
+            "registered parent runs declared todo completion validation; "
+            "child reports relevant validation evidence"
+        ),
+    }
+    assert payload["child_operations"][0]["task_packet"]["acceptance_mode"] == (
+        "parent_validation_then_review"
+    )
+
+
 def test_turn_plan_rejects_context_not_supported_by_selected_host() -> None:
     envelope = _adaptive_envelope()
     orchestration = envelope["task_orchestration_contract"]
@@ -502,6 +538,33 @@ def test_turn_plan_rejects_context_not_supported_by_selected_host() -> None:
     payload = build_loopx_turn_plan(
         envelope,
         host="claude-code",
+        execution_mode="interactive-visible",
+    )
+
+    assert payload["ok"] is True
+    assert "child_operations" not in payload
+    rejection = payload["multi_agent_execution_topology"][
+        "pre_spawn_rejections"
+    ][0]
+    assert rejection["reason_codes"] == ["child_task_packet_incomplete"]
+    assert rejection["parent_blocked"] is False
+
+
+def test_turn_plan_rejects_resume_without_child_session_binding() -> None:
+    envelope = _adaptive_envelope()
+    orchestration = envelope["task_orchestration_contract"]
+    assert isinstance(orchestration, dict)
+    defaults = orchestration["child_brief_defaults"]
+    assert isinstance(defaults, dict)
+    defaults["context_policy"] = {
+        "selection_owner": "task_coordinator",
+        "default": "resume",
+        "allowed": ["fresh", "resume"],
+    }
+
+    payload = build_loopx_turn_plan(
+        envelope,
+        host="codex-cli",
         execution_mode="interactive-visible",
     )
 

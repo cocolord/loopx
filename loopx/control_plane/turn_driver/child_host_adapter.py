@@ -15,11 +15,6 @@ _HOST_CHILD_CONTEXT_ADAPTERS: dict[str, dict[str, dict[str, Any]]] = {
             "arguments": {"fork_context": True},
             "requires_session": False,
         },
-        "resume": {
-            "native_operation": "resume_agent",
-            "arguments": {},
-            "requires_session": True,
-        },
     },
     "claude-code": {
         "fresh": {
@@ -46,4 +41,5 @@ def project_child_context_adapter(
     return {
         "host": host,
         **adapter,
+        "arguments": dict(adapter["arguments"]),
     }
