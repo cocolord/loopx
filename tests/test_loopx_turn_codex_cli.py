@@ -180,6 +180,10 @@ def test_codex_cli_result_schema_requires_only_bounded_contract_fields() -> None
     assert set(schema["required"]) == set(schema["properties"])
     assert "raw_trajectory" not in schema["properties"]
     assert "stdout" not in schema["properties"]
+    receipt_properties = schema["properties"]["child_execution_receipts"]["items"][
+        "properties"
+    ]
+    assert "task_packet_digest" in receipt_properties
     assert {
         field: schema["properties"][field]["maxLength"]
         for field in (

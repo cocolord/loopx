@@ -319,6 +319,8 @@ def _prompt(request: Mapping[str, Any]) -> str:
             "For routine continuation, retry, successor creation, or no-change replanning, set path_delta_mode=unchanged, leave agent_vision_json empty, and provide vision_unchanged_reason.",
             "For user_action_required or wait, leave material-only fields empty and explain the stop in summary.",
             "When multi_agent_execution_topology is present, return one compact child_execution_receipts item for each observed child. Never copy prompts, transcripts, tool output, credentials, private links, or local absolute paths into a receipt. If no child was observed, return an empty list.",
+            "Launch a child only from its complete child_execution_task_packet_v0. Keep the child inside its objective, acceptance, capability, write-scope, effect, workspace, and execution-budget boundaries, and copy the exact task_packet_digest into its receipt.",
+            "If a child deviates from that packet, stop or quarantine only that child and its evidence. Do not let the child write LoopX state or block the parent agent; the parent may retry fresh, replace the child, take over serially, or ignore an optional result.",
             'completed_phases must be exactly ["host_execute","typed_result"], and turn_key must match the request.',
             "Turn request:",
             request_json,

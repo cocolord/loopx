@@ -404,11 +404,11 @@ def _child_brief_defaults(
             "allowed": allowed_contexts,
         },
         "expected_output": "public_safe_evidence",
-        "child_decision": "continue",
         "execution_policy": {
             "timeout": "bounded_by_host_turn",
             "cancel": "task_coordinator_or_host_timeout",
         },
+        "child_guard_policy": "prevention_first_v0",
         "validation_policy": (
             "run todo-scoped validation when applicable and report commands/results"
         ),
@@ -449,6 +449,11 @@ def _eligible_child_lane(lane: _NormalizedAdmissionLane) -> dict[str, Any]:
         ),
         "target_key": str(item.get("target_key") or "").strip() or None,
     }
+    if item.get("validation_command") or item.get("validation_command_argv"):
+        child_brief["validation_declared"] = True
+        child_brief["validation_label"] = (
+            str(item.get("validation_label") or "").strip() or None
+        )
     return {
         "todo_id": child_brief["todo_id"],
         "task_domain": lane.task_domain,

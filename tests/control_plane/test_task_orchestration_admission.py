@@ -127,11 +127,11 @@ def test_admission_emits_complete_child_brief_and_typed_block_reasons() -> None:
             "allowed": ["fresh"],
         },
         "expected_output": "public_safe_evidence",
-        "child_decision": "continue",
         "execution_policy": {
             "timeout": "bounded_by_host_turn",
             "cancel": "task_coordinator_or_host_timeout",
         },
+        "child_guard_policy": "prevention_first_v0",
         "validation_policy": (
             "run todo-scoped validation when applicable and report commands/results"
         ),

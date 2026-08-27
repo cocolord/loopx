@@ -16,6 +16,8 @@ MULTI_AGENT_HOST_EXECUTION_RECEIPT_SCHEMA_VERSION = (
 MULTI_AGENT_CONTROL_PLANE_RECONCILIATION_SCHEMA_VERSION = (
     "multi_agent_control_plane_reconciliation_v0"
 )
+CHILD_EXECUTION_TASK_PACKET_SCHEMA_VERSION = "child_execution_task_packet_v0"
+CHILD_EXECUTION_GUARD_SCHEMA_VERSION = "child_execution_guard_v0"
 MAX_CHILD_EXECUTION_RECEIPTS = 32
 MAX_EFFECT_CLASSES = 8
 MAX_EVIDENCE_REFS = 12
@@ -34,6 +36,12 @@ KNOWN_EFFECT_CLASSES = frozenset(
         "monitor",
     }
 )
+CHILD_FALLBACK_ACTIONS = (
+    "retry_fresh",
+    "replace_child",
+    "serial_takeover",
+    "ignore_optional_result",
+)
 _OPAQUE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$")
 _RECEIPT_FIELDS = frozenset(
     {
@@ -46,6 +54,7 @@ _RECEIPT_FIELDS = frozenset(
         "runtime_id",
         "worker_ref",
         "source_state_ref",
+        "task_packet_digest",
         "workspace_ref",
         "status",
         "effect_classes",
@@ -125,12 +134,148 @@ def _digest(value: Mapping[str, Any]) -> str:
     ).hexdigest()[:16]
 
 
+def _sha256_ref(value: Mapping[str, Any]) -> str:
+    return "sha256:" + hashlib.sha256(
+        json.dumps(
+            dict(value),
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def multi_agent_bundle_id(*, turn_key: str) -> str:
     return "bundle_" + _digest({"turn_key": turn_key})
 
 
 def multi_agent_lane_id(*, bundle_id: str, todo_id: str) -> str:
     return "lane_" + _digest({"bundle_id": bundle_id, "todo_id": todo_id})
+
+
+def _required_text(value: Any, *, field: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ChildExecutionTopologyError(
+            reason_code="child_task_packet_incomplete",
+            detail=f"{field} is required before child launch",
+        )
+    return text
+
+
+def _child_guard_policy(brief: Mapping[str, Any]) -> dict[str, Any]:
+    if brief.get("child_guard_policy") != "prevention_first_v0":
+        raise ChildExecutionTopologyError(
+            reason_code="child_task_packet_incomplete",
+            detail="child_guard_policy is missing or not fail-local",
+        )
+    return {
+        "schema_version": CHILD_EXECUTION_GUARD_SCHEMA_VERSION,
+        "pre_spawn": "require_complete_task_packet",
+        "on_deviation": "stop_and_quarantine_child",
+        "evidence_disposition": "candidate_until_parent_accepts",
+        "parent_blocked": False,
+        "parent_continuation": "continue",
+        "fallback_actions": list(CHILD_FALLBACK_ACTIONS),
+    }
+
+
+def _child_task_packet(
+    *,
+    brief: Mapping[str, Any],
+    todo_id: str,
+    source_state_ref: str,
+    allowed_effect_classes: Sequence[str],
+    workspace_requirement: str,
+    workspace_ref: str | None,
+) -> dict[str, Any]:
+    required_capabilities = brief.get("required_capabilities")
+    required_write_scopes = brief.get("required_write_scopes")
+    acceptance = brief.get("acceptance")
+    if not isinstance(required_capabilities, list):
+        raise ChildExecutionTopologyError(
+            reason_code="child_task_packet_incomplete",
+            detail="required_capabilities must be explicit",
+        )
+    if not isinstance(required_write_scopes, list):
+        raise ChildExecutionTopologyError(
+            reason_code="child_task_packet_incomplete",
+            detail="required_write_scopes must be explicit",
+        )
+    if (
+        not isinstance(acceptance, list)
+        or not acceptance
+        or not all(isinstance(item, str) and item.strip() for item in acceptance)
+    ):
+        raise ChildExecutionTopologyError(
+            reason_code="child_task_packet_incomplete",
+            detail="acceptance must be a non-empty string list",
+        )
+    validation = {
+        "declared": brief.get("validation_declared") is True,
+        "label": str(brief.get("validation_label") or "").strip() or None,
+        "policy": _required_text(
+            brief.get("validation_policy"),
+            field="validation_policy",
+        ),
+    }
+    task_packet = {
+        "schema_version": CHILD_EXECUTION_TASK_PACKET_SCHEMA_VERSION,
+        "todo_id": todo_id,
+        "objective": _required_text(brief.get("objective"), field="objective"),
+        "action_kind": _required_text(
+            brief.get("action_kind"),
+            field="action_kind",
+        ),
+        "target_key": str(brief.get("target_key") or "").strip() or None,
+        "deliverable": (
+            "held_workspace_change_with_evidence"
+            if required_write_scopes
+            else "public_safe_evidence"
+        ),
+        "acceptance": [item.strip() for item in acceptance],
+        "context_refs": [
+            _required_text(brief.get("authority_artifact"), field="authority_artifact"),
+            _required_text(brief.get("latest_state_ref"), field="latest_state_ref"),
+            source_state_ref,
+        ],
+        "task_domain": _required_text(
+            brief.get("task_domain"),
+            field="task_domain",
+        ),
+        "task_repository": str(brief.get("task_repository") or "").strip() or None,
+        "allowed_capabilities": list(required_capabilities),
+        "allowed_write_scopes": list(required_write_scopes),
+        "allowed_effect_classes": list(allowed_effect_classes),
+        "forbidden_effect_classes": sorted(
+            KNOWN_EFFECT_CLASSES - set(allowed_effect_classes)
+        ),
+        "workspace_requirement": workspace_requirement,
+        "workspace_ref": workspace_ref,
+        "execution_budget": dict(
+            brief.get("execution_policy")
+            if isinstance(brief.get("execution_policy"), Mapping)
+            else {}
+        ),
+        "output_contract": _required_text(
+            brief.get("expected_output"),
+            field="expected_output",
+        ),
+        "acceptance_mode": (
+            "declared_validation_then_parent_review"
+            if validation["declared"]
+            else "parent_review_only"
+        ),
+        "validation": validation,
+        "guard": _child_guard_policy(brief),
+    }
+    if not task_packet["execution_budget"]:
+        raise ChildExecutionTopologyError(
+            reason_code="child_task_packet_incomplete",
+            detail="execution_policy must define the child budget",
+        )
+    validate_public_safe_value(task_packet, path="child_task_packet")
+    return task_packet
 
 
 def build_multi_agent_execution_topology(
@@ -210,6 +355,17 @@ def build_multi_agent_execution_topology(
             todo_id=todo_id,
         )
         workspace_ref = f"workspace:{lane_id}" if has_workspace_write else None
+        workspace_requirement = (
+            "independent_git_worktree" if has_workspace_write else "not_required"
+        )
+        task_packet = _child_task_packet(
+            brief=brief,
+            todo_id=todo_id,
+            source_state_ref=source_state_ref,
+            allowed_effect_classes=lane_effect_classes,
+            workspace_requirement=workspace_requirement,
+            workspace_ref=workspace_ref,
+        )
         lanes.append(
             {
                 "lane_id": lane_id,
@@ -218,12 +374,10 @@ def build_multi_agent_execution_topology(
                 "admission_ref": f"task_orchestration_contract_v2:{todo_id}",
                 "effect_boundary": effect_boundary,
                 "allowed_effect_classes": lane_effect_classes,
-                "workspace_requirement": (
-                    "independent_git_worktree"
-                    if has_workspace_write
-                    else "not_required"
-                ),
+                "workspace_requirement": workspace_requirement,
                 "workspace_ref": workspace_ref,
+                "task_packet": task_packet,
+                "task_packet_digest": _sha256_ref(task_packet),
             }
         )
     return {
@@ -266,6 +420,12 @@ def bind_child_operations_to_topology(
                 lanes_by_todo.get(str(operation.get("todo_id") or ""))
             ).get("execution_kind"),
             "source_state_ref": topology.get("source_state_ref"),
+            "task_packet_digest": _mapping(
+                lanes_by_todo.get(str(operation.get("todo_id") or ""))
+            ).get("task_packet_digest"),
+            "task_packet": _mapping(
+                lanes_by_todo.get(str(operation.get("todo_id") or ""))
+            ).get("task_packet"),
             "effect_boundary": _mapping(
                 lanes_by_todo.get(str(operation.get("todo_id") or ""))
             ).get("effect_boundary"),
@@ -313,6 +473,7 @@ def child_execution_receipts_json_schema() -> dict[str, Any]:
         "runtime_id": {"type": "string", "maxLength": 192},
         "worker_ref": {"type": "string", "maxLength": 192},
         "source_state_ref": {"type": "string", "maxLength": 192},
+        "task_packet_digest": {"type": "string", "maxLength": 192},
         "workspace_ref": nullable_ref,
         "status": {
             "type": "string",
@@ -403,6 +564,10 @@ def normalize_multi_agent_host_execution_receipts(
                 raw.get("source_state_ref"),
                 field=f"{field}.source_state_ref",
             ),
+            "task_packet_digest": _opaque_ref(
+                raw.get("task_packet_digest"),
+                field=f"{field}.task_packet_digest",
+            ),
             "workspace_ref": _opaque_ref(
                 raw.get("workspace_ref"),
                 field=f"{field}.workspace_ref",
@@ -480,6 +645,8 @@ def reconcile_multi_agent_execution(
                 reasons.append("execution_kind_mismatch")
             if receipt.get("source_state_ref") != topology.get("source_state_ref"):
                 reasons.append("source_state_stale")
+            if receipt.get("task_packet_digest") != lane.get("task_packet_digest"):
+                reasons.append("task_packet_mismatch")
             allowed_effects = set(lane.get("allowed_effect_classes") or [])
             if any(
                 effect not in allowed_effects
@@ -521,12 +688,46 @@ def reconcile_multi_agent_execution(
                 "status": status,
                 "reason_codes": reasons,
                 "receipt_present": receipt is not None,
+                "evidence_disposition": (
+                    "quarantined"
+                    if status in {"drifted", "rejected", "cancelled"}
+                    else "candidate"
+                    if status == "incomplete"
+                    else "candidate_for_parent_acceptance"
+                ),
+                "recommended_child_action": (
+                    "stop_child"
+                    if status in {"drifted", "rejected", "cancelled"}
+                    else "wait_for_child"
+                    if status == "incomplete"
+                    else "return_to_parent"
+                ),
+                "parent_blocked": False,
+                "parent_continuation": "continue",
+                "fallback_actions": list(
+                    _mapping(_mapping(lane.get("task_packet")).get("guard")).get(
+                        "fallback_actions"
+                    )
+                    or []
+                ),
                 **(
                     {
                         "worker_ref": receipt.get("worker_ref"),
                         "workspace_ref": receipt.get("workspace_ref"),
                         "effect_classes": list(receipt.get("effect_classes") or []),
-                        "evidence_refs": list(receipt.get("evidence_refs") or []),
+                        **(
+                            {
+                                "quarantined_evidence_refs": list(
+                                    receipt.get("evidence_refs") or []
+                                )
+                            }
+                            if status in {"drifted", "rejected", "cancelled"}
+                            else {
+                                "candidate_evidence_refs": list(
+                                    receipt.get("evidence_refs") or []
+                                )
+                            }
+                        ),
                     }
                     if receipt is not None
                     else {}
@@ -541,6 +742,14 @@ def reconcile_multi_agent_execution(
                 "unadmitted_child_spawn",
                 "orphaned_worker_result",
             ],
+            "evidence_disposition": "quarantined",
+            "recommended_child_action": "stop_child",
+            "parent_blocked": False,
+            "parent_continuation": "continue",
+            "fallback_actions": list(CHILD_FALLBACK_ACTIONS),
+            "quarantined_evidence_refs": list(
+                receipt.get("evidence_refs") or []
+            ),
         }
         for lane_id, lane_receipts in sorted(receipts_by_lane.items())
         for receipt in lane_receipts
@@ -550,6 +759,14 @@ def reconcile_multi_agent_execution(
             "lane_id": str(receipt.get("lane_id") or "") or None,
             "worker_ref": receipt.get("worker_ref"),
             "reason_codes": ["orphaned_worker_result"],
+            "evidence_disposition": "quarantined",
+            "recommended_child_action": "stop_child",
+            "parent_blocked": False,
+            "parent_continuation": "continue",
+            "fallback_actions": list(CHILD_FALLBACK_ACTIONS),
+            "quarantined_evidence_refs": list(
+                receipt.get("evidence_refs") or []
+            ),
         }
         for receipt in duplicate_receipts
     )
@@ -560,6 +777,27 @@ def reconcile_multi_agent_execution(
         "topology_present": bool(topology),
         "observation_only": True,
         "settlement_enforced": False,
+        "child_guard": {
+            "schema_version": CHILD_EXECUTION_GUARD_SCHEMA_VERSION,
+            "enforced_boundaries": [
+                "pre_spawn_task_packet",
+                "receipt_task_packet_binding",
+                "evidence_admission",
+            ],
+            "projected_dispositions": [
+                "stop_child",
+                "quarantine_evidence",
+                "continue_parent",
+                "fallback_actions",
+            ],
+            "unsupported_boundaries": [
+                "live_host_tool_interception",
+                "automatic_host_child_termination",
+            ],
+            "parent_acceptance_required": True,
+        },
+        "parent_blocked": False,
+        "parent_continuation": "continue",
         "status": (
             "drifted"
             if drifted_count or orphaned_count
