@@ -132,7 +132,7 @@ The temporary task coordinator chooses a worker context from the work shape:
 | Work type | Context | Required task brief |
 | --- | --- | --- |
 | Broad mapping, prior-art search, risk discovery | Fresh worker | Objective, authority source, allowed sources, boundary, expected output, non-goals |
-| Independent review or adversarial validation | Fresh worker | Claim under review, exact evidence, validation command, acceptance and merge rules |
+| Independent review or adversarial validation | Fresh worker | Claim under review, exact evidence, child evidence expectations, acceptance and merge rules |
 | Failed-smoke repair or review-comment follow-up | Resume or fork | Worktree, failing evidence, latest patch, next bounded repair |
 | Disjoint local implementation whose result remains held | Fresh worker in an independent worktree | Admitted Todo, allowed paths, write scope, validation, held-result boundary |
 | Branch push, PR mutation, publication, deployment, or later follow-up | Registered parent agent | Accepted child evidence, current Todo authority, workspace readback, and controlled writeback |
@@ -167,9 +167,14 @@ its digest contains Codex tool names or arguments:
 - `fresh` means no parent-conversation inheritance;
 - `forked_snapshot` means an explicitly admitted parent-conversation snapshot
   and is available only after the Harness observes `subagent_context_fork`;
-- `resume` means continuation of an existing child session.
+- `resume` means continuation of an existing child session and is launchable
+  only when the Harness also supplies that provider-owned child-session
+  binding.
 
-Fresh remains the default even when fork or resume is available.
+Fresh remains the default even when fork or resume is available. Todo
+completion validation remains registered-parent work: the child packet carries
+only a public-safe authority marker and never copies the validation command or
+argv into the child handoff.
 
 ## Shared Control Plane Handoff
 
@@ -214,14 +219,16 @@ legitimate host metadata only to map supported native context operations. The
 host name does not admit child work. The task coordinator chooses from that
 catalog:
 
-- Codex exposes `fresh`, optional `forked_snapshot`, and optional `resume`;
+- Codex exposes `fresh` and optional `forked_snapshot`; this slice does not
+  expose `resume` because it has no provider-owned child-session binding;
 - Claude Code exposes `fresh` through its native Task surface;
 - generic adapters expose no child capability unless the adapter declares one.
 
 The Harness adapter, outside the generic packet, maps those semantic modes to
 native operations. The current Codex adapter maps `fresh` to
 `spawn_agent(fork_context=false)`, `forked_snapshot` to
-`spawn_agent(fork_context=true)`, and `resume` to `resume_agent`. The current
+`spawn_agent(fork_context=true)`. A later Codex adapter may map `resume` to
+`resume_agent` only after it can pass the required child-session id. The current
 Claude adapter maps `fresh` to its native Task surface. These mappings do not
 grant write, settlement, or peer authority and cannot change the task-packet
 digest.

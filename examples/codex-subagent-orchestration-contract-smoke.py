@@ -13,6 +13,9 @@ from loopx.control_plane.turn_driver.child_execution_topology import (
     normalize_multi_agent_host_execution_receipts,
     reconcile_multi_agent_execution,
 )
+from loopx.control_plane.turn_driver.child_host_adapter import (
+    project_child_context_adapter,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -374,12 +377,35 @@ def main() -> int:
         "arguments": {"fork_context": False},
         "requires_session": False,
     }
+    assert (
+        project_child_context_adapter(
+            host="codex-cli",
+            context_mode="resume",
+        )
+        is None
+    )
     assert claude_plan["child_operations"][0]["host_adapter"] == {
         "host": "claude-code",
         "native_operation": "Task",
         "arguments": {},
         "requires_session": False,
     }
+
+    validation_operation = _child_operation()
+    validation_brief = validation_operation["brief"]
+    assert isinstance(validation_brief, dict)
+    validation_brief["validation_declared"] = True
+    validation_topology = build_multi_agent_execution_topology(
+        turn_envelope=_turn_envelope(),
+        child_operations=[validation_operation],
+        turn_key="sha256:" + "c" * 64,
+        source_state_ref="sha256:" + "d" * 64,
+    )
+    assert validation_topology is not None
+    validation = validation_topology["lanes"][0]["task_packet"]["validation"]
+    assert validation["authority_ref"] == "todo:todo_review:completion_validation"
+    assert validation["execution_owner"] == "registered_parent"
+    assert validation["command_disclosed"] is False
 
     reconciliation_cases = {
         case["case_id"]: case for case in drift_fixture["reconciliation_cases"]

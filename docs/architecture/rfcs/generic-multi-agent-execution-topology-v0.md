@@ -199,8 +199,11 @@ registered-peer orchestration, replace admission, or create new authority.
         "acceptance_mode": "parent_review_only",
         "validation": {
           "declared": false,
+          "authority_ref": null,
+          "execution_owner": "registered_parent",
+          "command_disclosed": false,
           "label": null,
-          "policy": "report validation commands and results"
+          "policy": "child reports evidence; parent runs declared todo gate"
         },
         "guard": {
           "schema_version": "child_execution_guard_v0",
@@ -251,8 +254,8 @@ defaults. The packet is launchable only when it contains:
 - explicit allowed capabilities, write scopes, effect classes, workspace
   requirement, and execution budget;
 - a provider-neutral selected context mode and inheritance contract;
-- an output contract plus either declared validation or
-  `acceptance_mode=parent_review_only`; and
+- an output contract plus either a public-safe marker for parent-owned Todo
+  completion validation or `acceptance_mode=parent_review_only`; and
 - `child_execution_guard_v0` with local failure handling and parent fallback.
 
 Missing or contradictory fields produce a child-local pre-spawn rejection with
@@ -271,13 +274,21 @@ validates the observation:
 - `forked_snapshot` is exposed only when the runtime reports
   `subagent_context_fork` and means
   `inheritance=parent_conversation_snapshot`;
-- `resume` is exposed only when the runtime reports `subagent_resume` and means
-  `inheritance=existing_child_session`.
+- `resume` means `inheritance=existing_child_session`, but a Harness adapter
+  may expose it only when it also has the provider-owned child session binding
+  required by the native resume operation.
 
 The Harness adapter owns the native mapping outside the task packet. The Codex
 adapter currently maps `fresh` to `spawn_agent(fork_context=false)` and
-`forked_snapshot` to `spawn_agent(fork_context=true)`; another host may use
-different primitives without changing the packet digest.
+`forked_snapshot` to `spawn_agent(fork_context=true)`. It does not currently
+advertise `resume`, because this slice has no child-session binding to pass to
+`resume_agent`. Another host may use different primitives without changing the
+packet digest.
+
+Todo completion validation remains a registered-parent responsibility. The
+task packet carries only a public-safe validation marker, an opaque authority
+reference derived from the Todo id, and `command_disclosed=false`; it never
+copies the private command or argv into the child handoff.
 
 The receipt records the actual `context_mode`. A mismatch between planned and
 observed context is `context_mode_mismatch` and quarantines that child's
@@ -395,7 +406,7 @@ a parallel orchestration stack:
 | Child admission | `control_plane/quota/task_orchestration_admission.py` | Supply compact shared Guard policy and Todo-derived task facts; keep domain names out. |
 | Task-packet guard | `control_plane/turn_driver/child_execution_topology.py` | Reject only the invalid child before launch unless objective, acceptance, context, scope, effects, budget, output, and fallback are complete; bind packet and context observations to the receipt. |
 | Host operation planning | `control_plane/turn_driver/driver.py` | Emit only Guard-qualified provider-neutral operations, default to clean child context, and carry stable bundle/lane/task-packet correlation. |
-| Harness adapter mapping | `control_plane/turn_driver/child_host_adapter.py` plus each concrete host runner | Translate `fresh`, `forked_snapshot`, or `resume` into host-native operations and arguments without changing the generic task packet. |
+| Harness adapter mapping | `control_plane/turn_driver/child_host_adapter.py` plus each concrete host runner | Translate supported semantic modes into host-native operations and arguments without changing the generic task packet; expose `resume` only with a provider-owned child-session binding. |
 | Parent work ownership | Existing Todo, workspace guard, and continuation contracts | Keep final acceptance and durable effects with the registered agent; do not recreate ownership in child adapters. |
 | Child execution | Host adapters | Execute the packet, return opaque worker/workspace facts and typed effects, and enforce live tool boundaries when supported. |
 | Reconciliation projection | `control_plane/turn_driver/child_execution_topology.py` | Join planned lanes and observed receipts, quarantine drifting evidence, and project child-local recovery without mutating Todo state. |
