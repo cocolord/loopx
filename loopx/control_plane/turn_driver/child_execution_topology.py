@@ -38,6 +38,11 @@ KNOWN_EFFECT_CLASSES = frozenset(
     }
 )
 CHILD_CONTEXT_MODES = frozenset({"fresh", "forked_snapshot", "resume"})
+CHILD_CONTEXT_INHERITANCE = {
+    "fresh": "none",
+    "forked_snapshot": "parent_conversation_snapshot",
+    "resume": "existing_child_session",
+}
 CHILD_FALLBACK_ACTIONS = (
     "retry_fresh",
     "replace_child",
@@ -194,46 +199,19 @@ def _child_context_contract(operation: Mapping[str, Any]) -> dict[str, Any]:
             reason_code="child_task_packet_incomplete",
             detail="available_contexts must be explicit",
         )
-    selected = next(
-        (
-            _mapping(candidate)
-            for candidate in available_contexts
-            if isinstance(candidate, Mapping) and candidate.get("context") == mode
-        ),
-        {},
-    )
-    if not selected:
+    if mode not in CHILD_CONTEXT_MODES:
+        raise ChildExecutionTopologyError(
+            reason_code="child_task_packet_incomplete",
+            detail="recommended_context is unsupported",
+        )
+    if mode not in available_contexts:
         raise ChildExecutionTopologyError(
             reason_code="child_task_packet_incomplete",
             detail="recommended_context is not available on the selected host",
         )
-    native_operation = _required_text(
-        selected.get("native_operation"),
-        field="available_contexts[].native_operation",
-    )
-    inheritance = _required_text(
-        selected.get("context_inheritance"),
-        field="available_contexts[].context_inheritance",
-    )
-    native_arguments = _mapping(selected.get("native_arguments"))
-    if native_operation == "spawn_agent":
-        expected_fork_context = mode == "forked_snapshot"
-        if native_arguments.get("fork_context") is not expected_fork_context:
-            raise ChildExecutionTopologyError(
-                reason_code="child_task_packet_incomplete",
-                detail=(
-                    "spawn_agent context must set fork_context explicitly "
-                    f"for {mode}"
-                ),
-            )
     return {
         "mode": mode,
-        "inheritance": inheritance,
-        "host": _required_text(operation.get("host"), field="host"),
-        "native_operation": native_operation,
-        "native_arguments": native_arguments,
-        "requires_session": selected.get("requires_session") is True,
-        "context_creation_owner": "host_runtime",
+        "inheritance": CHILD_CONTEXT_INHERITANCE[mode],
     }
 
 

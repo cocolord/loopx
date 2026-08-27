@@ -6,6 +6,10 @@ from enum import Enum
 from hashlib import sha256
 from typing import Any
 
+from .child_host_adapter import (
+    project_child_context_adapter,
+    supported_child_context_modes,
+)
 from .child_execution_topology import (
     bind_child_operations_to_topology,
     build_multi_agent_execution_topology,
@@ -23,36 +27,6 @@ LOOPX_CHILD_HOST_OPERATION_SCHEMA_VERSION = "loopx_child_host_operation_v0"
 TURN_ENVELOPE_SCHEMA_VERSION = "loopx_turn_envelope_v0"
 SUPPORTED_HOSTS = {"codex-cli", "claude-code", "generic-cli"}
 SUPPORTED_EXECUTION_MODES = {"interactive-visible", "isolated-headless"}
-HOST_CHILD_CONTEXT_OPERATIONS = {
-    "codex-cli": {
-        "fresh": {
-            "native_operation": "spawn_agent",
-            "requires_session": False,
-            "context_inheritance": "task_packet_without_parent_conversation",
-            "native_arguments": {"fork_context": False},
-        },
-        "forked_snapshot": {
-            "native_operation": "spawn_agent",
-            "requires_session": False,
-            "context_inheritance": "parent_conversation_snapshot",
-            "native_arguments": {"fork_context": True},
-        },
-        "resume": {
-            "native_operation": "resume_agent",
-            "requires_session": True,
-            "context_inheritance": "existing_child_session",
-            "native_arguments": {},
-        },
-    },
-    "claude-code": {
-        "fresh": {
-            "native_operation": "Task",
-            "requires_session": False,
-            "context_inheritance": "task_packet_without_parent_conversation",
-            "native_arguments": {},
-        },
-    },
-}
 REPLAN_ACTIONS = {
     "autonomous_replan",
     "autonomous_replan_required",
@@ -293,8 +267,8 @@ def _child_host_operations(
     brief_defaults = _mapping(orchestration.get("child_brief_defaults"))
     if brief_defaults.get("schema_version") != "subagent_control_plane_handoff_v0":
         return []
-    operations = HOST_CHILD_CONTEXT_OPERATIONS.get(host, {})
-    if not operations:
+    supported_contexts = supported_child_context_modes(host)
+    if not supported_contexts:
         return []
     child_operations: list[dict[str, Any]] = []
     for lane in lanes:
@@ -312,9 +286,7 @@ def _child_host_operations(
         if not isinstance(allowed_contexts, list):
             allowed_contexts = [recommended]
         available_contexts = [
-            {"context": context, **operations[context]}
-            for context in allowed_contexts
-            if context in operations
+            context for context in allowed_contexts if context in supported_contexts
         ]
         child_operations.append(
             {
@@ -332,6 +304,27 @@ def _child_host_operations(
             }
         )
     return child_operations
+
+
+def _bind_host_child_operations(
+    child_operations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    bound: list[dict[str, Any]] = []
+    for operation in child_operations:
+        context_mode = str(operation.get("recommended_context") or "")
+        adapter = project_child_context_adapter(
+            host=str(operation.get("host") or ""),
+            context_mode=context_mode,
+        )
+        if adapter is None:
+            continue
+        bound.append(
+            {
+                **operation,
+                "host_adapter": adapter,
+            }
+        )
+    return bound
 
 
 def build_loopx_turn_plan(
@@ -400,6 +393,7 @@ def build_loopx_turn_plan(
         raw_child_operations,
         execution_topology,
     )
+    child_operations = _bind_host_child_operations(child_operations)
     payload = {
         "ok": route is not LoopXTurnRoute.CONTRACT_ERROR,
         "schema_version": LOOPX_TURN_PLAN_SCHEMA_VERSION,
