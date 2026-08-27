@@ -13,6 +13,7 @@ from loopx.control_plane.turn_driver.codex_cli import (
     _diagnostic_failure_category,
     _event_failure_categories,
     _event_failure_category,
+    _prompt,
     _select_failure_category,
     codex_cli_result_schema,
     codex_cli_session_binding,
@@ -184,6 +185,11 @@ def test_codex_cli_result_schema_requires_only_bounded_contract_fields() -> None
         "properties"
     ]
     assert "task_packet_digest" in receipt_properties
+    assert receipt_properties["context_mode"]["enum"] == [
+        "forked_snapshot",
+        "fresh",
+        "resume",
+    ]
     assert {
         field: schema["properties"][field]["maxLength"]
         for field in (
@@ -303,6 +309,16 @@ def test_codex_cli_specific_quota_code_wins_over_http_429() -> None:
     }
 
     assert _event_failure_category(event) == "quota_exhausted"
+
+
+def test_codex_cli_prompt_requires_explicit_child_context_isolation() -> None:
+    request = _request()
+
+    prompt = _prompt(request)
+
+    assert "pass native_arguments.fork_context explicitly" in prompt
+    assert "fresh means false, does not inherit the parent conversation" in prompt
+    assert "forked_snapshot means true" in prompt
 
 
 def test_codex_cli_host_starts_then_resumes_opaque_session(

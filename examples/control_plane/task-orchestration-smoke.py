@@ -373,6 +373,13 @@ def main() -> int:
         item["context"]
         for item in codex_request["child_operations"][0]["available_contexts"]
     ] == ["fresh", "resume"]
+    assert codex_request["child_operations"][0]["available_contexts"][0] == {
+        "context": "fresh",
+        "native_operation": "spawn_agent",
+        "requires_session": False,
+        "context_inheritance": "task_packet_without_parent_conversation",
+        "native_arguments": {"fork_context": False},
+    }
 
     claude_decision = build_quota_should_run(
         adaptive_payload(),
@@ -393,6 +400,8 @@ def main() -> int:
             "context": "fresh",
             "native_operation": "Task",
             "requires_session": False,
+            "context_inheritance": "task_packet_without_parent_conversation",
+            "native_arguments": {},
         }
     ]
     print("task-orchestration-smoke ok")

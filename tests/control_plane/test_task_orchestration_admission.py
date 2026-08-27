@@ -172,6 +172,23 @@ def test_admission_emits_complete_child_brief_and_typed_block_reasons() -> None:
     }
 
 
+def test_admission_exposes_context_fork_only_as_explicit_host_capability() -> None:
+    contract = _contract(
+        [
+            _todo("todo_primary"),
+            _todo("todo_child"),
+        ],
+        available_capabilities=["subagent_spawn", "subagent_context_fork"],
+    )
+
+    assert contract is not None
+    assert contract["child_brief_defaults"]["context_policy"] == {
+        "selection_owner": "task_coordinator",
+        "default": "fresh",
+        "allowed": ["fresh", "forked_snapshot"],
+    }
+
+
 def test_admission_serializes_overlapping_write_scopes() -> None:
     contract = _contract(
         [

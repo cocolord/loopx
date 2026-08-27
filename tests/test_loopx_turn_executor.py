@@ -220,6 +220,7 @@ def _child_execution_receipt(
         "worker_ref": "worker:fixture-child",
         "source_state_ref": topology["source_state_ref"],
         "task_packet_digest": lane["task_packet_digest"],
+        "context_mode": lane["task_packet"]["context"]["mode"],
         "workspace_ref": None,
         "status": "completed",
         "effect_classes": (
@@ -411,6 +412,22 @@ def test_child_receipt_schema_excludes_registered_peer_authority() -> None:
     )
 
 
+def test_child_receipt_rejects_unknown_context_mode() -> None:
+    plan = _adaptive_observation_plan()
+    result = _host_result(plan)
+    result["child_execution_receipts"] = [
+        {
+            **_child_execution_receipt(plan),
+            "context_mode": "implicit_parent_history",
+        }
+    ]
+
+    validation = validate_loopx_turn_host_result(plan, result)
+
+    assert validation["ok"] is False
+    assert "context_mode is unsupported" in " ".join(validation["errors"])
+
+
 def test_host_result_reconciles_aligned_child_receipt() -> None:
     plan = _adaptive_observation_plan()
     result = _host_result(plan)
@@ -425,10 +442,12 @@ def test_host_result_reconciles_aligned_child_receipt() -> None:
     assert reconciliation["settlement_enforced"] is False
     assert reconciliation["child_guard"] == {
         "schema_version": "child_execution_guard_v0",
-        "enforced_boundaries": [
-            "pre_spawn_task_packet",
+        "enforced_boundaries": ["pre_spawn_task_packet"],
+        "validated_observations": [
             "receipt_task_packet_binding",
-            "evidence_admission",
+            "context_mode_binding",
+            "workspace_boundary",
+            "effect_boundary",
         ],
         "projected_dispositions": [
             "stop_child",
@@ -437,6 +456,7 @@ def test_host_result_reconciles_aligned_child_receipt() -> None:
             "fallback_actions",
         ],
         "unsupported_boundaries": [
+            "evidence_acceptance_enforcement",
             "live_host_tool_interception",
             "automatic_host_child_termination",
         ],
@@ -446,6 +466,7 @@ def test_host_result_reconciles_aligned_child_receipt() -> None:
     assert reconciliation["parent_continuation"] == "continue"
     assert reconciliation["counts"] == {
         "planned": 1,
+        "pre_spawn_rejected": 0,
         "observed": 1,
         "aligned": 1,
         "incomplete": 0,
@@ -461,6 +482,42 @@ def test_host_result_reconciles_aligned_child_receipt() -> None:
     assert lane["parent_blocked"] is False
     assert lane["candidate_evidence_refs"] == ["artifact:fixture-review"]
     assert "quarantined_evidence_refs" not in lane
+
+
+def test_pre_spawn_rejection_remains_visible_without_blocking_parent() -> None:
+    plan = _adaptive_observation_plan()
+    topology = plan["multi_agent_execution_topology"]
+    topology["pre_spawn_rejections"] = [
+        {
+            "schema_version": "child_execution_rejection_v0",
+            "todo_id": "todo_child002",
+            "stage": "pre_spawn",
+            "reason_codes": ["child_task_packet_incomplete"],
+            "launch_allowed": False,
+            "recommended_child_action": "do_not_launch",
+            "parent_blocked": False,
+            "parent_continuation": "continue",
+            "fallback_actions": [
+                "retry_fresh",
+                "replace_child",
+                "serial_takeover",
+                "ignore_optional_result",
+            ],
+        }
+    ]
+    result = _host_result(plan)
+    result["child_execution_receipts"] = [_child_execution_receipt(plan)]
+
+    validation = validate_loopx_turn_host_result(plan, result)
+
+    assert validation["ok"] is True
+    reconciliation = validation["result"]["multi_agent_reconciliation"]
+    assert reconciliation["status"] == "guarded"
+    assert reconciliation["counts"]["pre_spawn_rejected"] == 1
+    assert reconciliation["parent_blocked"] is False
+    assert reconciliation["pre_spawn_rejections"] == topology[
+        "pre_spawn_rejections"
+    ]
 
 
 def test_host_result_observes_missing_and_drifted_child_receipts() -> None:
@@ -517,6 +574,21 @@ def test_host_result_observes_missing_and_drifted_child_receipts() -> None:
         "reason_codes"
     ] == ["task_packet_mismatch"]
 
+    context_mismatch_result = _host_result(plan)
+    context_mismatch_result["child_execution_receipts"] = [
+        {
+            **_child_execution_receipt(plan),
+            "context_mode": "forked_snapshot",
+        }
+    ]
+    context_mismatch = validate_loopx_turn_host_result(
+        plan, context_mismatch_result
+    )
+    assert context_mismatch["ok"] is True
+    context_lane = context_mismatch["result"]["multi_agent_reconciliation"]["lanes"][0]
+    assert context_lane["reason_codes"] == ["context_mode_mismatch"]
+    assert context_lane["evidence_disposition"] == "quarantined"
+
     no_evidence_result = _host_result(plan)
     no_evidence_result["child_execution_receipts"] = [
         _child_execution_receipt(plan, evidence_refs=[])
@@ -564,6 +636,7 @@ def test_host_result_observes_unadmitted_child_and_rejects_local_path() -> None:
         "worker_ref": "worker:unadmitted",
         "source_state_ref": "sha256:fixture",
         "task_packet_digest": "sha256:" + "f" * 64,
+        "context_mode": "fresh",
         "workspace_ref": None,
         "status": "completed",
         "effect_classes": ["local_read"],
