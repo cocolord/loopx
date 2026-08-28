@@ -600,6 +600,67 @@ def test_host_result_observes_missing_and_drifted_child_receipts() -> None:
     ] == ["aggregate_settlement_without_lane_evidence"]
 
 
+@pytest.mark.parametrize(
+    ("receipt_status", "lane_status"),
+    [
+        ("failed", "rejected"),
+        ("rejected", "rejected"),
+        ("cancelled", "cancelled"),
+    ],
+)
+def test_host_result_guards_terminal_unsuccessful_child_receipts(
+    receipt_status: str,
+    lane_status: str,
+) -> None:
+    plan = _adaptive_observation_plan()
+    result = _host_result(plan)
+    result["child_execution_receipts"] = [
+        {
+            **_child_execution_receipt(plan),
+            "status": receipt_status,
+        }
+    ]
+
+    validation = validate_loopx_turn_host_result(plan, result)
+
+    assert validation["ok"] is True
+    reconciliation = validation["result"]["multi_agent_reconciliation"]
+    assert reconciliation["status"] == "guarded"
+    assert reconciliation["parent_blocked"] is False
+    lane = reconciliation["lanes"][0]
+    assert lane["status"] == lane_status
+    assert lane["evidence_disposition"] == "quarantined"
+    assert lane["recommended_child_action"] == "stop_child"
+
+
+def test_terminal_unsuccessful_child_takes_priority_over_incomplete_sibling() -> None:
+    plan = _adaptive_observation_plan()
+    topology = plan["multi_agent_execution_topology"]
+    lanes = topology["lanes"]
+    assert isinstance(lanes, list)
+    sibling = {
+        **lanes[0],
+        "lane_id": "lane_sibling",
+        "todo_id": "todo_sibling",
+    }
+    lanes.append(sibling)
+    result = _host_result(plan)
+    result["child_execution_receipts"] = [
+        {
+            **_child_execution_receipt(plan),
+            "status": "failed",
+        }
+    ]
+
+    validation = validate_loopx_turn_host_result(plan, result)
+
+    assert validation["ok"] is True
+    reconciliation = validation["result"]["multi_agent_reconciliation"]
+    assert reconciliation["status"] == "guarded"
+    assert reconciliation["counts"]["rejected"] == 1
+    assert reconciliation["counts"]["incomplete"] == 1
+
+
 def test_host_result_requires_planned_workspace_for_writing_child() -> None:
     plan = _adaptive_observation_plan(required_write_scopes=["src/**"])
     topology = plan["multi_agent_execution_topology"]

@@ -937,10 +937,12 @@ def reconcile_multi_agent_execution(
         "status": (
             "drifted"
             if status_counts["drifted"] or orphaned_count
-            else "incomplete"
-            if status_counts["incomplete"]
             else "guarded"
             if pre_spawn_rejections
+            or status_counts["rejected"]
+            or status_counts["cancelled"]
+            else "incomplete"
+            if status_counts["incomplete"]
             else "reconciled"
         ),
         "counts": {
