@@ -30,7 +30,7 @@ def _render_external_agent_result(payload: dict[str, object]) -> str:
 
 
 def register_benchmark_external_agent_commands(
-    benchmark_subparsers: argparse._SubParsersAction,
+    benchmark_subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     add_subcommand_format: Callable[[argparse.ArgumentParser], None],
 ) -> None:
     parser = benchmark_subparsers.add_parser(
