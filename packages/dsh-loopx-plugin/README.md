@@ -36,12 +36,18 @@ deferred atomicity limit are specified in the versioned
 
 ## Install
 
-Requirements are Node.js 22.19+, `pnpm`, Python 3.11+, and network access for
-the first DSH start when no compatible LoopX CLI is already installed. LoopX
-itself is deliberately not a prerequisite. The initializer honors an explicit
-`PYTHON_BIN`, otherwise it checks `python3`, `python3.14`, `python3.13`,
+Requirements are Node.js 22.19+, `pnpm`, Python 3.11+ with `pip`, and network
+access for the first DSH start when no compatible LoopX CLI is already
+installed. LoopX itself is deliberately not a prerequisite. The initializer
+honors an explicit `PYTHON_BIN`, otherwise it checks `python3`, `python3.14`, `python3.13`,
 `python3.12`, and `python3.11` and keeps the first interpreter that satisfies
-the requirement.
+the requirement. If it must install or upgrade LoopX, it writes an isolated
+copy under `$DSH_AGENTS_HOME/runtime/dsh-loopx-plugin` (default
+`~/.agents/runtime/dsh-loopx-plugin`) and never mutates the system Python
+environment. This works with externally managed Python distributions that
+enforce PEP 668; the plugin does not use `--break-system-packages`.
+The published plugin requires LoopX 0.5.3 or newer because that is the first
+release contract whose wheel carries the packaged workflow skills.
 Install the published package into the web profile:
 
 ```bash
@@ -96,6 +102,7 @@ pnpm build
 pnpm smoke:artifact
 pnpm smoke:profile
 pnpm smoke:runtime
+pnpm smoke:docker
 ```
 
 The runtime smoke creates an isolated temporary DSH profile. Its real web
@@ -113,6 +120,12 @@ do not replace the owner-reviewed packed-browser gate: that separate manual
 layer mounts the served Client at a real DSH URL and exercises Client-to-carrier
 Start/Pause. Focused Client tests cover Session-generation replacement and old
 request cancellation without duplicating that matrix in the packed smoke.
+The Docker smoke packs the current plugin and builds the current LoopX
+release-candidate wheel, then starts both in a clean Debian container with the
+supported DSH release. It proves PEP 668-compatible private installation, the
+managed launcher, startup readiness, and first-session `loopx` skill
+discovery. It requires Docker, `uv`, and network access for base images and
+never opens a browser or configures a model provider.
 
 ## GoalBar authority and privacy boundary
 
@@ -146,9 +159,12 @@ The repair command has no arguments. Extra input returns a usage error before an
 model work or CLI probe. A valid invocation queues a bounded start followup on
 the exact receiving Agent, then probes the current LoopX installation. When the
 CLI is missing or lacks the DSH-native skill contract, it runs exactly one
-`<compatible-python> -m pip install --upgrade loopx`, then uses that same
-interpreter to install and read back the skills. It never constructs a shell
-command, edits a registry, or retries the install mutation.
+fixed-argv `pip install --upgrade --target <plugin-runtime> 'loopx>=0.5.3'`, writes a
+small managed Python launcher beside that target, then uses that same
+interpreter and launcher to install and read back the skills. Driver and
+GoalBar resolve this same managed runtime, including after an explicit repair.
+It never constructs a shell command, mutates the system Python environment,
+edits a registry, or retries the install mutation.
 
 Unless the command is cancelled, it queues a second bounded followup for the
 typed success or failure result. These are ordinary Agent turns, so a valid,
@@ -239,12 +255,20 @@ dsh plugin --profile web remove dsh-loopx-plugin
 ```
 
 This removes the GoalBar Host/Client row, stops the Driver, and removes
-`/loopx-init`; it does not remove LoopX, its registry, bindings, or skills. To
-remove only LoopX-managed skills, run:
+`/loopx-init`; it does not remove LoopX, its registry, bindings, skills, or the
+plugin-managed runtime. To remove only LoopX-managed skills, run:
 
 ```bash
 loopx workflow-skills --uninstall \
   --skills-dir "${DSH_AGENTS_HOME:-$HOME/.agents}/skills"
+```
+
+After DSH has stopped and the plugin has been removed, the isolated CLI copy
+can be removed independently without touching LoopX state:
+
+```bash
+DSH_LOOPX_RUNTIME="${DSH_AGENTS_HOME:-$HOME/.agents}/runtime/dsh-loopx-plugin"
+test -f "$DSH_LOOPX_RUNTIME/loopx_cli.py" && rm -rf -- "$DSH_LOOPX_RUNTIME"
 ```
 
 To roll back the plugin while preserving LoopX state, remove it and install a

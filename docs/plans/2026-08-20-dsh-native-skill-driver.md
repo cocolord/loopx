@@ -71,11 +71,16 @@ sequence:
    CLI and DSH workflow skills are being checked or installed.
 2. Probe a usable `loopx` executable and the DSH-native workflow-skill
    installation capability.
-3. If the CLI is missing or incompatible, run the documented installer once:
-   `<compatible-python> -m pip install --upgrade loopx`. An explicit
-   `PYTHON_BIN` wins; otherwise the plugin probes `python3` and named Python
-   3.11-3.14 executables, then keeps the selected interpreter for readback and
-   generated skill commands.
+3. If the CLI is missing or incompatible, run one fixed-argv private install:
+   `<compatible-python> -m pip install --upgrade --target
+   <agents-home>/runtime/dsh-loopx-plugin/site-packages 'loopx>=0.5.3'`, then
+   write a managed launcher beside that target. An explicit `PYTHON_BIN` wins;
+   otherwise the plugin probes `python3` and named Python 3.11-3.14
+   executables, then keeps the selected interpreter and launcher for readback,
+   Driver/GoalBar calls, and generated skill commands. This does not mutate an
+   externally managed system Python or use `--break-system-packages`.
+   The package requirement is `loopx>=0.5.3`, the first release contract whose
+   Python wheel includes the workflow-skill resources.
 4. Resolve the resulting executable again; fail if it is still unavailable.
 5. Run `loopx workflow-skills --install --skills-dir ~/.agents/skills
    --host-surface deepseek-harness-native`.
