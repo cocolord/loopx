@@ -76,6 +76,12 @@ REQUIRED_PHRASES = (
 
 TOPOLOGY_REQUIRED_PHRASES = (
     "Status: Draft",
+    "## TL;DR",
+    "ephemeral subagents that parallelize",
+    "LoopX versus Harness",
+    "Child packets never copy parent-owned",
+    "valid siblings and the parent remain runnable",
+    "evidence-acceptance enforcement still require",
     "`serial`",
     "`ephemeral_children`",
     "`task_orchestration_contract_v2`",

@@ -2,24 +2,42 @@
 
 Status: Draft
 
+## TL;DR
+
+- **Scope:** this contract governs ephemeral subagents that parallelize
+  multiple admitted Todos inside one registered agent lane.
+  This contract does not coordinate multiple registered LoopX agents. A host
+  child never becomes a LoopX peer.
+- **Delegation:** the registered parent chooses serial or parallel execution
+  inside the human- or Goal-approved envelope. LoopX emits a child operation
+  only after objective, acceptance, authority and state refs, capabilities,
+  write/effect/workspace boundaries, budget, context, output, validation
+  ownership, and fallback form a complete typed task packet.
+- **LoopX versus Harness:** LoopX signs provider-neutral task, context, and
+  authority semantics and reconciles compact receipts. The Harness owns native
+  `spawn_agent`, Task, fork, and resume operations. `fresh` is the default;
+  `forked_snapshot` is capability-gated; `resume` is unavailable until the
+  provider supplies the required child-session binding.
+- **Authority:** the registered parent keeps LoopX identity, Todo completion
+  validation, evidence acceptance, durable remote effects, writeback, quota,
+  and settlement responsibility. Child packets never copy parent-owned
+  validation commands or argv.
+- **Drift handling:** prevention starts before launch. An incomplete,
+  unsupported, or over-capacity child is not started. A receipt that disagrees
+  with its packet, context, workspace, or effect boundary quarantines only that
+  child's evidence; valid siblings and the parent remain runnable.
+- **Current enforcement:** v0 enforces pre-spawn packet qualification and
+  validates receipt bindings. Stop/quarantine/fallback are projected for the
+  parent; live tool interception, automatic child termination, and automatic
+  evidence-acceptance enforcement still require a consuming Host or settlement
+  adapter. The contract stays domain-neutral rather than creating an Auto
+  Research, Deep Research, issue-fix, or benchmark-specific runtime.
+
 ## Decision
 
-LoopX should strengthen one domain-neutral subagent control path for parallel
-work inside one registered agent lane. This contract does not coordinate
-multiple registered LoopX agents.
-
-The control plane decides whether one agent lane stays serial or uses
-ephemeral host child workers to advance multiple admitted Todos in parallel.
-Before launch, LoopX compiles each admitted child lane into a complete typed
-task packet. The host executes only that packet and returns compact receipts.
-LoopX then reconciles the observed worker, workspace, effects, packet digest,
-and evidence. A drifting child is stopped or quarantined locally; it never
-blocks the registered parent agent from retrying, replacing the child, taking
-the Todo back serially, or ignoring an optional result.
-
-`spawn_agent`, a native Task tool, or any equivalent host primitive is execution
-capacity. Its presence does not grant LoopX admission, authority, or proof that
-the resulting work remains aligned with the control plane.
+Adopt one domain-neutral, prevention-first child execution contract for
+parallel work inside a registered agent lane, while keeping registered-peer
+orchestration and Host-native lifecycle mechanics in their existing owners.
 
 ## Problem
 
