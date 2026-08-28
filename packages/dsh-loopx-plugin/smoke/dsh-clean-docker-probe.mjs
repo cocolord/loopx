@@ -2,12 +2,16 @@
 
 import { randomUUID } from 'node:crypto'
 
-const [baseUrl] = process.argv.slice(2)
-if (!baseUrl) throw new Error('missing DSH base URL')
+const [baseUrl, workspace] = process.argv.slice(2)
+if (!baseUrl || !workspace) throw new Error('missing DSH base URL or workspace')
+const endpoint = new URL(baseUrl)
+if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1') {
+  throw new Error('DSH smoke endpoint must use container-local loopback')
+}
 
 async function rpc(method, payload) {
   const rpcId = randomUUID()
-  const response = await fetch(`${baseUrl}/api/${method}`, {
+  const response = await fetch(new URL(`/api/${method}`, endpoint), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ type: 'client-request', rpcId, method, payload }),
@@ -24,7 +28,7 @@ async function rpc(method, payload) {
 }
 
 const sessionId = 'clean-docker-loopx-bootstrap'
-await rpc('session.create', { sessionId, cwd: '/tmp/workspace' })
+await rpc('session.create', { sessionId, cwd: workspace })
 const catalog = await rpc('skill.list', { sessionId })
 const names = catalog.skills.map(skill => skill.name).sort()
 if (!names.includes('loopx')) {

@@ -5,34 +5,37 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PACKAGE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 REPO_ROOT="$(cd "$PACKAGE_ROOT/../.." && pwd -P)"
 DSH_SMOKE_PID=''
+LOG_PREVIEW_RANGE='1,240p'
 
 container_smoke() {
   export DEBIAN_FRONTEND=noninteractive
-  export DSH_HOME=/tmp/dsh-home
-  export DSH_AGENTS_HOME=/tmp/agents
+  local smoke_root
+  smoke_root="$(mktemp -d "${TMPDIR:-/tmp}/dsh-loopx-container.XXXXXX")"
+  chmod 700 "$smoke_root"
+  export DSH_HOME="$smoke_root/dsh-home"
+  export DSH_AGENTS_HOME="$smoke_root/agents"
   export PYTHON_BIN=python3
   export PIP_FIND_LINKS=/artifact
   export PIP_NO_INDEX=1
+  local dsh_log="$smoke_root/dsh.log"
+  local pep668_log="$smoke_root/pep668.log"
 
-  local externally_managed
-  externally_managed="$(python3 -c 'import sysconfig; print(sysconfig.get_path("stdlib") + "/EXTERNALLY-MANAGED")')"
-  printf '[externally-managed]\nError=clean smoke system Python is externally managed\n' \
-    >"$externally_managed"
-  if python3 -m pip install --dry-run --no-index loopx >/tmp/pep668.log 2>&1; then
+  if python3 -m pip install --dry-run --no-index loopx >"$pep668_log" 2>&1; then
     echo 'clean Docker smoke: PEP 668 guard was not active' >&2
     return 1
   fi
-  grep -qi 'externally.managed' /tmp/pep668.log || {
-    sed -n '1,80p' /tmp/pep668.log
+  grep -qi 'externally.managed' "$pep668_log" || {
+    sed -n '1,80p' "$pep668_log"
     echo 'clean Docker smoke: pip did not report the PEP 668 guard' >&2
     return 1
   }
 
-  mkdir -p /tmp/workspace
+  local workspace="$smoke_root/workspace"
+  mkdir -p "$workspace"
   timeout 180 dsh plugin --profile web add \
     /artifact/dsh-loopx-plugin.tgz --ignore-scripts
 
-  dsh --profile web --port 0 --no-open >/tmp/dsh.log 2>&1 &
+  dsh --profile web --port 0 --no-open >"$dsh_log" 2>&1 &
   DSH_SMOKE_PID=$!
   cleanup_dsh() {
     [[ "$DSH_SMOKE_PID" =~ ^[0-9]+$ ]] || return 0
@@ -43,17 +46,17 @@ container_smoke() {
 
   local base_url=''
   for _attempt in $(seq 1 180); do
-    base_url="$(grep -Eo 'http://127\.0\.0\.1:[0-9]+' /tmp/dsh.log | tail -n 1 || true)"
+    base_url="$(awk '/dsh web: / { value = $NF } END { print value }' "$dsh_log")"
     [[ -n "$base_url" ]] && break
     if ! kill -0 "$DSH_SMOKE_PID" 2>/dev/null; then
-      sed -n '1,240p' /tmp/dsh.log
+      sed -n "$LOG_PREVIEW_RANGE" "$dsh_log"
       return 1
     fi
     sleep 1
   done
 
   if [[ -z "$base_url" ]]; then
-    sed -n '1,240p' /tmp/dsh.log
+    sed -n "$LOG_PREVIEW_RANGE" "$dsh_log"
     echo 'clean Docker smoke: DSH did not publish a URL' >&2
     return 1
   fi
@@ -64,8 +67,8 @@ container_smoke() {
     "$runtime_dir/site-packages/loopx" \
     "$DSH_AGENTS_HOME/skills/loopx/SKILL.md"; do
     if [[ ! -e "$expected" ]]; then
-      sed -n '1,240p' /tmp/dsh.log
-      find "$DSH_AGENTS_HOME" /root/.agents \
+      sed -n "$LOG_PREVIEW_RANGE" "$dsh_log"
+      find "$DSH_AGENTS_HOME" "$HOME/.agents" \
         -maxdepth 4 -type f -print 2>/dev/null | sort || true
       if [[ -f "$runtime_dir/loopx_cli.py" ]]; then
         python3 "$runtime_dir/loopx_cli.py" --version || true
@@ -78,7 +81,7 @@ container_smoke() {
     fi
   done
   python3 "$runtime_dir/loopx_cli.py" --version | grep -E '^loopx '
-  node /smoke/dsh-clean-docker-probe.mjs "$base_url"
+  node /smoke/dsh-clean-docker-probe.mjs "$base_url" "$workspace"
   printf '\nclean Docker smoke passed\n'
 }
 
@@ -115,7 +118,7 @@ trap cleanup_artifact EXIT
 pnpm --dir "$PACKAGE_ROOT" pack --out "$artifact_dir/dsh-loopx-plugin.tgz"
 if ! uv build --wheel --out-dir "$artifact_dir" "$REPO_ROOT" \
   >"$artifact_dir/loopx-wheel-build.log" 2>&1; then
-  sed -n '1,240p' "$artifact_dir/loopx-wheel-build.log"
+  sed -n "$LOG_PREVIEW_RANGE" "$artifact_dir/loopx-wheel-build.log"
   echo 'clean Docker smoke: LoopX release-candidate wheel build failed' >&2
   exit 1
 fi
@@ -124,6 +127,8 @@ wheel_count="$(find "$artifact_dir" -maxdepth 1 -name 'loopx-*.whl' -print | wc 
   echo "clean Docker smoke: expected one LoopX wheel, found $wheel_count" >&2
   exit 1
 }
+chmod 755 "$artifact_dir"
+chmod 644 "$artifact_dir/dsh-loopx-plugin.tgz" "$artifact_dir"/loopx-*.whl
 docker build \
   --file "$SCRIPT_DIR/Dockerfile.clean" \
   --iidfile "$artifact_dir/image-id" \

@@ -862,9 +862,8 @@ async function exerciseRealDshWeb(home, env, cliLog) {
     const index = await fetch(baseUrl, { signal: AbortSignal.timeout(5_000) })
     assert.equal(index.status, 200)
     const html = await index.text()
-    const bootText = html.match(
-      /(?:window\.__DSH_BOOT__|globalThis\["__DSH_BOOT__"\])\s*=\s*(\{.*?\})<\/script>/su,
-    )?.[1]
+    const bootText = /(?:window\.__DSH_BOOT__|globalThis\["__DSH_BOOT__"\])\s*=\s*(\{.*?\})<\/script>/su
+      .exec(html)?.[1]
     assert(bootText, 'real DSH index omitted the boot manifest')
     const boot = JSON.parse(bootText)
     const row = boot.entries.find(entry => entry.id === packageId)
@@ -950,12 +949,12 @@ async function main() {
     }
     assert((await stat(tarball)).isFile(), 'packed artifact is unavailable')
     assertPackedArtifact(tarball)
-    await writeFile(fakeLoopX, `#!/usr/bin/env sh
+    await writeFile(fakeLoopX, String.raw`#!/usr/bin/env sh
 set -eu
-printf '%s\\n' "$*" >> "${cliLog}"
+printf '%s\n' "$*" >> "${cliLog}"
 case " $* " in
   *" --version "*)
-    printf '%s\\n' 'loopx smoke'
+    printf '%s\n' 'loopx smoke'
     exit 0
     ;;
 esac
@@ -971,18 +970,18 @@ case " $* " in
       *" --install "*)
         for skill in loopx loopx-benchmark loopx-doc-registry loopx-pr-program loopx-pr-review loopx-project loopx-self-repair; do
           mkdir -p "$skills_dir/$skill"
-          printf '%s\\n' '---' "name: \\"$skill\\"" "description: \\"LoopX runtime smoke skill.\\"" '---' '' '# LoopX smoke' > "$skills_dir/$skill/SKILL.md"
+          printf '%s\n' '---' "name: \"$skill\"" "description: \"LoopX runtime smoke skill.\"" '---' '' '# LoopX smoke' > "$skills_dir/$skill/SKILL.md"
         done
-        printf '%s\\n' '{"ok":true,"schema_version":"loopx_workflow_skill_install_v0","operation":"install","host_surface":"deepseek-harness-native","installed":{"loopx-benchmark":"created","loopx-doc-registry":"created","loopx-pr-program":"created","loopx-pr-review":"created","loopx-project":"created","loopx-self-repair":"created"},"entry":{"status":"created"}}'
+        printf '%s\n' '{"ok":true,"schema_version":"loopx_workflow_skill_install_v0","operation":"install","host_surface":"deepseek-harness-native","installed":{"loopx-benchmark":"created","loopx-doc-registry":"created","loopx-pr-program":"created","loopx-pr-review":"created","loopx-project":"created","loopx-self-repair":"created"},"entry":{"status":"created"}}'
         ;;
       *)
         if [ -f "$skills_dir/loopx/SKILL.md" ]; then required=false; else required=true; fi
-        printf '%s\\n' "{\\"ok\\":true,\\"schema_version\\":\\"loopx_workflow_skill_install_v0\\",\\"operation\\":\\"inspect\\",\\"host_surface\\":\\"deepseek-harness-native\\",\\"install_required\\":$required}"
+        printf '%s\n' "{\"ok\":true,\"schema_version\":\"loopx_workflow_skill_install_v0\",\"operation\":\"inspect\",\"host_surface\":\"deepseek-harness-native\",\"install_required\":$required}"
         ;;
     esac
     ;;
   *)
-    printf '%s\\n' '{"ok":false,"error":"unexpected smoke command"}'
+    printf '%s\n' '{"ok":false,"error":"unexpected smoke command"}'
     exit 1
     ;;
 esac
