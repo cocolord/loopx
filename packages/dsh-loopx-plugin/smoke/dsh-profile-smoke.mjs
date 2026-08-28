@@ -163,8 +163,65 @@ async function exerciseInstalled(installed) {
   assert.deepEqual(hostModule.inject, ['agents', 'connection'])
   assert.equal(typeof hostModule.createGoalBarService, 'function')
   const commands = new Map()
-  initModule.apply({ commands: { register: definition => commands.set(definition.name, definition) } })
+  const services = new Map()
+  const initCalls = []
+  const initWarnings = []
+  await initModule.apply({
+    commands: { register: definition => commands.set(definition.name, definition) },
+    logger: { warn: message => initWarnings.push(message) },
+    reflect: {
+      provide(name, value) {
+        services.set(name, value)
+        return () => services.delete(name)
+      },
+    },
+  }, {
+    skillsDir: join(installed, '.fixture-skills'),
+    runner: async (_file, args, options) => {
+      initCalls.push([...args])
+      if (options.signal?.aborted) {
+        throw new hostModule.LoopXCliError('aborted', 'cancelled', false)
+      }
+      if (args.at(-1) === '--version') {
+        return { exitCode: 0, stdout: 'loopx smoke\n', stderr: '' }
+      }
+      if (args.includes('--install')) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            schema_version: 'loopx_workflow_skill_install_v0',
+            operation: 'install',
+            host_surface: 'deepseek-harness-native',
+            installed: Object.fromEntries([
+              'loopx-project',
+              'loopx-pr-program',
+              'loopx-pr-review',
+              'loopx-doc-registry',
+              'loopx-self-repair',
+            ].map(name => [name, 'unchanged'])),
+            entry: { status: 'unchanged' },
+          }),
+          stderr: '',
+        }
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          schema_version: 'loopx_workflow_skill_install_v0',
+          operation: 'inspect',
+          host_surface: 'deepseek-harness-native',
+          install_required: false,
+        }),
+        stderr: '',
+      }
+    },
+  })
   assert.deepEqual([...commands.keys()], ['loopx-init'])
+  assert.deepEqual(services.get('loopxBootstrap'), { state: 'ready' })
+  assert.equal(initWarnings.length, 0)
+  assert.equal(initCalls.filter(args => args.includes('--install')).length, 1)
   const command = commands.get('loopx-init')
   assert.equal(command.recordInput, false)
   const followups = []

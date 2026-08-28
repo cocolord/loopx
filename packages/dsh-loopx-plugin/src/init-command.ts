@@ -20,6 +20,14 @@ const HOST_SURFACE = 'deepseek-harness-native'
 const WORKFLOW_SCHEMA = 'loopx_workflow_skill_install_v0'
 const INIT_SOURCE_ID = 'dsh-loopx-plugin/init-command'
 const MAX_FOLLOWUP_TEXT_CHARS = 800
+const PYTHON_VERSION_PROBE = 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'
+const PYTHON_CANDIDATES = Object.freeze([
+  'python3',
+  'python3.14',
+  'python3.13',
+  'python3.12',
+  'python3.11',
+])
 const PACKAGED_SKILL_IDS = Object.freeze([
   'loopx-project',
   'loopx-pr-program',
@@ -59,6 +67,21 @@ export interface LoopXInitSummary {
   readonly skillsInstalled: true
   readonly skillsChanged: boolean
   readonly hostSurface: typeof HOST_SURFACE
+}
+
+export type LoopXBootstrapStatus = Readonly<
+  | { readonly state: 'ready' }
+  | {
+      readonly state: 'failed'
+      readonly stage: LoopXInitStage | 'unknown'
+      readonly causeKind: LoopXInitCauseKind | 'unknown'
+    }
+>
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    readonly loopxBootstrap: LoopXBootstrapStatus
+  }
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -139,12 +162,56 @@ async function compatible(
   }
 }
 
-async function installCli(options: LoopXInitOptions): Promise<void> {
-  const runner = options.runner ?? runFile
-  const python = options.pythonBin
+function configuredPython(options: LoopXInitOptions): string | undefined {
+  return options.pythonBin
     ?? options.env?.PYTHON_BIN
     ?? process.env.PYTHON_BIN
-    ?? 'python3'
+}
+
+function withPython(
+  options: LoopXInitOptions,
+  python: string,
+): LoopXInitOptions {
+  return {
+    ...options,
+    env: { ...(options.env ?? process.env), PYTHON_BIN: python },
+    pythonBin: python,
+  }
+}
+
+async function resolveInstallPython(options: LoopXInitOptions): Promise<string> {
+  const runner = options.runner ?? runFile
+  const explicit = configuredPython(options)
+  const candidates = explicit === undefined ? PYTHON_CANDIDATES : [explicit]
+  for (const python of candidates) {
+    try {
+      const result = await runner(
+        python,
+        ['-c', PYTHON_VERSION_PROBE],
+        {
+          env: options.env,
+          signal: options.signal,
+          timeoutMs: 5_000,
+          maxOutputBytes: 16 * 1024,
+        },
+      )
+      if (result.exitCode === 0) return python
+    } catch (error: unknown) {
+      if (error instanceof LoopXCliError && error.kind === 'aborted') throw error
+    }
+  }
+  throw new LoopXInitError(
+    'install_cli',
+    explicit === undefined
+      ? 'Python 3.11 or newer could not be found'
+      : 'The configured Python interpreter is unavailable or older than 3.11',
+    'missing',
+  )
+}
+
+async function installCli(options: LoopXInitOptions): Promise<string> {
+  const runner = options.runner ?? runFile
+  const python = await resolveInstallPython(options)
   let result
   try {
     result = await runner(
@@ -165,6 +232,7 @@ async function installCli(options: LoopXInitOptions): Promise<void> {
   if (result.exitCode !== 0) {
     throw new LoopXInitError('install_cli', 'LoopX CLI installation failed', 'exit')
   }
+  return python
 }
 
 /** Install/upgrade LoopX once when needed, then install and verify DSH skills. */
@@ -175,19 +243,24 @@ export async function initializeLoopX(options: LoopXInitOptions = {}): Promise<L
     ? configuredAgentsHome
     : join(homedir(), '.agents')
   const skillsDir = resolve(options.skillsDir ?? join(agentsHome, 'skills'))
+  const initialPython = configuredPython(options)
+  let effectiveOptions = initialPython === undefined
+    ? options
+    : withPython(options, initialPython)
   let command: LoopXCommand | undefined
   try {
-    command = await resolveLoopXCommand(options)
+    command = await resolveLoopXCommand(effectiveOptions)
   } catch (error: unknown) {
     if (error instanceof LoopXCliError && error.kind === 'aborted') throw error
   }
 
   let cliInstalled = false
-  if (command === undefined || !(await compatible(command, skillsDir, options))) {
-    await installCli(options)
+  if (command === undefined || !(await compatible(command, skillsDir, effectiveOptions))) {
+    const installedPython = await installCli(effectiveOptions)
+    effectiveOptions = withPython(options, installedPython)
     cliInstalled = true
     try {
-      command = await resolveLoopXCommand(options)
+      command = await resolveLoopXCommand(effectiveOptions)
     } catch (error: unknown) {
       if (error instanceof LoopXCliError && error.kind === 'aborted') throw error
       const kind = error instanceof LoopXCliError ? error.kind : 'transport'
@@ -197,7 +270,7 @@ export async function initializeLoopX(options: LoopXInitOptions = {}): Promise<L
         kind,
       )
     }
-    if (!(await compatible(command, skillsDir, options))) {
+    if (!(await compatible(command, skillsDir, effectiveOptions))) {
       throw new LoopXInitError(
         'probe',
         'The installed LoopX CLI does not support the DSH-native skill contract',
@@ -212,9 +285,9 @@ export async function initializeLoopX(options: LoopXInitOptions = {}): Promise<L
       command,
       workflowArgs(command, skillsDir, 'install'),
       {
-        runner: options.runner,
-        signal: options.signal,
-        env: options.env,
+        runner: effectiveOptions.runner,
+        signal: effectiveOptions.signal,
+        env: effectiveOptions.env,
         attempts: 1,
         timeoutMs: 60_000,
         validate: workflowPayload,
@@ -248,9 +321,9 @@ export async function initializeLoopX(options: LoopXInitOptions = {}): Promise<L
       command,
       workflowArgs(command, skillsDir, 'inspect'),
       {
-        runner: options.runner,
-        signal: options.signal,
-        env: options.env,
+        runner: effectiveOptions.runner,
+        signal: effectiveOptions.signal,
+        env: effectiveOptions.env,
         attempts: 1,
         validate: workflowPayload,
       },
@@ -281,7 +354,7 @@ export async function initializeLoopX(options: LoopXInitOptions = {}): Promise<L
 
 function recoveryForStage(stage: LoopXInitStage): string {
   return stage === 'install_cli'
-    ? 'Run `python3 -m pip install --upgrade loopx` manually for diagnostics, then retry `/loopx-init`.'
+    ? 'Verify Python 3.11+ or set `PYTHON_BIN`, install LoopX manually for diagnostics, then retry `/loopx-init`.'
     : stage === 'probe'
       ? 'Verify `loopx --version`, then retry `/loopx-init`.'
       : 'Run `loopx workflow-skills --help` for diagnostics, then retry `/loopx-init`.'
@@ -316,9 +389,7 @@ function successResult(result: LoopXInitSummary): CommandResult {
       result.skillsChanged
         ? 'DSH LoopX skills installed or updated and verified.'
         : 'DSH LoopX skills already current and verified.',
-      result.skillsChanged
-        ? 'Restart DSH once to reload the changed skills, then use the `loopx` skill with your task.'
-        : 'No DSH restart is required; use the `loopx` skill with your task.',
+      'No DSH restart is required; use the `loopx` skill with your task.',
     ].join(' '),
   }
 }
@@ -358,7 +429,7 @@ function successFollowup(result: LoopXInitSummary): UserMessage {
     `Report these authoritative facts briefly: version ${safeVersion(result.cliVersion)};`,
     result.cliInstalled ? 'the CLI was installed or upgraded;' : 'the CLI was already compatible;',
     result.skillsChanged
-      ? 'DSH workflow skills were installed or updated and verified; restart DSH once to reload the changed skills.'
+      ? 'DSH workflow skills were installed or updated, verified, and loaded without a restart.'
       : 'DSH workflow skills were already current and verified; no DSH restart is required.',
     'Do not call tools, run commands, reinstall anything, or add diagnostics.',
   ].join(' '))
@@ -401,7 +472,11 @@ function cancelled(error: unknown, signal: AbortSignal): boolean {
   return signal.aborted || (error instanceof LoopXCliError && error.kind === 'aborted')
 }
 
-export function apply(ctx: Context, options: LoopXInitOptions = {}): void {
+/** Register the explicit repair command without changing LoopX readiness. */
+export function registerLoopXInitCommand(
+  ctx: Context,
+  options: LoopXInitOptions = {},
+): void {
   ctx.commands.register({
     name: 'loopx-init',
     description: 'install or upgrade LoopX and install the DSH LoopX skills',
@@ -428,4 +503,60 @@ export function apply(ctx: Context, options: LoopXInitOptions = {}): void {
       }
     },
   })
+}
+
+function automaticFailure(error: unknown): string {
+  if (error instanceof LoopXInitError) {
+    return [
+      'dsh-loopx-init-command: automatic initialization failed;',
+      `stage=${error.stage}; kind=${error.causeKind ?? 'unknown'};`,
+      '/loopx-init remains available for repair',
+    ].join(' ')
+  }
+  if (error instanceof LoopXCliError && error.kind === 'aborted') {
+    return 'dsh-loopx-init-command: automatic initialization was cancelled; /loopx-init remains available for repair'
+  }
+  return 'dsh-loopx-init-command: automatic initialization failed unexpectedly; /loopx-init remains available for repair'
+}
+
+function bootstrapFailureStatus(error: unknown): LoopXBootstrapStatus {
+  if (error instanceof LoopXInitError) {
+    return Object.freeze({
+      state: 'failed',
+      stage: error.stage,
+      causeKind: error.causeKind ?? 'unknown',
+    })
+  }
+  if (error instanceof LoopXCliError) {
+    return Object.freeze({
+      state: 'failed',
+      stage: 'unknown',
+      causeKind: error.kind,
+    })
+  }
+  return Object.freeze({ state: 'failed', stage: 'unknown', causeKind: 'unknown' })
+}
+
+/**
+ * Make the installed plugin ready before DSH finishes loading this row.
+ *
+ * Startup failures are isolated to LoopX: DSH still boots and the registered
+ * command remains as an explicit retry surface. The awaited happy path keeps a
+ * freshly installed profile from racing its first `skill.list` readback.
+ */
+export async function apply(ctx: Context, options: LoopXInitOptions = {}): Promise<void> {
+  registerLoopXInitCommand(ctx, options)
+  let status: LoopXBootstrapStatus
+  try {
+    await initializeLoopX(options)
+    status = Object.freeze({ state: 'ready' })
+  } catch (error: unknown) {
+    status = bootstrapFailureStatus(error)
+    try {
+      ctx.logger.warn(automaticFailure(error))
+    } catch {
+      // Diagnostics must never turn an isolated LoopX bootstrap failure into a DSH startup failure.
+    }
+  }
+  ctx.reflect.provide('loopxBootstrap', status)
 }
