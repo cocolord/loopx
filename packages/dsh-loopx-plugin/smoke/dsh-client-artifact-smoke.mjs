@@ -56,10 +56,11 @@ const packedStaticEntries = new Set([
   'package/lib/types/goalbar/service.d.ts',
   'package/lib/types/index.d.ts',
   'package/lib/types/init-command.d.ts',
+  'package/lib/types/managed-runtime.d.ts',
   'package/package.json',
 ])
 const packedHashedEntries = [
-  ['CLI chunk', /^package\/lib\/cli-[A-Za-z0-9_-]{8}\.js$/u],
+  ['managed runtime chunk', /^package\/lib\/managed-runtime-[A-Za-z0-9_-]{8}\.js$/u],
   ['Driver chunk', /^package\/lib\/driver-[A-Za-z0-9_-]{8}\.js$/u],
 ]
 
@@ -428,7 +429,7 @@ async function assertHostExports(root) {
   ])
   assert.equal(typeof host.apply, 'function')
   assert.equal(host.name, packageId)
-  assert.deepEqual(host.inject, ['agents', 'connection'])
+  assert.deepEqual(host.inject, ['agents', 'connection', 'loopxBootstrap'])
   let handler
   let disposeHost
   let rpcDisposals = 0

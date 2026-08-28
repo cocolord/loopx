@@ -60,10 +60,11 @@ const packedStaticEntries = new Set([
   'package/lib/types/goalbar/service.d.ts',
   'package/lib/types/index.d.ts',
   'package/lib/types/init-command.d.ts',
+  'package/lib/types/managed-runtime.d.ts',
   'package/package.json',
 ])
 const packedHashedEntries = [
-  ['CLI chunk', /^package\/lib\/cli-[A-Za-z0-9_-]{8}\.js$/u],
+  ['managed runtime chunk', /^package\/lib\/managed-runtime-[A-Za-z0-9_-]{8}\.js$/u],
   ['Driver chunk', /^package\/lib\/driver-[A-Za-z0-9_-]{8}\.js$/u],
 ]
 

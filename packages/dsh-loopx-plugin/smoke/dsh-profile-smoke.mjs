@@ -39,10 +39,11 @@ const packedStaticEntries = new Set([
   'package/lib/types/goalbar/service.d.ts',
   'package/lib/types/index.d.ts',
   'package/lib/types/init-command.d.ts',
+  'package/lib/types/managed-runtime.d.ts',
   'package/package.json',
 ])
 const packedHashedEntries = [
-  ['CLI chunk', /^package\/lib\/cli-[A-Za-z0-9_-]{8}\.js$/u],
+  ['managed runtime chunk', /^package\/lib\/managed-runtime-[A-Za-z0-9_-]{8}\.js$/u],
   ['Driver chunk', /^package\/lib\/driver-[A-Za-z0-9_-]{8}\.js$/u],
 ]
 
@@ -160,7 +161,7 @@ async function exerciseInstalled(installed) {
     import(pathToFileURL(requireFromPlugin.resolve('dsh-loopx-plugin/driver')).href),
   ])
   assert.equal(hostModule.name, packageId)
-  assert.deepEqual(hostModule.inject, ['agents', 'connection'])
+  assert.deepEqual(hostModule.inject, ['agents', 'connection', 'loopxBootstrap'])
   assert.equal(typeof hostModule.createGoalBarService, 'function')
   const commands = new Map()
   const services = new Map()
@@ -256,7 +257,7 @@ async function exerciseInstalled(installed) {
     plugin: 'dsh-loopx-plugin/driver',
   })
   assert.equal(typeof driverModule.LoopXContinuationDriver, 'function')
-  assert.equal(driverModule.inject.join(','), 'agents')
+  assert.equal(driverModule.inject.join(','), 'agents,loopxBootstrap')
 
   const runnerCalls = []
   const timerCalls = []

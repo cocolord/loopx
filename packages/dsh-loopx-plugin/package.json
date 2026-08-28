@@ -43,7 +43,8 @@
     "prepack": "pnpm build",
     "smoke:artifact": "node smoke/dsh-client-artifact-smoke.mjs",
     "smoke:profile": "node smoke/dsh-profile-smoke.mjs",
-    "smoke:runtime": "node smoke/dsh-goalbar-runtime-smoke.mjs"
+    "smoke:runtime": "node smoke/dsh-goalbar-runtime-smoke.mjs",
+    "smoke:docker": "bash smoke/dsh-clean-docker-smoke.sh"
   },
   "dsh": {
     "bundle": {
