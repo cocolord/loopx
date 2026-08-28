@@ -3,9 +3,10 @@
 `dsh-loopx-plugin` is one independently versioned DSH package with three
 separate Loader rows:
 
-- `/loopx-init` installs or upgrades the LoopX CLI, installs the packaged
-  workflow skills into `$DSH_AGENTS_HOME/skills` (default
-  `~/.agents/skills`), and verifies the DSH-native `loopx` entry.
+- the init row automatically installs or upgrades the LoopX CLI, installs the
+  packaged workflow skills into `$DSH_AGENTS_HOME/skills` (default
+  `~/.agents/skills`), and verifies the DSH-native `loopx` entry before DSH
+  finishes loading it. `/loopx-init` remains the explicit repair command.
 - a passive same-session Driver becomes eligible only after the exact current
   Session successfully invokes the exact `loopx` skill. It then asks LoopX
   whether another turn may run and queues the authoritative heartbeat task
@@ -15,8 +16,8 @@ separate Loader rows:
   and Queue dock rows. It renders only for one exact live
   `(goalId, loopxAgentId)` binding.
 
-Installing the plugin and running `/loopx-init` load and prepare these
-capabilities; neither creates a binding nor activates the Driver. The GoalBar
+Installing the plugin and starting DSH load and prepare these capabilities;
+neither creates a binding nor activates the Driver. The GoalBar
 does one bounded read when a browser row mounts, then watches exact-Session
 `step/end` and `turn/end` boundaries. It rereads LoopX only when the opaque
 revision of the authoritative binding or active Goal state changes; a watch
@@ -35,26 +36,38 @@ deferred atomicity limit are specified in the versioned
 
 ## Install
 
-Requirements are Node.js 22.19+ and `pnpm`. LoopX itself is deliberately not a
-prerequisite:
+Requirements are Node.js 22.19+, `pnpm`, Python 3.11+, and network access for
+the first DSH start when no compatible LoopX CLI is already installed. LoopX
+itself is deliberately not a prerequisite. The initializer honors an explicit
+`PYTHON_BIN`, otherwise it checks `python3`, `python3.14`, `python3.13`,
+`python3.12`, and `python3.11` and keeps the first interpreter that satisfies
+the requirement.
+Install the published package into the web profile:
+
+```bash
+dsh plugin --profile web add dsh-loopx-plugin
+```
+
+For a source checkout, the equivalent build-and-install path is:
 
 ```bash
 cd packages/dsh-loopx-plugin
 ./install.sh
 ```
 
-Then open DSH and run:
-
-```text
-/loopx-init
-```
-
-For a local web session, start DSH on loopback (port `0` asks the OS for a free
-port) and open the printed URL:
+Start DSH on loopback (port `0` asks the OS for a free port) and open the
+printed URL. The plugin finishes its idempotent LoopX CLI and skill bootstrap
+before DSH publishes the Web URL. Its typed `loopxBootstrap` service gates the
+Web server and runtime rows until startup has either succeeded or failed
+safely:
 
 ```bash
 dsh --profile web --port 0
 ```
+
+Use `/loopx <task>` immediately. If automatic initialization reports a safe
+failure in the DSH log, fix the named Python or package-manager problem and run
+`/loopx-init` once to retry; normal installation does not require that command.
 
 Installation is the GoalBar opt-in: there is no separate remote endpoint or
 per-session grant. A row remains hidden until the exact DSH Session has one
@@ -86,9 +99,10 @@ pnpm smoke:runtime
 ```
 
 The runtime smoke creates an isolated temporary DSH profile. Its real web
-process proves profile composition, boot-manifest discovery, bundle serving,
+process proves profile composition, automatic initialization before readiness,
+immediate skill-catalog visibility, boot-manifest discovery, bundle serving,
 Client materialization, and the loopback Connection fence. Separately, a
-packed rc.7 Context, Connection, and WebServer with a live Host Session fixture
+packed supported-DSH Context, Connection, and WebServer with a live Host Session fixture
 cover same-turn binding discovery, lease-time source reconciliation,
 status-only updates, pending-watch cancellation, successful actions, and
 handler disposal through the real HTTP carrier. The served Client is then
@@ -117,15 +131,24 @@ a change token, not authorization or a compare-and-swap guard. Installing the
 package grants no model tool authority, does not create or repair bindings, and
 does not change LoopX core state by itself.
 
-## `/loopx-init` behavior
+## Automatic initialization and `/loopx-init` repair
 
-The command has no arguments. Extra input returns a usage error before any
+When DSH loads the plugin, the init row runs the same typed initialization
+routine and publishes the `loopxBootstrap` readiness service only after it
+settles. The plugin's profile patch makes DSH's Web server and runtime depend
+on that service, so the printed URL is a real bootstrap boundary. A safe
+failure is logged without raw subprocess output or local paths, releases the
+Web rows instead of stopping DSH, and leaves `/loopx-init` registered for an
+explicit retry. Automatic startup does not create Agent followups or model
+calls.
+
+The repair command has no arguments. Extra input returns a usage error before any
 model work or CLI probe. A valid invocation queues a bounded start followup on
 the exact receiving Agent, then probes the current LoopX installation. When the
 CLI is missing or lacks the DSH-native skill contract, it runs exactly one
-`python3 -m pip install --upgrade loopx`, then installs and reads back the
-skills. It never constructs a shell command, edits a registry, or retries the
-install mutation.
+`<compatible-python> -m pip install --upgrade loopx`, then uses that same
+interpreter to install and read back the skills. It never constructs a shell
+command, edits a registry, or retries the install mutation.
 
 Unless the command is cancelled, it queues a second bounded followup for the
 typed success or failure result. These are ordinary Agent turns, so a valid,
@@ -136,11 +159,9 @@ best effort and is not retried. The native `CommandResult` rendered by the
 command UI remains authoritative: a followup failure or model reply cannot
 change the installation result or repeat its mutation.
 
-On success, restart DSH only when the actual install payload reports a packaged
-skill as `created` or `updated`, or the entry skill as `created`, `updated`, or
-`upgraded_legacy_managed`. A CLI-only installation or upgrade and an
-all-`unchanged` skill result do not require a restart. Missing or unknown skill
-status fails initialization instead of being guessed as unchanged.
+On success, DSH's filesystem skill provider invalidates its catalog and loads
+created or updated skills without a restart. Missing or unknown skill status
+still fails initialization instead of being guessed as unchanged.
 
 After initialization, invoke the `loopx` skill with the task text. The skill
 uses the exact DSH-managed `$DSH_SESSION_ID`, passes
