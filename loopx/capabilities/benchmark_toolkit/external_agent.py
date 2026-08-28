@@ -11,21 +11,33 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from ...process_tree import isolated_process_creation_flags, terminate_process_tree
-
 EXTERNAL_AGENT_REQUEST_SCHEMA_VERSION = "external_agent_request_v1"
 EXTERNAL_AGENT_RESULT_SCHEMA_VERSION = "external_agent_result_v1"
+EXTERNAL_AGENT_CONTAINMENT_SCHEMA_VERSION = "external_agent_containment_v1"
+EXTERNAL_AGENT_CONTAINMENT_VERIFICATION_SCHEMA_VERSION = (
+    "external_agent_containment_verification_v1"
+)
 LOOPX_EXTERNAL_AGENT_PHASE_RECEIPT_SCHEMA_VERSION = (
     "loopx_external_agent_phase_receipt_v1"
 )
 _MAX_TIMEOUT_SECONDS = 86_400.0
-_RESULT_STATUSES = {"succeeded", "failed", "timed_out"}
+_RESULT_STATUSES = {"succeeded", "failed"}
+_CONTAINMENT_KINDS = {
+    "container",
+    "cgroup_v2",
+    "pid_namespace",
+    "virtual_machine",
+    "windows_job_object",
+}
+_CONTAINMENT_POSTCONDITION = "drained_before_result_consumption"
+_OPAQUE_REF_PATTERN = re.compile(r"^[A-Za-z0-9._:@/-]{1,160}$")
 _SOLVER_ENVIRONMENT_ALLOWLIST = (
     "COMSPEC",
     "LANG",
@@ -57,7 +69,7 @@ def _load_json_object(path: Path) -> dict[str, Any]:
 
 def _validate_request(
     value: Mapping[str, Any],
-) -> tuple[str, Path, float]:
+) -> tuple[str, Path, float, str, str]:
     if value.get("schema_version") != EXTERNAL_AGENT_REQUEST_SCHEMA_VERSION:
         raise ValueError("external_agent_request_schema_unsupported")
 
@@ -84,7 +96,50 @@ def _validate_request(
     if not 0 < timeout_seconds <= _MAX_TIMEOUT_SECONDS:
         raise ValueError("external_agent_request_timeout_invalid")
 
-    return instruction, workspace, timeout_seconds
+    containment = value.get("containment")
+    if not isinstance(containment, Mapping) or set(containment) != {
+        "schema_version",
+        "kind",
+        "timeout_owner",
+        "termination_postcondition",
+        "verification",
+    }:
+        raise ValueError("external_agent_containment_contract_invalid")
+    if (
+        containment.get("schema_version")
+        != EXTERNAL_AGENT_CONTAINMENT_SCHEMA_VERSION
+        or containment.get("kind") not in _CONTAINMENT_KINDS
+        or containment.get("timeout_owner") != "runner"
+        or containment.get("termination_postcondition")
+        != _CONTAINMENT_POSTCONDITION
+    ):
+        raise ValueError("external_agent_containment_contract_invalid")
+
+    verification = containment.get("verification")
+    if not isinstance(verification, Mapping) or set(verification) != {
+        "schema_version",
+        "status",
+        "authority",
+        "receipt_ref",
+    }:
+        raise ValueError("external_agent_containment_verification_invalid")
+    receipt_ref = str(verification.get("receipt_ref") or "")
+    if (
+        verification.get("schema_version")
+        != EXTERNAL_AGENT_CONTAINMENT_VERIFICATION_SCHEMA_VERSION
+        or verification.get("status") != "verified"
+        or verification.get("authority") != "runner"
+        or not _OPAQUE_REF_PATTERN.fullmatch(receipt_ref)
+    ):
+        raise ValueError("external_agent_containment_verification_invalid")
+
+    return (
+        instruction,
+        workspace,
+        timeout_seconds,
+        str(containment["kind"]),
+        receipt_ref,
+    )
 
 
 def _validate_solver_command(value: Sequence[str]) -> list[str]:
@@ -114,6 +169,8 @@ def _result(
     instruction: str | None,
     command: Sequence[str],
     classification: str,
+    containment_kind: str | None = None,
+    containment_verification_ref: str | None = None,
 ) -> dict[str, Any]:
     if status not in _RESULT_STATUSES:
         raise ValueError("external_agent_result_status_invalid")
@@ -129,6 +186,20 @@ def _result(
     if instruction is not None:
         receipt["instruction_sha256"] = _sha256(instruction)
         receipt["instruction_chars"] = len(instruction)
+    if containment_kind is not None:
+        receipt["containment_contract_validated"] = True
+        receipt["containment_kind"] = containment_kind
+        receipt["containment_verification_authority"] = "runner"
+        receipt["containment_verification_status"] = "verified"
+        receipt["containment_termination_postcondition"] = (
+            _CONTAINMENT_POSTCONDITION
+        )
+        receipt["timeout_enforced_locally"] = False
+        receipt["timeout_owner"] = "runner"
+    if containment_verification_ref is not None:
+        receipt["containment_verification_ref_sha256"] = _sha256(
+            containment_verification_ref
+        )
     return {
         "schema_version": EXTERNAL_AGENT_RESULT_SCHEMA_VERSION,
         "status": status,
@@ -145,7 +216,13 @@ def run_external_agent_phase(
 ) -> dict[str, Any]:
     """Execute one runner-owned solver command from an external-agent request."""
 
-    instruction, workspace, timeout_seconds = _validate_request(request)
+    (
+        instruction,
+        workspace,
+        timeout_seconds,
+        containment_kind,
+        containment_verification_ref,
+    ) = _validate_request(request)
     command = _validate_solver_command(solver_command)
     environment = {
         "LOOPX_EXTERNAL_AGENT_REQUEST_SCHEMA_VERSION": (
@@ -167,23 +244,10 @@ def run_external_agent_phase(
             stdin=subprocess.PIPE,
             stdout=None,
             stderr=None,
-            start_new_session=os.name == "posix",
-            creationflags=isolated_process_creation_flags(),
             text=True,
         )
-        try:
-            process.communicate(instruction, timeout=timeout_seconds)
-            exit_code = process.returncode
-        except subprocess.TimeoutExpired:
-            terminate_process_tree(process)
-            return _result(
-                status="timed_out",
-                exit_code=124,
-                duration_ms=int((time.monotonic() - started) * 1000),
-                instruction=instruction,
-                command=command,
-                classification="solver_timeout",
-            )
+        process.communicate(instruction)
+        exit_code = process.returncode
     except OSError:
         return _result(
             status="failed",
@@ -192,6 +256,8 @@ def run_external_agent_phase(
             instruction=instruction,
             command=command,
             classification="solver_startup_failed",
+            containment_kind=containment_kind,
+            containment_verification_ref=containment_verification_ref,
         )
 
     return _result(
@@ -205,6 +271,8 @@ def run_external_agent_phase(
             if exit_code == 0
             else "solver_exited_nonzero"
         ),
+        containment_kind=containment_kind,
+        containment_verification_ref=containment_verification_ref,
     )
 
 
@@ -227,10 +295,18 @@ def execute_external_agent_request(
 ) -> dict[str, Any]:
     """Validate one request and optionally run its solver command."""
 
+    if execute:
+        result_path.unlink(missing_ok=True)
     try:
         command = _validate_solver_command(solver_command)
         request = _load_json_object(request_path)
-        instruction, _workspace, _timeout_seconds = _validate_request(request)
+        (
+            instruction,
+            _workspace,
+            _timeout_seconds,
+            containment_kind,
+            containment_verification_ref,
+        ) = _validate_request(request)
         result = (
             run_external_agent_phase(
                 request,
@@ -245,6 +321,8 @@ def execute_external_agent_request(
                 instruction=instruction,
                 command=command,
                 classification="request_validated_not_executed",
+                containment_kind=containment_kind,
+                containment_verification_ref=containment_verification_ref,
             )
         )
     except (TypeError, ValueError):
