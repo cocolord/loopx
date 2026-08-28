@@ -30,6 +30,7 @@ const WORKFLOW_SCHEMA = 'loopx_workflow_skill_install_v0'
 const INIT_SOURCE_ID = 'dsh-loopx-plugin/init-command'
 const MAX_FOLLOWUP_TEXT_CHARS = 800
 const PYTHON_VERSION_PROBE = 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'
+const PIP_VERSION_ARGS = Object.freeze(['-m', 'pip', '--version'])
 const LOOPX_REQUIREMENT = 'loopx>=0.5.3'
 const MANAGED_LAUNCHER_SOURCE = [
   'from pathlib import Path',
@@ -211,7 +212,18 @@ async function resolveInstallPython(options: LoopXInitOptions): Promise<string> 
           maxOutputBytes: 16 * 1024,
         },
       )
-      if (result.exitCode === 0) return python
+      if (result.exitCode !== 0) continue
+      const pipResult = await runner(
+        python,
+        PIP_VERSION_ARGS,
+        {
+          env: options.env,
+          signal: options.signal,
+          timeoutMs: 5_000,
+          maxOutputBytes: 16 * 1024,
+        },
+      )
+      if (pipResult.exitCode === 0) return python
     } catch (error: unknown) {
       if (error instanceof LoopXCliError && error.kind === 'aborted') throw error
     }
@@ -219,8 +231,8 @@ async function resolveInstallPython(options: LoopXInitOptions): Promise<string> 
   throw new LoopXInitError(
     'install_cli',
     explicit === undefined
-      ? 'Python 3.11 or newer could not be found'
-      : 'The configured Python interpreter is unavailable or older than 3.11',
+      ? 'Python 3.11 or newer with pip could not be found'
+      : 'The configured Python interpreter is unavailable, older than 3.11, or cannot run pip',
     'missing',
   )
 }

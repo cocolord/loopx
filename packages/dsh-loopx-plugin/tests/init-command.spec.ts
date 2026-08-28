@@ -120,6 +120,9 @@ function successfulRunner(options: {
     if (args[0] === '-c') {
       return { exitCode: 0, stdout: '', stderr: '' }
     }
+    if (args.join(' ') === '-m pip --version') {
+      return { exitCode: 0, stdout: 'pip fixture', stderr: '' }
+    }
     if (args.slice(0, 3).join(' ') === '-m pip install') {
       options.events?.push('install-cli')
       cliAvailable = true
@@ -303,6 +306,9 @@ describe('/loopx-init implementation', () => {
       if (args[0] === '-c') {
         return { exitCode: 0, stdout: '', stderr: '' }
       }
+      if (args.join(' ') === '-m pip --version') {
+        return { exitCode: 0, stdout: 'pip fixture', stderr: '' }
+      }
       if (args.slice(0, 3).join(' ') === '-m pip install') {
         pipCalls += 1
         installed = true
@@ -337,6 +343,13 @@ describe('/loopx-init implementation', () => {
       calls.push({ file, args: [...args] })
       if (args[0] === '-c') {
         return { exitCode: file === 'python3.13' ? 0 : 1, stdout: '', stderr: '' }
+      }
+      if (args.join(' ') === '-m pip --version') {
+        return {
+          exitCode: file === 'python3.13' ? 0 : 1,
+          stdout: file === 'python3.13' ? 'pip fixture' : '',
+          stderr: '',
+        }
       }
       if (args.slice(0, 3).join(' ') === '-m pip install') {
         installed = true
@@ -392,6 +405,101 @@ describe('/loopx-init implementation', () => {
     ))).toBe(true)
   })
 
+  it('skips an implicit version-compatible Python that cannot run pip', async () => {
+    const calls: Array<{ readonly file: string; readonly args: readonly string[] }> = []
+    let installed = false
+    const runner: FileRunner = async (file, args) => {
+      calls.push({ file, args: [...args] })
+      if (args.at(-1) === '--version' && args[0] !== '-m') {
+        throw new LoopXCliError('missing', 'missing', false)
+      }
+      if (args[0] === '-c') {
+        return {
+          exitCode: file === 'python3' || file === 'python3.14' ? 0 : 1,
+          stdout: '',
+          stderr: '',
+        }
+      }
+      if (args.join(' ') === '-m pip --version') {
+        return {
+          exitCode: file === 'python3.14' ? 0 : 1,
+          stdout: file === 'python3.14' ? 'pip fixture' : '',
+          stderr: '',
+        }
+      }
+      if (args.slice(0, 3).join(' ') === '-m pip install') {
+        installed = true
+        return { exitCode: 0, stdout: 'installed', stderr: '' }
+      }
+      if (args.at(-1) === '--version') {
+        if (file !== 'python3.14' || !installed) {
+          throw new LoopXCliError('missing', 'missing', false)
+        }
+        return { exitCode: 0, stdout: 'loopx 0.5.3\n', stderr: '' }
+      }
+      if (args.includes('workflow-skills')) {
+        const operation = args.includes('--install') ? 'install' : 'inspect'
+        return {
+          exitCode: 0,
+          stdout: workflowPayload(operation, false),
+          stderr: '',
+        }
+      }
+      throw new Error(`unexpected argv: ${file} ${args.join(' ')}`)
+    }
+
+    const result = await initializeLoopX({
+      runner,
+      skillsDir: '/fixture/skills',
+      runtimeDir: '/fixture/runtime',
+    })
+
+    expect(result.cliInstalled).toBe(true)
+    expect(calls.some(call => (
+      call.file === 'python3'
+      && call.args.join(' ') === '-m pip --version'
+    ))).toBe(true)
+    expect(calls.some(call => (
+      call.file === 'python3'
+      && call.args.slice(0, 3).join(' ') === '-m pip install'
+    ))).toBe(false)
+    expect(calls.some(call => (
+      call.file === 'python3.14'
+      && call.args.slice(0, 3).join(' ') === '-m pip install'
+    ))).toBe(true)
+  })
+
+  it('does not fall back from an explicit Python that cannot run pip', async () => {
+    const calls: Array<{ readonly file: string; readonly args: readonly string[] }> = []
+    const runner: FileRunner = async (file, args) => {
+      calls.push({ file, args: [...args] })
+      if (args.at(-1) === '--version' && args[0] !== '-m') {
+        throw new LoopXCliError('missing', 'missing', false)
+      }
+      if (args[0] === '-c') {
+        return { exitCode: 0, stdout: '', stderr: '' }
+      }
+      if (args.join(' ') === '-m pip --version') {
+        return { exitCode: 1, stdout: '', stderr: 'No module named pip' }
+      }
+      throw new Error(`unexpected argv: ${file} ${args.join(' ')}`)
+    }
+
+    await expect(initializeLoopX({
+      runner,
+      pythonBin: '/configured/python',
+      skillsDir: '/fixture/skills',
+    })).rejects.toMatchObject({
+      stage: 'install_cli',
+      causeKind: 'missing',
+    })
+    expect(calls.some(call => call.file === 'python3.14')).toBe(false)
+    expect(calls.some(call => (
+      call.file === '/configured/python'
+      && call.args.join(' ') === '-m pip --version'
+    ))).toBe(true)
+  })
+
   it('reuses the plugin-owned launcher across runtime consumers and restarts', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-loopx-managed-runtime-'))
     const runtimeDir = join(root, 'runtime')
@@ -443,6 +551,9 @@ describe('/loopx-init implementation', () => {
     const runner: FileRunner = async (_file, args) => {
       if (args[0] === '-c') {
         return { exitCode: 0, stdout: '', stderr: '' }
+      }
+      if (args.join(' ') === '-m pip --version') {
+        return { exitCode: 0, stdout: 'pip fixture', stderr: '' }
       }
       if (args.at(-1) === '--version') {
         return { exitCode: 0, stdout: 'loopx 0.4.0\n', stderr: '' }
