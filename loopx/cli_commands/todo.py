@@ -823,6 +823,7 @@ def handle_todo_command(
             settlement_identity = None
             settlement_readback = None
             completion_requires_settlement = False
+            completion_error = None
             completion_turn_key = None
             completion_identity_source = None
             if getattr(args, "turn_instance_id", None):
@@ -881,49 +882,63 @@ def handle_todo_command(
                 )
                 if completion_error is not None:
                     settlement_result = settlement_readback.settlement
-                    raise ValueError(completion_error)
+                    payload = {
+                        "ok": False,
+                        "dry_run": bool(args.dry_run),
+                        "completed": False,
+                        "changed": False,
+                        "goal_id": args.goal_id,
+                        "todo_id": args.todo_id,
+                        "settlement_blocked_completion": True,
+                        "settlement_identity": identity.as_dict(),
+                        "settlement_result": settlement_result_payload(
+                            settlement_result
+                        ),
+                        "error": completion_error,
+                    }
                 completion_turn_key = identity.effect_id
                 completion_identity_source = "turn_settlement"
             elif getattr(args, "completion_identity_key", None):
                 completion_turn_key = str(args.completion_identity_key)
                 completion_identity_source = "lifecycle_reentry"
-            payload = complete_goal_todo(
-                registry_path=registry_path,
-                goal_id=args.goal_id,
-                todo_id=args.todo_id,
-                role=args.role,
-                decision_outcome=args.decision_outcome,
-                evidence=args.evidence,
-                completion_turn_key=completion_turn_key,
-                completion_identity_source=completion_identity_source,
-                task_lease_idempotency_key=args.task_lease_idempotency_key,
-                task_lease_expected_version=args.task_lease_expected_version,
-                note=args.note,
-                no_followup=bool(args.no_follow_up),
-                successor_todo_ids=args.successor_todo_ids,
-                claimed_by=args.claimed_by,
-                clear_claim=bool(args.clear_claim),
-                next_agent_todo=args.next_agent_todo,
-                next_user_todo=args.next_user_todo,
-                next_user_task_class=args.next_user_task_class,
-                next_claimed_by=args.next_claimed_by,
-                next_task_class=args.next_task_class,
-                next_action_kind=args.next_action_kind,
-                next_task_repository=args.next_task_repository,
-                next_required_capabilities=args.next_required_capabilities,
-                next_continuation_policy=args.next_continuation_policy,
-                next_excluded_agents=args.next_excluded_agents,
-                self_merged=bool(args.self_merged),
-                agent_id=args.agent_id,
-                authority_reason=args.authority_reason,
-                **_todo_path_args(args),
-                dry_run=bool(args.dry_run),
-            )
-            if settlement_identity is not None:
-                payload["settlement_identity"] = settlement_identity.as_dict()
-                payload["settlement_result"] = settlement_result_payload(
-                    settlement_result
+            if completion_error is None:
+                payload = complete_goal_todo(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    todo_id=args.todo_id,
+                    role=args.role,
+                    decision_outcome=args.decision_outcome,
+                    evidence=args.evidence,
+                    completion_turn_key=completion_turn_key,
+                    completion_identity_source=completion_identity_source,
+                    task_lease_idempotency_key=args.task_lease_idempotency_key,
+                    task_lease_expected_version=args.task_lease_expected_version,
+                    note=args.note,
+                    no_followup=bool(args.no_follow_up),
+                    successor_todo_ids=args.successor_todo_ids,
+                    claimed_by=args.claimed_by,
+                    clear_claim=bool(args.clear_claim),
+                    next_agent_todo=args.next_agent_todo,
+                    next_user_todo=args.next_user_todo,
+                    next_user_task_class=args.next_user_task_class,
+                    next_claimed_by=args.next_claimed_by,
+                    next_task_class=args.next_task_class,
+                    next_action_kind=args.next_action_kind,
+                    next_task_repository=args.next_task_repository,
+                    next_required_capabilities=args.next_required_capabilities,
+                    next_continuation_policy=args.next_continuation_policy,
+                    next_excluded_agents=args.next_excluded_agents,
+                    self_merged=bool(args.self_merged),
+                    agent_id=args.agent_id,
+                    authority_reason=args.authority_reason,
+                    **_todo_path_args(args),
+                    dry_run=bool(args.dry_run),
                 )
+                if settlement_identity is not None:
+                    payload["settlement_identity"] = settlement_identity.as_dict()
+                    payload["settlement_result"] = settlement_result_payload(
+                        settlement_result
+                    )
         elif args.todo_command == "supersede":
             validate_todo_supersede_options(args)
             payload = supersede_goal_todo(

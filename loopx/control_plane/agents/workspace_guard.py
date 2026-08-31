@@ -103,32 +103,6 @@ def _git_repository_identity(path: Path) -> str | None:
         return None
 
 
-def _git_worktree_is_clean(path: Path) -> bool:
-    try:
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(path),
-                "status",
-                "--porcelain=v1",
-                "--untracked-files=all",
-                "--",
-                ".",
-                ":(exclude).codex/**",
-                ":(exclude).loopx/**",
-            ],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=1.5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0 and not result.stdout.strip()
-
-
 def capture_delivery_workspace(
     current_path: Path | None = None,
     *,
@@ -244,8 +218,6 @@ def build_delivery_workspace_guard(
         current_workspace = "not_git_worktree"
     elif current_repository != task_repository:
         current_workspace = "foreign_git_worktree"
-    elif not _git_worktree_is_clean(current_path or Path.cwd()):
-        current_workspace = "dirty_git_worktree"
     elif (
         recorded_workspace == "independent_git_worktree"
         and current_workspace != "independent_git_worktree"
@@ -277,8 +249,8 @@ def build_delivery_workspace_guard(
         "delivery_run_generated_at": delivery_run.get("generated_at"),
         "delivery_run_classification": delivery_run.get("classification"),
         "reason": (
-            "quota spend requires the clean workspace that produced the latest "
-            "unspent accountable delivery"
+            "quota spend workspace does not match the latest unspent accountable "
+            "delivery workspace"
         ),
         "required_action": (
             "run quota spend-slot from the workspace that produced the latest "

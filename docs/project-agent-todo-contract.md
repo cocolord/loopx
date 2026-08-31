@@ -203,11 +203,6 @@ loopx todo update \
 workspace isolation, not write authority; claim/lease, capabilities, the goal
 boundary, and repository policy continue to apply.
 
-For an accountable Git delivery, `delivery_workspace_v1` is emitted only from
-a clean worktree. Untracked or modified files keep the writeback unsettled;
-the snapshot still proves repository/worktree identity only, not that a
-specific commit or pull request reached a remote branch.
-
 `quota should-run --agent-id <agent-id>` is the preflight for every peer. When
 the selected task writes repository state and the peer is in a non-git,
 unrelated, or non-isolated workspace, it returns `workspace_guard` and blocks
@@ -386,6 +381,12 @@ valid only for the exact already-completed Todo, its matching local identity,
 It cannot be supplied for an open Todo or used as a quota turn identity.
 Otherwise add/link a real successor. Do not create a user gate merely to
 silence a succession warning.
+
+Compatibility host adapters whose established transaction completes the Todo
+before writing the same-turn refresh and quota receipts must explicitly mark
+their non-repository work `same_agent_non_delivery`. Repository advancement
+through those adapters fails closed with a typed settlement blocker until the
+adapter adopts a writeback-and-spend-before-completion transaction.
 
 This keeps the active checklist honest without making LoopX a heavyweight
 project-management state machine.
