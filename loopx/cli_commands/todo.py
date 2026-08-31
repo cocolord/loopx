@@ -6,10 +6,14 @@ from pathlib import Path
 
 from ..control_plane.todos.contract import (
     TODO_CONTINUATION_POLICY_VALUES,
+    TODO_TASK_CLASS_ADVANCEMENT,
+    normalize_todo_continuation_policy,
+    normalize_todo_task_class,
     replan_successor_semantic_binding,
 )
 from ..control_plane.capability_hooks import PostWritebackHookRegistration
 from ..control_plane.quota.settlement import (
+    QuotaSettlementReadback,
     read_heartbeat_settlement,
     settlement_result_payload,
 )
@@ -65,6 +69,48 @@ PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
     None,
 ]
+
+
+def _completion_settlement_requirement(
+    todo: dict[str, object],
+    *,
+    no_follow_up: bool,
+) -> str | None:
+    if no_follow_up:
+        return "terminal no-follow-up closeout"
+    task_class = normalize_todo_task_class(
+        todo.get("task_class"),
+        text=str(todo.get("text") or ""),
+        action_kind=todo.get("action_kind"),
+    )
+    continuation_policy = normalize_todo_continuation_policy(
+        todo.get("continuation_policy")
+    )
+    if (
+        str(todo.get("role") or "") == "agent"
+        and task_class == TODO_TASK_CLASS_ADVANCEMENT
+        and continuation_policy != "same_agent_non_delivery"
+    ):
+        return "turn-scoped advancement completion"
+    return None
+
+
+def _completion_settlement_error(
+    todo: dict[str, object],
+    settlement_readback: QuotaSettlementReadback,
+    *,
+    no_follow_up: bool,
+) -> str | None:
+    requirement = _completion_settlement_requirement(
+        todo,
+        no_follow_up=no_follow_up,
+    )
+    if requirement is None or settlement_readback.settlement.failure is None:
+        return None
+    return (
+        f"{requirement} requires matching writeback and quota spend receipts: "
+        + settlement_readback.settlement.failure.reason
+    )
 
 
 def _validated_replan_successor_obligation(
@@ -776,6 +822,7 @@ def handle_todo_command(
             settlement_result = None
             settlement_identity = None
             settlement_readback = None
+            completion_requires_settlement = False
             completion_turn_key = None
             completion_identity_source = None
             if getattr(args, "turn_instance_id", None):
@@ -801,14 +848,40 @@ def handle_todo_command(
                     raise ValueError("turn-scoped Todo completion has no identity")
                 identity = settlement_result.value
                 settlement_identity = identity
-                if args.no_follow_up:
+                todo_payload = list_goal_todos(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    todo_id=args.todo_id,
+                    project=Path(args.project).expanduser() if args.project else None,
+                    state_file=(
+                        Path(args.state_file).expanduser()
+                        if args.state_file
+                        else None
+                    ),
+                    runtime_root_arg=runtime_root_arg,
+                )
+                todo = (
+                    todo_payload.get("todo")
+                    if isinstance(todo_payload.get("todo"), dict)
+                    else None
+                )
+                if todo is None:
+                    raise ValueError(
+                        "turn-scoped Todo completion requires one durable Todo"
+                    )
+                completion_requirement = _completion_settlement_requirement(
+                    todo,
+                    no_follow_up=bool(args.no_follow_up),
+                )
+                completion_requires_settlement = completion_requirement is not None
+                completion_error = _completion_settlement_error(
+                    todo,
+                    settlement_readback=settlement_readback,
+                    no_follow_up=bool(args.no_follow_up),
+                )
+                if completion_error is not None:
                     settlement_result = settlement_readback.settlement
-                    if settlement_result.failure is not None:
-                        raise ValueError(
-                            "terminal no-follow-up closeout requires matching "
-                            "writeback and quota spend receipts: "
-                            + settlement_result.failure.reason
-                        )
+                    raise ValueError(completion_error)
                 completion_turn_key = identity.effect_id
                 completion_identity_source = "turn_settlement"
             elif getattr(args, "completion_identity_key", None):
@@ -966,6 +1039,8 @@ def handle_todo_command(
         settlement_result = (
             settlement_readback.terminal_settlement
             if args.no_follow_up and settlement_identity is not None
+            else settlement_readback.settlement
+            if completion_requires_settlement
             else settlement_readback.identity
         )
         payload["settlement_result"] = settlement_result_payload(
