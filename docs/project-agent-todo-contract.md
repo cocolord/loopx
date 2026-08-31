@@ -203,6 +203,11 @@ loopx todo update \
 workspace isolation, not write authority; claim/lease, capabilities, the goal
 boundary, and repository policy continue to apply.
 
+For an accountable Git delivery, `delivery_workspace_v1` is emitted only from
+a clean worktree. Untracked or modified files keep the writeback unsettled;
+the snapshot still proves repository/worktree identity only, not that a
+specific commit or pull request reached a remote branch.
+
 `quota should-run --agent-id <agent-id>` is the preflight for every peer. When
 the selected task writes repository state and the peer is in a non-git,
 unrelated, or non-isolated workspace, it returns `workspace_guard` and blocks
@@ -369,7 +374,10 @@ This succession decision is durable Todo state. A later progress observation,
 vision ACK, coverage-exhausted result, or rewritten rationale cannot substitute
 for it. Every new completion therefore retains an opaque completion identity.
 A quota-bound completion still permits only the receipt-backed same-turn
-`todo complete --no-follow-up` recovery. An ordinary unscoped completion gets a
+`todo complete` transition for agent advancement work. Complete the matching
+accountable `refresh-state` and `quota spend-slot` first; explicit
+`same_agent_non_delivery` work, monitors, user actions, and user gates keep
+their existing lifecycle paths. An ordinary unscoped completion gets a
 stable `local_completion_*` identity; if a later `refresh-state` discovers that
 the finished Goal has no real successor, its typed rejection may project
 `--completion-identity-key` for one direct lifecycle reentry. That command is
