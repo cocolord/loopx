@@ -6,13 +6,13 @@ from enum import Enum
 from hashlib import sha256
 from typing import Any
 
-from .child_host_adapter import (
+from .subagent_host_adapter import (
     project_child_context_adapter,
     supported_child_context_modes,
 )
-from .child_execution_topology import (
+from .subagent_execution_topology import (
     bind_child_operations_to_topology,
-    build_multi_agent_execution_topology,
+    build_subagent_execution_topology,
 )
 from ..quota.turn_envelope import turn_envelope_action_signature_document
 from ..scheduler.execution_context import (
@@ -381,7 +381,7 @@ def build_loopx_turn_plan(
         session_action=str(session.get("action") or "none"),
         turn_instance_id=turn_instance_id,
     )
-    execution_topology = build_multi_agent_execution_topology(
+    execution_topology = build_subagent_execution_topology(
         turn_envelope=envelope,
         child_operations=raw_child_operations,
         turn_key=str(transaction.get("turn_key") or ""),
@@ -437,5 +437,5 @@ def build_loopx_turn_plan(
     if child_operations:
         payload["child_operations"] = child_operations
     if execution_topology:
-        payload["multi_agent_execution_topology"] = execution_topology
+        payload["subagent_execution_topology"] = execution_topology
     return payload

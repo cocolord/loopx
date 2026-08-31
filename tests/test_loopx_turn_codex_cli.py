@@ -181,9 +181,15 @@ def test_codex_cli_result_schema_requires_only_bounded_contract_fields() -> None
     assert set(schema["required"]) == set(schema["properties"])
     assert "raw_trajectory" not in schema["properties"]
     assert "stdout" not in schema["properties"]
-    receipt_properties = schema["properties"]["child_execution_receipts"]["items"][
-        "properties"
-    ]
+    assert "child_execution_receipts" not in schema["properties"]
+    request = _request()
+    request["subagent_execution_topology"] = {
+        "schema_version": "subagent_execution_topology_v0"
+    }
+    enabled_schema = codex_cli_result_schema(request)
+    receipt_properties = enabled_schema["properties"]["child_execution_receipts"][
+        "items"
+    ]["properties"]
     assert "task_packet_digest" in receipt_properties
     assert receipt_properties["context_mode"]["enum"] == [
         "forked_snapshot",
@@ -311,11 +317,17 @@ def test_codex_cli_specific_quota_code_wins_over_http_429() -> None:
     assert _event_failure_category(event) == "quota_exhausted"
 
 
-def test_codex_cli_prompt_requires_explicit_child_context_isolation() -> None:
+def test_codex_cli_prompt_isolates_subagent_instructions_to_enabled_request() -> None:
     request = _request()
 
-    prompt = _prompt(request)
+    disabled_prompt = _prompt(request)
+    assert "spawn_agent" not in disabled_prompt
+    assert "subagent_execution_topology" not in disabled_prompt
 
+    request["subagent_execution_topology"] = {
+        "schema_version": "subagent_execution_topology_v0"
+    }
+    prompt = _prompt(request)
     assert "execute the separate host_adapter projection" in prompt
     assert "fresh maps to fork_context=false" in prompt
     assert "forked_snapshot maps to fork_context=true" in prompt

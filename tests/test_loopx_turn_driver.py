@@ -23,7 +23,7 @@ from loopx.control_plane.turn_driver import (
     run_loopx_turn_once,
 )
 from loopx.control_plane.turn_driver.codex_cli import _store_codex_cli_session
-from loopx.control_plane.turn_driver.child_execution_topology import (
+from loopx.control_plane.turn_driver.subagent_execution_topology import (
     CHILD_FALLBACK_ACTIONS,
 )
 from loopx.control_plane.turn_driver.executor import BuiltInHostError
@@ -237,7 +237,7 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
             "required_write_scopes": [],
         },
     }
-    topology = payload["multi_agent_execution_topology"]
+    topology = payload["subagent_execution_topology"]
     lane = topology["lanes"][0]
     task_packet = lane["task_packet"]
     source_state_ref = "sha256:fixture"
@@ -269,7 +269,7 @@ def test_turn_plan_maps_admitted_child_to_codex_native_operation() -> None:
         }
     ]
     assert topology == {
-        "schema_version": "multi_agent_execution_topology_v0",
+        "schema_version": "subagent_execution_topology_v0",
         "goal_id": "fixture-goal",
         "bundle_id": topology["bundle_id"],
         "coordinator_agent_id": "codex-fixture",
@@ -366,7 +366,7 @@ def test_turn_plan_rejects_incomplete_child_lane_without_blocking_parent() -> No
     assert [item["todo_id"] for item in payload["child_operations"]] == [
         "todo_child002"
     ]
-    topology = payload["multi_agent_execution_topology"]
+    topology = payload["subagent_execution_topology"]
     assert topology["topology"] == "ephemeral_children"
     assert [lane["todo_id"] for lane in topology["lanes"]] == ["todo_child002"]
     assert topology["pre_spawn_rejections"] == [
@@ -403,7 +403,7 @@ def test_turn_plan_falls_back_to_serial_when_every_child_packet_is_incomplete() 
     assert payload["ok"] is True
     assert payload["route"]["kind"] == LoopXTurnRoute.READY_FOR_HOST.value
     assert "child_operations" not in payload
-    topology = payload["multi_agent_execution_topology"]
+    topology = payload["subagent_execution_topology"]
     assert topology["topology"] == "serial"
     assert topology["rationale_codes"] == [
         "parent_serial_fallback",
@@ -445,7 +445,7 @@ def test_turn_plan_rejects_excess_child_lane_without_blocking_admitted_sibling()
     assert [item["todo_id"] for item in payload["child_operations"]] == [
         "todo_child001"
     ]
-    topology = payload["multi_agent_execution_topology"]
+    topology = payload["subagent_execution_topology"]
     assert [lane["todo_id"] for lane in topology["lanes"]] == ["todo_child001"]
     rejection = topology["pre_spawn_rejections"][0]
     assert rejection["todo_id"] == "todo_child002"
@@ -543,7 +543,7 @@ def test_turn_plan_rejects_context_not_supported_by_selected_host() -> None:
 
     assert payload["ok"] is True
     assert "child_operations" not in payload
-    rejection = payload["multi_agent_execution_topology"][
+    rejection = payload["subagent_execution_topology"][
         "pre_spawn_rejections"
     ][0]
     assert rejection["reason_codes"] == ["child_task_packet_incomplete"]
@@ -570,7 +570,7 @@ def test_turn_plan_rejects_resume_without_child_session_binding() -> None:
 
     assert payload["ok"] is True
     assert "child_operations" not in payload
-    rejection = payload["multi_agent_execution_topology"][
+    rejection = payload["subagent_execution_topology"][
         "pre_spawn_rejections"
     ][0]
     assert rejection["reason_codes"] == ["child_task_packet_incomplete"]
@@ -652,12 +652,12 @@ def test_turn_plan_uses_adaptive_primary_todo_for_bundle_lineage() -> None:
         == same_primary_plan["transaction"]["turn_key"]
     )
     assert (
-        payload["multi_agent_execution_topology"]["source_state_ref"]
-        != same_primary_plan["multi_agent_execution_topology"]["source_state_ref"]
+        payload["subagent_execution_topology"]["source_state_ref"]
+        != same_primary_plan["subagent_execution_topology"]["source_state_ref"]
     )
     assert (
-        payload["multi_agent_execution_topology"]["bundle_id"]
-        == same_primary_plan["multi_agent_execution_topology"]["bundle_id"]
+        payload["subagent_execution_topology"]["bundle_id"]
+        == same_primary_plan["subagent_execution_topology"]["bundle_id"]
     )
     assert (
         payload["transaction"]["turn_key"]
@@ -683,7 +683,7 @@ def test_turn_plan_exposes_only_qualified_claude_child_contexts() -> None:
             "required_write_scopes": [],
         },
     }
-    topology = payload["multi_agent_execution_topology"]
+    topology = payload["subagent_execution_topology"]
     lane = topology["lanes"][0]
     source_state_ref = topology["source_state_ref"]
 
@@ -773,7 +773,7 @@ def test_generic_host_does_not_project_unqualified_child_operations() -> None:
 
     assert payload["ok"] is True
     assert "child_operations" not in payload
-    assert "multi_agent_execution_topology" not in payload
+    assert "subagent_execution_topology" not in payload
 
 
 def test_turn_host_request_carries_typed_child_operations() -> None:
@@ -787,8 +787,8 @@ def test_turn_host_request_carries_typed_child_operations() -> None:
 
     assert request["child_operations"] == plan["child_operations"]
     assert (
-        request["multi_agent_execution_topology"]
-        == plan["multi_agent_execution_topology"]
+        request["subagent_execution_topology"]
+        == plan["subagent_execution_topology"]
     )
     assert request["child_operations"][0]["available_contexts"][0] == "fresh"
     assert request["child_operations"][0]["host_adapter"] == {

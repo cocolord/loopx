@@ -9,12 +9,12 @@ from typing import Any
 from ..runtime.public_safety import validate_public_safe_value
 
 
-MULTI_AGENT_EXECUTION_TOPOLOGY_SCHEMA_VERSION = "multi_agent_execution_topology_v0"
-MULTI_AGENT_HOST_EXECUTION_RECEIPT_SCHEMA_VERSION = (
-    "multi_agent_host_execution_receipt_v0"
+SUBAGENT_EXECUTION_TOPOLOGY_SCHEMA_VERSION = "subagent_execution_topology_v0"
+SUBAGENT_HOST_EXECUTION_RECEIPT_SCHEMA_VERSION = (
+    "subagent_host_execution_receipt_v0"
 )
-MULTI_AGENT_CONTROL_PLANE_RECONCILIATION_SCHEMA_VERSION = (
-    "multi_agent_control_plane_reconciliation_v0"
+SUBAGENT_CONTROL_PLANE_RECONCILIATION_SCHEMA_VERSION = (
+    "subagent_control_plane_reconciliation_v0"
 )
 CHILD_EXECUTION_TASK_PACKET_SCHEMA_VERSION = "child_execution_task_packet_v0"
 CHILD_EXECUTION_GUARD_SCHEMA_VERSION = "child_execution_guard_v0"
@@ -77,6 +77,21 @@ class ChildExecutionTopologyError(ValueError):
     def __init__(self, *, reason_code: str, detail: str) -> None:
         self.reason_code = reason_code
         super().__init__(f"{reason_code}: {detail}")
+
+
+def subagent_execution_topology(
+    plan: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    topology = plan.get("subagent_execution_topology")
+    return topology if isinstance(topology, Mapping) else None
+
+
+def subagent_host_result_fields(plan: Mapping[str, Any]) -> frozenset[str]:
+    return (
+        HOST_RESULT_FIELDS
+        if subagent_execution_topology(plan) is not None
+        else frozenset()
+    )
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -153,11 +168,11 @@ def _sha256_ref(value: Mapping[str, Any]) -> str:
     ).hexdigest()
 
 
-def multi_agent_bundle_id(*, turn_key: str) -> str:
+def subagent_bundle_id(*, turn_key: str) -> str:
     return "bundle_" + _digest({"turn_key": turn_key})
 
 
-def multi_agent_lane_id(*, bundle_id: str, todo_id: str) -> str:
+def subagent_lane_id(*, bundle_id: str, todo_id: str) -> str:
     return "lane_" + _digest({"bundle_id": bundle_id, "todo_id": todo_id})
 
 
@@ -380,7 +395,7 @@ def _child_execution_lane(
         allowed_effect_classes.append("network_read")
     if has_workspace_write:
         allowed_effect_classes.append("held_workspace_write")
-    lane_id = multi_agent_lane_id(
+    lane_id = subagent_lane_id(
         bundle_id=bundle_id,
         todo_id=todo_id,
     )
@@ -411,7 +426,7 @@ def _child_execution_lane(
     }
 
 
-def build_multi_agent_execution_topology(
+def build_subagent_execution_topology(
     *,
     turn_envelope: Mapping[str, Any],
     child_operations: Sequence[Mapping[str, Any]],
@@ -441,7 +456,7 @@ def build_multi_agent_execution_topology(
     assert normalized_source_state_ref is not None
     assert goal_id is not None
     assert coordinator_agent_id is not None
-    bundle_id = multi_agent_bundle_id(turn_key=turn_key)
+    bundle_id = subagent_bundle_id(turn_key=turn_key)
     configured_max_children = orchestration.get("max_children")
     max_children = (
         configured_max_children
@@ -484,7 +499,7 @@ def build_multi_agent_execution_topology(
     if pre_spawn_rejections:
         rationale_codes.append("child_launch_rejected")
     return {
-        "schema_version": MULTI_AGENT_EXECUTION_TOPOLOGY_SCHEMA_VERSION,
+        "schema_version": SUBAGENT_EXECUTION_TOPOLOGY_SCHEMA_VERSION,
         "goal_id": goal_id,
         "bundle_id": bundle_id,
         "coordinator_agent_id": coordinator_agent_id,
@@ -538,16 +553,16 @@ def bind_child_operations_to_topology(
     return bound_operations
 
 
-def multi_agent_host_request_projection(
+def subagent_host_request_projection(
     plan: Mapping[str, Any],
 ) -> dict[str, Any]:
     projection: dict[str, Any] = {}
     child_operations = plan.get("child_operations")
     if isinstance(child_operations, list) and child_operations:
         projection["child_operations"] = child_operations
-    topology = plan.get("multi_agent_execution_topology")
+    topology = plan.get("subagent_execution_topology")
     if isinstance(topology, Mapping):
-        projection["multi_agent_execution_topology"] = dict(topology)
+        projection["subagent_execution_topology"] = dict(topology)
     return projection
 
 
@@ -561,7 +576,7 @@ def child_execution_receipts_json_schema() -> dict[str, Any]:
     properties = {
         "schema_version": {
             "type": "string",
-            "enum": [MULTI_AGENT_HOST_EXECUTION_RECEIPT_SCHEMA_VERSION],
+            "enum": [SUBAGENT_HOST_EXECUTION_RECEIPT_SCHEMA_VERSION],
         },
         "bundle_id": {"type": "string", "maxLength": 192},
         "lane_id": {"type": "string", "maxLength": 192},
@@ -608,7 +623,7 @@ def child_execution_receipts_json_schema() -> dict[str, Any]:
     }
 
 
-def normalize_multi_agent_host_execution_receipts(
+def normalize_subagent_host_execution_receipts(
     value: Any,
 ) -> list[dict[str, Any]]:
     if value is None:
@@ -635,7 +650,7 @@ def normalize_multi_agent_host_execution_receipts(
             raise ValueError(f"{field} is missing fields: {', '.join(missing)}")
         if (
             raw.get("schema_version")
-            != MULTI_AGENT_HOST_EXECUTION_RECEIPT_SCHEMA_VERSION
+            != SUBAGENT_HOST_EXECUTION_RECEIPT_SCHEMA_VERSION
         ):
             raise ValueError(f"{field} has an unsupported schema_version")
         execution_kind = str(raw.get("execution_kind") or "").strip()
@@ -651,7 +666,7 @@ def normalize_multi_agent_host_execution_receipts(
         if raw_transcript_copied is not False:
             raise ValueError(f"{field}.raw_transcript_copied must be false")
         receipt = {
-            "schema_version": MULTI_AGENT_HOST_EXECUTION_RECEIPT_SCHEMA_VERSION,
+            "schema_version": SUBAGENT_HOST_EXECUTION_RECEIPT_SCHEMA_VERSION,
             "bundle_id": _opaque_ref(
                 raw.get("bundle_id"),
                 field=f"{field}.bundle_id",
@@ -853,7 +868,7 @@ def _orphaned_receipt_projection(
     }
 
 
-def reconcile_multi_agent_execution(
+def reconcile_subagent_execution(
     topology: Mapping[str, Any] | None,
     receipts: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any] | None:
@@ -905,7 +920,7 @@ def reconcile_multi_agent_execution(
         if isinstance(item, Mapping)
     ]
     payload = {
-        "schema_version": MULTI_AGENT_CONTROL_PLANE_RECONCILIATION_SCHEMA_VERSION,
+        "schema_version": SUBAGENT_CONTROL_PLANE_RECONCILIATION_SCHEMA_VERSION,
         "bundle_id": (topology or {}).get("bundle_id"),
         "topology_present": bool(topology),
         "observation_only": True,
@@ -960,36 +975,36 @@ def reconcile_multi_agent_execution(
     return payload
 
 
-def observe_multi_agent_host_result(
+def observe_subagent_host_result(
     plan: Mapping[str, Any],
     result: Mapping[str, Any],
     normalized: dict[str, Any],
     errors: list[str],
 ) -> None:
     try:
-        receipts = normalize_multi_agent_host_execution_receipts(
+        receipts = normalize_subagent_host_execution_receipts(
             result.get("child_execution_receipts")
         )
     except ValueError as exc:
         errors.append(str(exc))
         receipts = []
     topology = (
-        plan.get("multi_agent_execution_topology")
-        if isinstance(plan.get("multi_agent_execution_topology"), Mapping)
+        plan.get("subagent_execution_topology")
+        if isinstance(plan.get("subagent_execution_topology"), Mapping)
         else None
     )
     if receipts:
         normalized["child_execution_receipts"] = receipts
-    reconciliation = reconcile_multi_agent_execution(topology, receipts)
+    reconciliation = reconcile_subagent_execution(topology, receipts)
     if reconciliation is not None:
-        normalized["multi_agent_reconciliation"] = reconciliation
+        normalized["subagent_reconciliation"] = reconciliation
 
 
-def multi_agent_execution_payload_projection(
+def subagent_execution_payload_projection(
     journal: Mapping[str, Any],
 ) -> dict[str, Any]:
     host_result = _mapping(journal.get("host_result"))
-    reconciliation = host_result.get("multi_agent_reconciliation")
+    reconciliation = host_result.get("subagent_reconciliation")
     if not isinstance(reconciliation, Mapping):
         return {}
-    return {"multi_agent_reconciliation": dict(reconciliation)}
+    return {"subagent_reconciliation": dict(reconciliation)}

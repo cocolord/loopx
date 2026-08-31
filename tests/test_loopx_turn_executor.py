@@ -16,7 +16,7 @@ from loopx.control_plane.turn_driver import (
     run_loopx_turn_once,
     validate_loopx_turn_host_result,
 )
-from loopx.control_plane.turn_driver.child_execution_topology import (
+from loopx.control_plane.turn_driver.subagent_execution_topology import (
     child_execution_receipts_json_schema,
 )
 from loopx.control_plane.turn_driver.executor import (
@@ -203,14 +203,14 @@ def _child_execution_receipt(
     effect_classes: list[str] | None = None,
     evidence_refs: list[str] | None = None,
 ) -> dict[str, object]:
-    topology = plan["multi_agent_execution_topology"]
+    topology = plan["subagent_execution_topology"]
     assert isinstance(topology, dict)
     lanes = topology["lanes"]
     assert isinstance(lanes, list)
     lane = lanes[0]
     assert isinstance(lane, dict)
     return {
-        "schema_version": "multi_agent_host_execution_receipt_v0",
+        "schema_version": "subagent_host_execution_receipt_v0",
         "bundle_id": topology["bundle_id"],
         "lane_id": lane["lane_id"],
         "goal_id": topology["goal_id"],
@@ -436,7 +436,7 @@ def test_host_result_reconciles_aligned_child_receipt() -> None:
     validation = validate_loopx_turn_host_result(plan, result)
 
     assert validation["ok"] is True
-    reconciliation = validation["result"]["multi_agent_reconciliation"]
+    reconciliation = validation["result"]["subagent_reconciliation"]
     assert reconciliation["status"] == "reconciled"
     assert reconciliation["observation_only"] is True
     assert reconciliation["settlement_enforced"] is False
@@ -486,7 +486,7 @@ def test_host_result_reconciles_aligned_child_receipt() -> None:
 
 def test_pre_spawn_rejection_remains_visible_without_blocking_parent() -> None:
     plan = _adaptive_observation_plan()
-    topology = plan["multi_agent_execution_topology"]
+    topology = plan["subagent_execution_topology"]
     topology["pre_spawn_rejections"] = [
         {
             "schema_version": "child_execution_rejection_v0",
@@ -511,7 +511,7 @@ def test_pre_spawn_rejection_remains_visible_without_blocking_parent() -> None:
     validation = validate_loopx_turn_host_result(plan, result)
 
     assert validation["ok"] is True
-    reconciliation = validation["result"]["multi_agent_reconciliation"]
+    reconciliation = validation["result"]["subagent_reconciliation"]
     assert reconciliation["status"] == "guarded"
     assert reconciliation["counts"]["pre_spawn_rejected"] == 1
     assert reconciliation["parent_blocked"] is False
@@ -525,8 +525,8 @@ def test_host_result_observes_missing_and_drifted_child_receipts() -> None:
     missing = validate_loopx_turn_host_result(plan, _host_result(plan))
 
     assert missing["ok"] is True
-    assert missing["result"]["multi_agent_reconciliation"]["status"] == "incomplete"
-    assert missing["result"]["multi_agent_reconciliation"]["lanes"][0][
+    assert missing["result"]["subagent_reconciliation"]["status"] == "incomplete"
+    assert missing["result"]["subagent_reconciliation"]["lanes"][0][
         "reason_codes"
     ] == ["worker_receipt_missing"]
 
@@ -540,7 +540,7 @@ def test_host_result_observes_missing_and_drifted_child_receipts() -> None:
     drifted = validate_loopx_turn_host_result(plan, drifted_result)
 
     assert drifted["ok"] is True
-    reconciliation = drifted["result"]["multi_agent_reconciliation"]
+    reconciliation = drifted["result"]["subagent_reconciliation"]
     assert reconciliation["status"] == "drifted"
     assert reconciliation["lanes"][0]["reason_codes"] == [
         "side_effect_boundary_exceeded"
@@ -570,7 +570,7 @@ def test_host_result_observes_missing_and_drifted_child_receipts() -> None:
         plan, packet_mismatch_result
     )
     assert packet_mismatch["ok"] is True
-    assert packet_mismatch["result"]["multi_agent_reconciliation"]["lanes"][0][
+    assert packet_mismatch["result"]["subagent_reconciliation"]["lanes"][0][
         "reason_codes"
     ] == ["task_packet_mismatch"]
 
@@ -585,7 +585,7 @@ def test_host_result_observes_missing_and_drifted_child_receipts() -> None:
         plan, context_mismatch_result
     )
     assert context_mismatch["ok"] is True
-    context_lane = context_mismatch["result"]["multi_agent_reconciliation"]["lanes"][0]
+    context_lane = context_mismatch["result"]["subagent_reconciliation"]["lanes"][0]
     assert context_lane["reason_codes"] == ["context_mode_mismatch"]
     assert context_lane["evidence_disposition"] == "quarantined"
 
@@ -595,7 +595,7 @@ def test_host_result_observes_missing_and_drifted_child_receipts() -> None:
     ]
     no_evidence = validate_loopx_turn_host_result(plan, no_evidence_result)
     assert no_evidence["ok"] is True
-    assert no_evidence["result"]["multi_agent_reconciliation"]["lanes"][0][
+    assert no_evidence["result"]["subagent_reconciliation"]["lanes"][0][
         "reason_codes"
     ] == ["aggregate_settlement_without_lane_evidence"]
 
@@ -624,7 +624,7 @@ def test_host_result_guards_terminal_unsuccessful_child_receipts(
     validation = validate_loopx_turn_host_result(plan, result)
 
     assert validation["ok"] is True
-    reconciliation = validation["result"]["multi_agent_reconciliation"]
+    reconciliation = validation["result"]["subagent_reconciliation"]
     assert reconciliation["status"] == "guarded"
     assert reconciliation["parent_blocked"] is False
     lane = reconciliation["lanes"][0]
@@ -635,7 +635,7 @@ def test_host_result_guards_terminal_unsuccessful_child_receipts(
 
 def test_terminal_unsuccessful_child_takes_priority_over_incomplete_sibling() -> None:
     plan = _adaptive_observation_plan()
-    topology = plan["multi_agent_execution_topology"]
+    topology = plan["subagent_execution_topology"]
     lanes = topology["lanes"]
     assert isinstance(lanes, list)
     sibling = {
@@ -655,7 +655,7 @@ def test_terminal_unsuccessful_child_takes_priority_over_incomplete_sibling() ->
     validation = validate_loopx_turn_host_result(plan, result)
 
     assert validation["ok"] is True
-    reconciliation = validation["result"]["multi_agent_reconciliation"]
+    reconciliation = validation["result"]["subagent_reconciliation"]
     assert reconciliation["status"] == "guarded"
     assert reconciliation["counts"]["rejected"] == 1
     assert reconciliation["counts"]["incomplete"] == 1
@@ -663,7 +663,7 @@ def test_terminal_unsuccessful_child_takes_priority_over_incomplete_sibling() ->
 
 def test_host_result_requires_planned_workspace_for_writing_child() -> None:
     plan = _adaptive_observation_plan(required_write_scopes=["src/**"])
-    topology = plan["multi_agent_execution_topology"]
+    topology = plan["subagent_execution_topology"]
     lane = topology["lanes"][0]
     receipt = _child_execution_receipt(
         plan,
@@ -674,20 +674,20 @@ def test_host_result_requires_planned_workspace_for_writing_child() -> None:
 
     missing_workspace = validate_loopx_turn_host_result(plan, result)
     assert missing_workspace["ok"] is True
-    assert missing_workspace["result"]["multi_agent_reconciliation"]["lanes"][0][
+    assert missing_workspace["result"]["subagent_reconciliation"]["lanes"][0][
         "reason_codes"
     ] == ["workspace_mismatch"]
 
     receipt["workspace_ref"] = lane["workspace_ref"]
     aligned = validate_loopx_turn_host_result(plan, result)
     assert aligned["ok"] is True
-    assert aligned["result"]["multi_agent_reconciliation"]["status"] == "reconciled"
+    assert aligned["result"]["subagent_reconciliation"]["status"] == "reconciled"
 
 
-def test_host_result_observes_unadmitted_child_and_rejects_local_path() -> None:
+def test_disabled_host_result_rejects_unadmitted_child_receipt() -> None:
     plan = _plan()
     receipt = {
-        "schema_version": "multi_agent_host_execution_receipt_v0",
+        "schema_version": "subagent_host_execution_receipt_v0",
         "bundle_id": "bundle_unadmitted",
         "lane_id": "lane_unadmitted",
         "goal_id": "fixture-goal",
@@ -707,25 +707,21 @@ def test_host_result_observes_unadmitted_child_and_rejects_local_path() -> None:
     result = _host_result(plan)
     result["child_execution_receipts"] = [receipt]
 
-    observed = validate_loopx_turn_host_result(plan, result)
-
-    assert observed["ok"] is True
-    reconciliation = observed["result"]["multi_agent_reconciliation"]
-    assert reconciliation["status"] == "drifted"
-    assert reconciliation["topology_present"] is False
-    assert reconciliation["orphaned_receipts"][0]["reason_codes"] == [
-        "unadmitted_child_spawn",
-        "orphaned_worker_result",
-    ]
-    assert reconciliation["orphaned_receipts"][0]["evidence_disposition"] == (
-        "quarantined"
+    rejected = validate_loopx_turn_host_result(plan, result)
+    assert rejected["ok"] is False
+    assert "unsupported host result fields: child_execution_receipts" in (
+        " ".join(rejected["errors"])
     )
-    assert reconciliation["orphaned_receipts"][0]["parent_blocked"] is False
-    assert reconciliation["orphaned_receipts"][0][
-        "quarantined_evidence_refs"
-    ] == ["artifact:unadmitted"]
+    assert "subagent_reconciliation" not in rejected["result"]
 
+
+def test_enabled_host_result_rejects_receipt_local_path() -> None:
+    plan = _adaptive_observation_plan()
+    result = _host_result(plan)
+    receipt = _child_execution_receipt(plan)
     receipt["workspace_ref"] = "/Users/example/raw-worker-path"
+    result["child_execution_receipts"] = [receipt]
+
     rejected = validate_loopx_turn_host_result(plan, result)
     assert rejected["ok"] is False
     assert "absolute local path" in " ".join(rejected["errors"])
@@ -754,12 +750,12 @@ def test_observation_only_reconciliation_does_not_change_settlement(
 
     assert committed["ok"] is True
     assert committed["status"] == "committed"
-    assert committed["multi_agent_reconciliation"]["status"] == "incomplete"
-    assert committed["multi_agent_reconciliation"]["settlement_enforced"] is False
-    assert committed["multi_agent_reconciliation"]["parent_blocked"] is False
+    assert committed["subagent_reconciliation"]["status"] == "incomplete"
+    assert committed["subagent_reconciliation"]["settlement_enforced"] is False
+    assert committed["subagent_reconciliation"]["parent_blocked"] is False
     assert _journal(tmp_path / "runtime")["host_result"][
-        "multi_agent_reconciliation"
-    ] == committed["multi_agent_reconciliation"]
+        "subagent_reconciliation"
+    ] == committed["subagent_reconciliation"]
     assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from loopx.control_plane.turn_driver.child_host_adapter import (
+from loopx.control_plane.turn_driver.subagent_host_adapter import (
     project_child_context_adapter,
     supported_child_context_modes,
 )
