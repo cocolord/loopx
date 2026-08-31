@@ -313,6 +313,8 @@ def run_external_agent_continuation_phase(
             "duration_ms": max(0, int((clock() - segment_started) * 1000)),
         }
         segments.append(segment_record)
+        if stdout_path.is_file():
+            stdout_path.chmod(0o600)
         if not stdout_path.is_file() or stdout_path.stat().st_size == 0:
             terminal_decision = "segment_evidence_missing"
             classification = "continuation_segment_evidence_missing"

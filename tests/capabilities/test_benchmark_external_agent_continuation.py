@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import sys
 from pathlib import Path
@@ -116,8 +117,14 @@ def test_continuation_phase_runs_bounded_segments_and_writes_private_evidence(
     assert evidence["terminal_decision"] == "stop_complete"
     assert len(evidence["segments"]) == 2
     assert evidence["raw_task_recorded"] is False
-    assert stat.S_IMODE(evidence_root.stat().st_mode) == 0o700
-    assert stat.S_IMODE(evidence_path.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(evidence_root.stat().st_mode) == 0o700
+        assert stat.S_IMODE(evidence_path.stat().st_mode) == 0o600
+        assert all(
+            stat.S_IMODE((evidence_root / segment["stdout_file"]).stat().st_mode)
+            == 0o600
+            for segment in evidence["segments"]
+        )
 
 
 @pytest.mark.parametrize(
