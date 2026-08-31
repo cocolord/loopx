@@ -72,8 +72,9 @@ loopx benchmark continuation-decision \
 
 The command is read-only. It accepts only aggregate public progress counts and
 returns `continue`, `stop_complete`, `stop_prompt_mismatch`,
-`stop_task_shape_mismatch`, `stop_round_limit`, or `stop_time_budget`, plus a
-fair-share timeout for the next segment. The runner must give the first solver
+`stop_progress_regression`, `stop_task_shape_mismatch`, `stop_round_limit`, or
+`stop_time_budget`, plus a fair-share timeout for the next segment. The runner
+must give the first solver
 segment the complete original task prompt, freeze the initial unit count, and supply
 matching independently calculated digests. Later prompts may add
 only public progress; they must not disclose verifier output or hidden evaluation.

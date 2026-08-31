@@ -77,6 +77,12 @@ def test_benchmark_continuation_decision_continues_with_bounded_budget() -> None
     [
         (_progress(5), {}, "stop_complete", "all_units_complete"),
         (
+            _progress(0),
+            {},
+            "stop_progress_regression",
+            "public_progress_regressed",
+        ),
+        (
             _progress(2),
             {"observed_first_prompt_sha256": "b" * 64},
             "stop_prompt_mismatch",

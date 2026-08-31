@@ -59,6 +59,7 @@ _SOLVER_ENVIRONMENT_ALLOWLIST = (
 class BenchmarkContinuationDecision(str, Enum):
     CONTINUE = "continue"
     STOP_COMPLETE = "stop_complete"
+    STOP_PROGRESS_REGRESSION = "stop_progress_regression"
     STOP_PROMPT_MISMATCH = "stop_prompt_mismatch"
     STOP_ROUND_LIMIT = "stop_round_limit"
     STOP_TASK_SHAPE_MISMATCH = "stop_task_shape_mismatch"
@@ -258,6 +259,9 @@ def build_benchmark_continuation_decision(
     elif not task_shape_matches:
         decision = BenchmarkContinuationDecision.STOP_TASK_SHAPE_MISMATCH
         reason = "total_unit_count_mismatch"
+    elif completed < previous:
+        decision = BenchmarkContinuationDecision.STOP_PROGRESS_REGRESSION
+        reason = "public_progress_regressed"
     elif completed == total:
         decision = BenchmarkContinuationDecision.STOP_COMPLETE
         reason = "all_units_complete"
@@ -270,13 +274,9 @@ def build_benchmark_continuation_decision(
     else:
         decision = BenchmarkContinuationDecision.CONTINUE
         reason = (
-            "public_progress_regressed"
-            if completed < previous
-            else (
-                "requirements_remain_after_progress"
-                if completed > previous
-                else "requirements_remain_without_progress"
-            )
+            "requirements_remain_after_progress"
+            if completed > previous
+            else "requirements_remain_without_progress"
         )
 
     next_timeout_ms = (
