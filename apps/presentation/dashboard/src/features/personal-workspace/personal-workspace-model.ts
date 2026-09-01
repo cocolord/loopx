@@ -50,6 +50,12 @@ export type WorkspaceRepositoryContext = {
   readOnly: true;
 };
 
+export type WorkspaceGoalSubagentConfiguration = {
+  allowedDomains: string[];
+  enabled: boolean;
+  maxChildren: number;
+};
+
 export type WorkspaceGoal = {
   activationState: "active" | "stopped";
   agentId: string;
@@ -65,6 +71,7 @@ export type WorkspaceGoal = {
   nextSentence: string;
   repository?: WorkspaceRepositoryContext;
   state: WorkspaceGoalState;
+  subagentExecution?: WorkspaceGoalSubagentConfiguration;
   title: string;
   usage?: WorkspaceGoalUsage | null;
 };
@@ -300,6 +307,12 @@ export type PersonalWorkspaceCallbacks = {
   onOpenGoalView?: (tab: WorkspaceGoalTab) => void;
   onOpenRunSession?: (run: WorkspaceRun) => void | Promise<void>;
   onOpenOutput?: (output: WorkspaceOutput) => void;
+  onPreviewGoalSubagentConfiguration?: (
+    request: WorkspaceGoalSubagentConfiguration & { goalId: string },
+  ) => Promise<{ changed: boolean; previewId: string }>;
+  onApplyGoalSubagentConfiguration?: (
+    request: WorkspaceGoalSubagentConfiguration & { goalId: string; previewId: string },
+  ) => Promise<void>;
   onGoalActivationStateChange?: (goalId: string, activationState: "active" | "stopped") => void;
   onGoalDeleted?: (goalId: string) => void;
   onReconcileStatus?: () => void | Promise<void>;

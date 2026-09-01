@@ -153,6 +153,7 @@ loopx goal-lifecycle --goal-id <goal-id> --operation resume --execute
 
 - **执行健康度**：展示 Session ID、是否可继续以及当前 Agent 状态；
 - **代码仓只读绑定**：明确展示当前绑定的 GitHub / 本地仓库、生效分支及只读隔离属性；
+- **自适应子代理执行**：按 Goal 展示当前开关、允许的 `task_domain` 与最多子代理数；
 - **Lark / 飞书话题连接**：
   - 展示当前绑定的飞书群组与 Topic 话题；
   - **Capture scope**：可选择只接收明确 @ / 回复 App 的消息，或接收该 Goal Topic
@@ -165,6 +166,39 @@ loopx goal-lifecycle --goal-id <goal-id> --operation resume --execute
     - **Async inbox (`async_inbox`)**：写入该 Agent 的本地私有收件箱，等待后续显式
       `lark-inbox drain`；投递本身不会创建内联 Session，也不会提前回复或 ACK；
   - **Reply mode**：回复仍限定在来源 Topic 内，避免跨群或跨 Goal 投递。
+
+### 6.1 按 Goal 体验自适应子代理执行
+
+该能力默认关闭。要为一个 Goal 开启：
+
+1. 进入该 Goal，点击 **`Goal 详情`**；
+2. 在「自适应子代理执行」中填写一个或多个 Todo `task_domain`，例如
+   `code, validation`，并选择最多子代理数；
+3. 点击开关。此时只生成零写入预览；检查领域与并发上限后，再点击「确认」；
+4. 界面只有在 source registry 写入、共享 registry 同步和读回校验都成功后，才把
+   开关显示为「开启」。
+
+可在终端读取同一权威配置和运行时决策：
+
+```bash
+loopx configure-goal --goal-id <goal-id>
+loopx quota should-run --goal-id <goal-id>
+```
+
+关闭时再次点击开关、检查预览并确认；也可以使用同一配置入口：
+
+```bash
+loopx configure-goal \
+  --goal-id <goal-id> \
+  --multi-subagent-feature off \
+  --execute
+```
+
+这个开关只给运行时增加有界的临时子代理容量，不会强制并行，不会创建持久 Agent
+层级，也不会绕过 Todo 归属、quota、能力、Gate 或写入范围。SSH 状态来源保持只读，
+必须在 Goal 所在主机上修改。`task_domain` 会进入 Goal 配置，不要填写凭证、客户名或
+其他私密信息。完整执行语义见
+[Codex sub-agent orchestration](../integrations/codex-subagent-orchestration.md)。
 
 在「通知设置 → Lark / 飞书 → Connections」中选择 Goal、Target Agent、群聊、
 Capture scope 与 Agent ingress，保存后可在同一页读回当前模式、Session 绑定状态、

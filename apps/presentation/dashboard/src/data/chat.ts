@@ -103,6 +103,7 @@ export const chatCapabilitiesSchema = z.object({
   sandbox: z.string(),
   approval_policy: z.string(),
   todo_write: z.string(),
+  goal_subagent_configuration: z.string().optional(),
   goal_id: z.string().nullable(),
   streaming: z.boolean().optional(),
   resume: z.boolean().optional(),
@@ -197,6 +198,44 @@ export const todoApplyResultSchema = z.object({
     todo_id: z.string(),
   }),
 });
+
+const goalSubagentOrchestrationSchema = z.object({
+  mode: z.string(),
+  spawn_allowed: z.boolean(),
+  max_children: z.number().int().nonnegative(),
+  allowed_domains: z.array(z.string()).optional().default([]),
+}).passthrough();
+
+export const goalSubagentConfigurationResultSchema = z.object({
+  ok: z.literal(true),
+  dry_run: z.boolean(),
+  execute: z.boolean(),
+  written: z.boolean(),
+  changed: z.boolean(),
+  goal_id: z.string().min(1),
+  changed_fields: z.array(z.string()),
+  before: z.object({ orchestration: goalSubagentOrchestrationSchema }).passthrough(),
+  after: z.object({ orchestration: goalSubagentOrchestrationSchema }).passthrough(),
+  preview_id: z.string().min(1),
+  feature_summary: z.object({ multi_subagent: z.enum(["off", "enabled"]) }).passthrough(),
+  global_sync: z.object({
+    required: z.boolean(),
+    executed: z.boolean(),
+    readback: z.object({
+      status: z.string(),
+      verified: z.boolean(),
+    }).passthrough(),
+  }).passthrough(),
+});
+
+export type GoalSubagentConfigurationResult = z.infer<typeof goalSubagentConfigurationResultSchema>;
+
+export type GoalSubagentConfigurationRequest = {
+  allowedDomains: string[];
+  enabled: boolean;
+  goalId: string;
+  maxChildren: number;
+};
 
 export const storedDecisionHistoryItemSchema = z
   .object({
@@ -791,6 +830,82 @@ export async function resumeChatSession(sessionId: string) {
     `/api/chat/sessions/${sessionId}/resume`,
     { method: "POST", body: "{}" },
   );
+}
+
+function goalSubagentConfigurationBody(request: GoalSubagentConfigurationRequest) {
+  return {
+    goal_id: request.goalId,
+    enabled: request.enabled,
+    ...(request.enabled ? {
+      max_children: request.maxChildren,
+      allowed_domains: request.allowedDomains,
+    } : {}),
+  };
+}
+
+function verifyGoalSubagentConfigurationResult(
+  result: GoalSubagentConfigurationResult,
+  request: GoalSubagentConfigurationRequest,
+) {
+  const orchestration = result.after.orchestration;
+  const expectedDomains = [...new Set(request.allowedDomains)];
+  const enabled = result.feature_summary.multi_subagent === "enabled";
+  const matchesRequest = result.goal_id === request.goalId
+    && enabled === request.enabled
+    && (request.enabled
+      ? orchestration.max_children === request.maxChildren
+        && JSON.stringify(orchestration.allowed_domains) === JSON.stringify(expectedDomains)
+      : orchestration.spawn_allowed === false && orchestration.max_children === 0);
+  if (!matchesRequest) {
+    throw new ChatApiError("Goal 子代理配置回执与本次请求不一致，界面已停止更新。", {
+      after: result.after,
+      goal_id: result.goal_id,
+    });
+  }
+  return result;
+}
+
+export async function previewGoalSubagentConfiguration(
+  request: GoalSubagentConfigurationRequest,
+) {
+  const result = goalSubagentConfigurationResultSchema.parse(
+    await requestJson<unknown>("/api/chat/goal-subagents/dry-run", {
+      method: "POST",
+      body: JSON.stringify(goalSubagentConfigurationBody(request)),
+    }),
+  );
+  if (!result.dry_run || result.execute || result.written) {
+    throw new ChatApiError("Goal 子代理预览返回了非预览回执，已停止进入确认状态。", {
+      result,
+    });
+  }
+  return verifyGoalSubagentConfigurationResult(result, request);
+}
+
+export async function applyGoalSubagentConfiguration(
+  request: GoalSubagentConfigurationRequest,
+  previewId: string,
+) {
+  const result = goalSubagentConfigurationResultSchema.parse(
+    await requestJson<unknown>("/api/chat/goal-subagents/apply", {
+      method: "POST",
+      body: JSON.stringify({
+        ...goalSubagentConfigurationBody(request),
+        preview_id: previewId,
+      }),
+    }),
+  );
+  if (result.preview_id !== previewId || result.dry_run || !result.execute) {
+    throw new ChatApiError("Goal 子代理写入回执与本次确认不一致，界面已停止更新。", {
+      result,
+    });
+  }
+  if (result.changed && (!result.written
+    || !result.global_sync.executed
+    || !result.global_sync.readback.verified)) {
+    throw new ChatApiError("Goal 子代理设置未通过共享状态读回验证。", { result });
+  }
+  return verifyGoalSubagentConfigurationResult(result, request);
 }
 
 export async function previewTodo(goalId: string, text: string) {

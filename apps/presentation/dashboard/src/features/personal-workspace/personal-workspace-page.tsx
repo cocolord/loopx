@@ -856,12 +856,16 @@ export function PersonalWorkspacePage({
   }, [managerChatItems.length, managerChatOpen, latestMessageTextLength]);
   const drawerSelection = useMemo<Exclude<WorkspaceDrawerSelection, { kind: "settings" }> | null>(() => {
     if (selection?.kind === "settings") return null;
+    if (selection?.kind === "goal") {
+      const currentGoal = workspaceGoals.find((goal) => goal.goalId === selection.item.goalId);
+      return currentGoal ? { item: currentGoal, kind: "goal" } : selection;
+    }
     if (selection?.kind !== "run") return selection;
     const currentRun = items.find((item): item is Extract<WorkspaceTimelineItem, { kind: "run" }> =>
       item.kind === "run" && item.run.runId === selection.item.runId
     );
     return currentRun ? { item: currentRun.run, kind: "run" } : selection;
-  }, [items, selection]);
+  }, [items, selection, workspaceGoals]);
 
   useEffect(() => {
     if (readOnly) {

@@ -43,7 +43,7 @@ async function visibleElementCount(locator) {
 
 async function installApi(page) {
   let turnCounter = 0;
-  const runtime = page.__loopxRuntime ??= { actionProposals: new Map(), larkConnections: [], messages: new Map(), sessions: new Map(), turnMessages: new Map() };
+  const runtime = page.__loopxRuntime ??= { actionProposals: new Map(), goalSubagentConfigurations: new Map(), larkConnections: [], messages: new Map(), sessions: new Map(), turnMessages: new Map() };
   const actionProposals = runtime.actionProposals;
   const sessions = runtime.sessions;
   const messages = runtime.messages;
@@ -63,6 +63,8 @@ async function installApi(page) {
       ["legacy-benchmark", "stopped"],
       ["archived-notes", "stopped"],
     ]),
+    goalSubagentPreviews: [],
+    goalSubagentWrites: [],
     interrupts: [],
     larkWrites: [],
     actionTransitions: [],
@@ -72,6 +74,7 @@ async function installApi(page) {
     statusRequestCount: 0,
     turnRequests: [],
     get larkConnections() { return runtime.larkConnections; },
+    get goalSubagentConfigurations() { return runtime.goalSubagentConfigurations; },
   };
   await page.route(`http://127.0.0.1:${port}/status.json`, async (route) => {
     state.statusRequestCount += 1;
@@ -87,6 +90,8 @@ async function installApi(page) {
       const existingGoal = fixture.run_history.goals.find((goal) => goal.id === directoryGoal.id);
       if (existingGoal) {
         existingGoal.activation_state = activation_state;
+        existingGoal.spawn_policy = runtime.goalSubagentConfigurations.get(directoryGoal.id)
+          ?? { mode: "default", spawn_allowed: false, max_children: 0, allowed_domains: [] };
         continue;
       }
       fixture.run_history.goals.push({
@@ -94,9 +99,16 @@ async function installApi(page) {
         status: "active-read-only", registry_member: true,
         legacy_runtime_goal: false, adapter_kind: "generic_project_goal_v0", adapter_status: "connected",
         lifecycle_phase: "registered", lifecycle_flags: ["registered"],
+        spawn_policy: runtime.goalSubagentConfigurations.get(directoryGoal.id)
+          ?? { mode: "default", spawn_allowed: false, max_children: 0, allowed_domains: [] },
         quota: { compute: 1, window_hours: 24, slot_minutes: 1, allowed_slots: 1440, spent_slots: 0, state: activation_state === "stopped" ? "paused" : "waiting" },
         index_exists: false, raw_index_records: 0, unique_runs: 0, latest_runs: [],
       });
+    }
+    for (const fixtureGoal of fixture.run_history.goals) {
+      fixtureGoal.spawn_policy = runtime.goalSubagentConfigurations.get(fixtureGoal.id)
+        ?? fixtureGoal.spawn_policy
+        ?? { mode: "default", spawn_allowed: false, max_children: 0, allowed_domains: [] };
     }
     if (!fixture.run_history.goals.some((goal) => goal.id === "stale-browser-goal")) {
       fixture.run_history.goals.push({
@@ -256,10 +268,51 @@ async function installApi(page) {
       await route.fulfill({ contentType: "application/json", json: { ok: true, status: "disconnected" }, status: 200 });
       return;
     }
+    if (["/api/chat/goal-subagents/dry-run", "/api/chat/goal-subagents/apply"].includes(url.pathname) && request.method() === "POST") {
+      const body = request.postDataJSON();
+      const apply = url.pathname.endsWith("/apply");
+      const before = runtime.goalSubagentConfigurations.get(body.goal_id)
+        ?? { mode: "default", spawn_allowed: false, max_children: 0, allowed_domains: [] };
+      const after = body.enabled
+        ? { mode: "multi_subagent", spawn_allowed: true, max_children: body.max_children, allowed_domains: body.allowed_domains }
+        : { mode: "default", spawn_allowed: false, max_children: 0 };
+      const changed = JSON.stringify(before) !== JSON.stringify(after);
+      const previewId = `goal-subagents-${body.goal_id}-${JSON.stringify(after)}`;
+      if (apply && body.preview_id !== previewId) {
+        await route.fulfill({ contentType: "application/json", json: { ok: false, error: "stale Goal sub-agent preview", error_code: "stale_goal_subagent_preview" }, status: 409 });
+        return;
+      }
+      if (apply && changed) {
+        runtime.goalSubagentConfigurations.set(body.goal_id, after);
+        state.goalSubagentWrites.push({ ...body });
+        state.durableWriteCount += 1;
+      } else if (!apply) {
+        state.goalSubagentPreviews.push({ ...body, preview_id: previewId });
+      }
+      await route.fulfill({ contentType: "application/json", json: {
+        ok: true,
+        dry_run: !apply,
+        execute: apply,
+        written: apply && changed,
+        changed,
+        goal_id: body.goal_id,
+        changed_fields: changed ? ["orchestration"] : [],
+        before: { orchestration: before },
+        after: { orchestration: after },
+        preview_id: previewId,
+        feature_summary: { multi_subagent: body.enabled ? "enabled" : "off" },
+        global_sync: {
+          required: changed,
+          executed: apply && changed,
+          readback: { status: apply && changed ? "verified" : changed ? "not_executed" : "not_required", verified: apply && changed },
+        },
+      }, status: 200 });
+      return;
+    }
     if (url.pathname === "/api/chat/capabilities") {
       await route.fulfill({ contentType: "application/json", json: {
         ok: true, schema_version: "loopx_chat_capabilities_v1", agent_backend: "multi_adapter",
-        sandbox: "read-only", approval_policy: "never", todo_write: "preview_locked",
+        sandbox: "read-only", approval_policy: "never", todo_write: "preview_locked", goal_subagent_configuration: "preview_locked",
         goal_id: null, streaming: true, resume: true, interrupt: true, typed_actions: true,
         action_kinds: ["goal.create", "goal.lifecycle", "agent.bind", "heartbeat.bind", "monitor.create", "run.correct"],
         adapters: [
@@ -507,7 +560,7 @@ async function installApi(page) {
 async function main() {
   const { chromium } = loadPlaywright();
   await mkdir(outputDir, { recursive: true });
-  const results = new Map(Array.from({ length: 20 }, (_, index) => [index + 1, { status: "UNTESTED", note: "" }]));
+  const results = new Map(Array.from({ length: 22 }, (_, index) => [index + 1, { status: "UNTESTED", note: "" }]));
   const observations = [];
   const pass = (criterion, note) => results.set(criterion, { status: "PASS", note });
   const fail = (criterion, note) => results.set(criterion, { status: "FAIL", note });
@@ -618,6 +671,35 @@ async function main() {
     await page.screenshot({ path: resolve(outputDir, "desktop-first-screen.png"), fullPage: false, animations: "disabled" });
     pass(4, "First viewport exposes needs-you, running, observing, and scheduled Goal lanes with collapsed history.");
     pass(15, "Desktop viewport matches the approved single-sidebar/channel/drawer composition.");
+
+    await page.locator(".personal-goal-link").first().click();
+    await page.getByRole("button", { name: "Goal 详情" }).click();
+    const subagentSwitch = page.getByRole("switch", { name: "预览开启子代理执行" });
+    await subagentSwitch.waitFor({ state: "visible" });
+    if (await subagentSwitch.getAttribute("aria-checked") !== "false") throw new Error("Per-Goal sub-agent execution did not default off");
+    await page.getByLabel("允许的任务领域").fill("code, validation");
+    await page.getByLabel("最多子代理数").selectOption("2");
+    const writesBeforeSubagentPreview = api.durableWriteCount;
+    await subagentSwitch.click();
+    await page.getByText("预览已锁定，确认后才会写入这个 Goal。", { exact: true }).waitFor({ state: "visible" });
+    if (api.durableWriteCount !== writesBeforeSubagentPreview) throw new Error("Sub-agent preview mutated durable Goal state");
+    if (api.goalSubagentPreviews.at(-1)?.allowed_domains.join(",") !== "code,validation") throw new Error("Sub-agent preview lost the bounded task domains");
+    await page.locator(".personal-subagent-preview").getByRole("button", { name: "确认", exact: true }).click();
+    await page.getByText("已写入，并通过共享 Goal 状态读回校验。", { exact: true }).waitFor({ state: "visible" });
+    const enabledSubagentSwitch = page.getByRole("switch", { name: "预览关闭子代理执行" });
+    await enabledSubagentSwitch.waitFor({ state: "visible" });
+    if (await enabledSubagentSwitch.getAttribute("aria-checked") !== "true") throw new Error("Verified status readback did not turn the per-Goal switch on");
+    if (api.durableWriteCount !== writesBeforeSubagentPreview + 1) throw new Error("Sub-agent apply did not produce exactly one durable Goal write");
+    await page.screenshot({ path: resolve(outputDir, "goal-subagent-toggle.png"), fullPage: false, animations: "disabled" });
+
+    await enabledSubagentSwitch.click();
+    await page.locator(".personal-subagent-preview").getByRole("button", { name: "确认", exact: true }).click();
+    const disabledSubagentSwitch = page.getByRole("switch", { name: "预览开启子代理执行" });
+    await disabledSubagentSwitch.waitFor({ state: "visible" });
+    if (await disabledSubagentSwitch.getAttribute("aria-checked") !== "false") throw new Error("Verified status readback did not turn the per-Goal switch off");
+    if (api.durableWriteCount !== writesBeforeSubagentPreview + 2) throw new Error("Sub-agent disable did not produce exactly one additional durable Goal write");
+    pass(22, "Per-Goal sub-agent execution stays default-off, requires bounded task domains, previews before writing, verifies shared-state readback, and can be disabled again.");
+    await page.getByRole("button", { name: /关闭详情/ }).click();
 
     if (await page.locator("html").getAttribute("lang") !== "zh-CN") throw new Error("Desktop did not start in Simplified Chinese");
     await page.getByRole("button", { name: "设置", exact: true }).click();

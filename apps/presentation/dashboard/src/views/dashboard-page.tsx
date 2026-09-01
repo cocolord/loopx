@@ -20,6 +20,7 @@ import {
 } from "../data/status";
 import {
   ChatApiError,
+  applyGoalSubagentConfiguration,
   applyTypedAction,
   applyTodo,
   closeChatSession,
@@ -29,6 +30,7 @@ import {
   fetchChatSession,
   fetchChatSessions,
   interruptChatTurn,
+  previewGoalSubagentConfiguration,
   previewTodo,
   previewTypedAction,
   recordProjectionExchange,
@@ -480,6 +482,11 @@ type PersonalGoalItem = {
   nextSentence: string;
   runEvidence?: PersonalRunEvidence | null;
   state: PersonalGoalState;
+  subagentExecution: {
+    allowedDomains: string[];
+    enabled: boolean;
+    maxChildren: number;
+  };
   title: string;
   usage?: WorkspaceGoalUsage | null;
 };
@@ -1186,6 +1193,13 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
       nextSentence,
       runEvidence: personalRunEvidence(payload, row),
       state,
+      subagentExecution: {
+        allowedDomains: goal.spawn_policy?.allowed_domains ?? [],
+        enabled: goal.spawn_policy?.mode === "multi_subagent"
+          && goal.spawn_policy.spawn_allowed === true
+          && goal.spawn_policy.max_children > 0,
+        maxChildren: goal.spawn_policy?.max_children ?? 0,
+      },
       title: personalGoalTitle(goal.id, goal.display_name),
       usage: (() => {
         const goalUsage = usageById.get(goal.id);
@@ -2454,6 +2468,17 @@ function PersonalGoalHome({
             });
           },
           onOpenOutput: (output) => openGoalChat(output.goalId),
+          onPreviewGoalSubagentConfiguration: async (request) => {
+            const preview = await previewGoalSubagentConfiguration(request);
+            return {
+              changed: preview.changed,
+              previewId: preview.preview_id,
+            };
+          },
+          onApplyGoalSubagentConfiguration: async ({ previewId, ...request }) => {
+            await applyGoalSubagentConfiguration(request, previewId);
+            await onRefresh();
+          },
           onGoalActivationStateChange,
           onGoalDeleted,
           onReconcileStatus,

@@ -290,6 +290,29 @@
 .personal-goal-repository h3 { display: flex; align-items: center; gap: 8px; }
 .personal-goal-notification h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .personal-connection-status { padding: 2px 8px; border-radius: 99px; background: var(--pw-green-bg); color: var(--pw-green); font-size: 10px; font-weight: 650; }
+.personal-subagent-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.personal-subagent-heading h3 { display: flex; align-items: center; gap: 7px; margin-bottom: 0; }
+.personal-subagent-switch { display: inline-flex; flex: none; align-items: center; gap: 7px; min-height: 32px; padding: 4px 9px 4px 5px; border: 1px solid var(--pw-line-strong); border-radius: 99px; background: #f2f1ed; color: var(--pw-muted); cursor: pointer; font-size: 11px; font-weight: 700; }
+.personal-subagent-switch > span { position: relative; width: 30px; height: 18px; border-radius: 99px; background: #c8c8c2; transition: background .18s ease; }
+.personal-subagent-switch > span::after { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: #fff; content: ""; transition: transform .18s ease; }
+.personal-subagent-switch[aria-checked="true"] { border-color: #b9dccb; background: var(--pw-green-bg); color: var(--pw-green); }
+.personal-subagent-switch[aria-checked="true"] > span { background: var(--pw-green); }
+.personal-subagent-switch[aria-checked="true"] > span::after { transform: translateX(12px); }
+.personal-subagent-switch:disabled { cursor: default; opacity: .55; }
+.personal-subagent-fields { display: grid; grid-template-columns: minmax(0, 1fr) 112px; gap: 10px; margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--pw-line); }
+.personal-subagent-fields label { display: grid; align-content: start; gap: 6px; color: var(--pw-text); font-size: 11.5px; font-weight: 650; }
+.personal-subagent-fields input, .personal-subagent-fields select { min-width: 0; min-height: 38px; padding: 0 10px; border: 1px solid var(--pw-line-strong); border-radius: 9px; background: #fff; color: var(--pw-text); font: inherit; font-size: 12px; }
+.personal-subagent-fields label small { color: var(--pw-faint); font-size: 10.5px; font-weight: 450; line-height: 1.45; }
+.personal-subagent-fields .personal-secondary-action { grid-column: 1 / -1; margin-top: 0; }
+.personal-subagent-preview { margin-top: 13px; padding: 12px; border: 1px solid #d8c67a; border-radius: 10px; background: #fffbed; }
+.personal-subagent-preview > strong { font-size: 12.5px; }
+.personal-subagent-preview > p { margin: 5px 0 0; }
+.personal-subagent-preview > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.personal-subagent-preview .personal-primary-action, .personal-subagent-preview .personal-secondary-action { min-height: 38px; margin-top: 10px; }
+.personal-subagent-feedback { display: flex; align-items: flex-start; gap: 7px; margin: 10px 0 0 !important; }
+.personal-subagent-feedback.is-success { color: var(--pw-green) !important; }
+.personal-subagent-feedback.is-error { color: var(--pw-red) !important; }
+.personal-subagent-read-only { margin-bottom: 0; }
 
 .personal-settings-page { --pw-bg: #fbfaf7; --pw-card: #ffffff; --pw-line: #eceae3; --pw-line-strong: #e0ddd4; --pw-muted: #82889a; --pw-faint: #aab0bf; --pw-text: #23262e; --pw-blue: #2f66e9; --pw-blue-ink: #2456c8; --pw-blue-soft: #ebf1fe; --pw-red: #c2402f; --pw-red-bg: #fcecea; --pw-green: #2e7d5b; --pw-green-bg: #e6f3ec; display: grid; grid-template-columns: 268px minmax(0, 1fr); min-height: 100vh; background: var(--pw-bg); color: var(--pw-text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
 .personal-settings-sidebar { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 18px 14px; border-right: 1px solid var(--pw-line); background: #f5f3ee; }
@@ -800,7 +823,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .personal-timeline-row, .personal-diagnostics-trigger svg, .personal-workspace-sidebar, .personal-stopped-goals > summary svg { transition: none; }
+  .personal-timeline-row, .personal-diagnostics-trigger svg, .personal-workspace-sidebar, .personal-stopped-goals > summary svg, .personal-subagent-switch > span, .personal-subagent-switch > span::after { transition: none; }
   .personal-spin { animation: none; }
 }
 
@@ -938,6 +961,15 @@
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-inline-agent-select { border: 2px solid #141414; border-radius: 4px; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-inline-agent-select select { border: 2px solid #141414; border-radius: 4px; color: #141414; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-inline-resume-when input { border: 2px solid #141414; border-radius: 4px; color: #141414; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-switch,
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-fields input,
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-fields select,
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-preview { border: 2px solid #141414; border-radius: 4px; color: #141414; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-switch { background: #fff; box-shadow: 2px 2px 0 #141414; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-switch[aria-checked="true"] { background: #baf2c7; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-switch > span { background: #777; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-switch[aria-checked="true"] > span { background: #141414; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-preview { background: #fff3c9; box-shadow: 2px 2px 0 #141414; }
 
 /* ===== 晨间摘要 + Agent 全景 + 会话提示 + 优先级徽章 ===== */
 .personal-digest-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; padding: 13px 16px; border: 1px solid var(--pw-line); border-radius: 14px; background: linear-gradient(135deg, #fff, #fbf7ee); }

@@ -194,6 +194,23 @@ assert.match(model, /repository\??:\s*WorkspaceRepositoryContext/, "Goal exposes
 assert.match(drawer, /t\("drawer\.repository"\)/, "Goal settings display the localized repository label");
 assert.match(drawer, /t\("common\.readOnly"\)/, "Repository is visibly read-only");
 assert.doesNotMatch(drawer, /Add repository/, "Goal settings do not imply repository binding controls");
+assert.match(model, /subagentExecution\??:\s*WorkspaceGoalSubagentConfiguration/, "Goal exposes the projected sub-agent execution boundary");
+for (const callback of ["onPreviewGoalSubagentConfiguration", "onApplyGoalSubagentConfiguration"]) {
+  assert.match(model, new RegExp(`${callback}\\??:`), `Goal sub-agent settings expose ${callback}`);
+  assert.match(drawer, new RegExp(`callbacks\\.${callback}`), `Goal drawer calls ${callback}`);
+}
+assert.match(drawer, /role="switch"/, "Goal sub-agent control uses an accessible switch");
+assert.match(drawer, /subagentPreview && subagentMutationState === "ready"/, "Goal sub-agent writes require a visible preview state");
+assert.match(drawer, /normalize.*SubagentDomains|normalizedSubagentDomains/, "Goal sub-agent domains are validated before preview");
+assert.match(chatData, /\/api\/chat\/goal-subagents\/dry-run/, "Dashboard uses the local preview-locked Goal sub-agent API");
+assert.match(chatData, /\/api\/chat\/goal-subagents\/apply/, "Dashboard applies Goal sub-agent settings through the same local API");
+assert.match(chatData, /global_sync\.readback\.verified/, "Goal sub-agent success requires shared-state readback verification");
+assert.match(dashboard, /goal\.spawn_policy\?\.mode === "multi_subagent"/, "Rendered switch state comes from the status spawn-policy projection");
+assert.match(dashboard, /previewGoalSubagentConfiguration/, "Goal setting preview delegates to the canonical Chat data adapter");
+assert.match(dashboard, /applyGoalSubagentConfiguration/, "Goal setting apply delegates to the canonical Chat data adapter");
+assert.match(page, /selection\?\.kind === "goal"[\s\S]*workspaceGoals\.find/, "An open Goal drawer follows refreshed status readback");
+assert.doesNotMatch(drawer, /localStorage[\s\S]{0,120}subagent|subagent[\s\S]{0,120}localStorage/i, "Goal sub-agent state is never stored in browser-local authority");
+assert.match(i18n, /drawer\.subagentDescription/, "Sub-agent authority boundaries are localized in the Goal drawer");
 
 for (const lane of ["needs_you", "running", "observing", "scheduled", "history"]) {
   assert.match(model, new RegExp(`"${lane}"`), `Manager home models the ${lane} lane`);
