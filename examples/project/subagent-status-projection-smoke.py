@@ -151,6 +151,12 @@ def main() -> int:
     latest = goal["latest_runs"][0]
 
     assert payload["ok"] is True, payload
+    assert goal["spawn_policy"] == {
+        "mode": "multi_subagent",
+        "spawn_allowed": True,
+        "max_children": 3,
+        "allowed_domains": ["docs", "validation", "implementation"],
+    }, goal
     assert activity["source"] == "run_history", activity
     assert activity["parent_goal_id"] == GOAL_ID, activity
     assert activity["child_count"] == 3, activity

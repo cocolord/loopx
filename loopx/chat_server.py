@@ -22,6 +22,7 @@ from .chat_agent import CodexChatAgentError
 from .chat_attachments import normalize_chat_image_attachments
 from .chat_actions import ChatActionService, ProtectedActionGate
 from .chat_action_store import ACTION_KINDS, ActionConflictError, ChatActionStore
+from .chat_goal_subagent_api import CHAT_GOAL_SUBAGENT_APPLY_PATH, CHAT_GOAL_SUBAGENT_DRY_RUN_PATH, GoalSubagentConfigurationRequestMixin
 from .chat_runtime import ChatRuntimeController, TERMINAL_TURN_STATES
 from .chat_ssh_source_api import SSH_SOURCE_ENSURE_PATH, SshSourceRequestMixin
 from .chat_store import ChatSessionStore
@@ -101,6 +102,8 @@ CHAT_LARK_CHATS_PATH = "/api/chat/lark/chats"
 CHAT_LARK_CONNECTIONS_PATH = "/api/chat/lark/connections"
 CHAT_ACTIONS_PATH = "/api/actions"
 CHAT_ACTION_PREVIEW_PATH = f"{CHAT_ACTIONS_PATH}/preview"
+
+
 def chat_cors_response_headers(origin: str | None) -> dict[str, str]:
     headers = cors_response_headers(origin)
     if headers:
@@ -429,6 +432,7 @@ class ChatHTTPServer(ThreadingHTTPServer):
 class ChatRequestHandler(
     AttachedSessionRequestMixin,
     SshSourceRequestMixin,
+    GoalSubagentConfigurationRequestMixin,
     LarkChatRequestMixin,
     BaseHTTPRequestHandler,
 ):
@@ -1291,6 +1295,7 @@ class ChatRequestHandler(
                     "sandbox": "read-only",
                     "approval_policy": "never",
                     "todo_write": "preview_locked",
+                    "goal_subagent_configuration": "preview_locked",
                     "goal_id": self.server.selected_goal_id,
                     "streaming": True,
                     "resume": True,
@@ -1354,6 +1359,8 @@ class ChatRequestHandler(
             CHAT_ACTION_PREVIEW_PATH: self._action_preview,
             CHAT_TODO_DRY_RUN_PATH: lambda: self._todo(apply=False),
             CHAT_TODO_APPLY_PATH: lambda: self._todo(apply=True),
+            CHAT_GOAL_SUBAGENT_DRY_RUN_PATH: lambda: self._goal_subagent_configuration(apply=False),
+            CHAT_GOAL_SUBAGENT_APPLY_PATH: lambda: self._goal_subagent_configuration(apply=True),
             CHAT_GOAL_CHANNEL_SETUP_PATH: self._goal_channel_setup,
             CHAT_GOAL_CHANNEL_CONFIGURE_PATH: self._goal_channel_configure,
             CHAT_LARK_APP_SETUPS_PATH: self._lark_setup_start,

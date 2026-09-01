@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from ...boundary_authority import checkpointed_boundary_authority_summary
+from ...orchestration import compact_orchestration_policy
 from .run_context_retention import (
     compact_goal_semantic_history,
     latest_runs_with_agent_context,
@@ -102,6 +103,9 @@ def build_run_history(
                 "coordination": compact_goal_coordination(goal.get("coordination")),
                 "explore_graph": goal.get("explore_graph")
                 if isinstance(goal.get("explore_graph"), dict)
+                else None,
+                "spawn_policy": compact_orchestration_policy(goal.get("spawn_policy"))
+                if isinstance(goal.get("spawn_policy"), dict)
                 else None,
                 "guards": goal.get("guards") if isinstance(goal.get("guards"), list) else [],
                 "next_probe": goal.get("next_probe"),
