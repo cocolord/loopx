@@ -77,7 +77,7 @@ def test_default_segment_runner_enforces_allocated_timeout(tmp_path: Path) -> No
     assert "started" in stdout_path.read_text(encoding="utf-8")
 
 
-def test_continuation_phase_stops_after_segment_timeout(
+def test_continuation_phase_uses_remaining_budget_after_segment_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace = tmp_path / "workspace"
@@ -85,9 +85,17 @@ def test_continuation_phase_stops_after_segment_timeout(
     monkeypatch.chdir(workspace)
     request = _request(workspace)
 
+    calls = 0
+
     def timed_out_segment(_command, _cwd, _environment, _instruction, stdout_path):
+        nonlocal calls
+        calls += 1
         stdout_path.write_text('{"type":"thread.started"}\n', encoding="utf-8")
-        raise BenchmarkSegmentTimeout
+        if calls == 1:
+            raise BenchmarkSegmentTimeout
+        return 0
+
+    progress_values = iter([_progress(0), _progress(1), _progress(5)])
 
     result = run_external_agent_continuation_phase(
         request,
@@ -98,20 +106,19 @@ def test_continuation_phase_stops_after_segment_timeout(
         max_agent_segments=2,
         private_evidence_root=tmp_path / "evidence",
         segment_runner=timed_out_segment,
-        progress_runner=lambda *_args: _progress(0),
+        progress_runner=lambda *_args: next(progress_values),
     )
 
     assert result["status"] == "succeeded"
-    assert result["receipt"]["classification"] == (
-        "continuation_time_budget_exhausted"
-    )
+    assert result["receipt"]["classification"] == "solver_completed"
     evidence = json.loads(
         (tmp_path / "evidence" / "continuation-private.json").read_text(
             encoding="utf-8"
         )
     )
-    assert evidence["terminal_decision"] == "stop_time_budget"
+    assert evidence["terminal_decision"] == "stop_complete"
     assert evidence["segments"][0]["timed_out"] is True
+    assert evidence["segments"][1]["timed_out"] is False
 
 
 def test_continuation_phase_runs_bounded_segments_and_writes_private_evidence(

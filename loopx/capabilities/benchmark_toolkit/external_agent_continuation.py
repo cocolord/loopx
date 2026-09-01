@@ -371,11 +371,6 @@ def run_external_agent_continuation_phase(
             result_exit_code = None
             segment_record["stdout_status"] = "missing_or_empty"
             break
-        if segment_timed_out:
-            terminal_decision = BenchmarkContinuationDecision.STOP_TIME_BUDGET.value
-            classification = "continuation_time_budget_exhausted"
-            result_exit_code = 0
-            break
         if segment_exit_code != 0 and not segment_timed_out:
             terminal_decision = "solver_exited_nonzero"
             classification = "solver_exited_nonzero"
