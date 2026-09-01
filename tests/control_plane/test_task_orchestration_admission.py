@@ -27,7 +27,7 @@ def _peer_management(*agent_ids: str) -> dict[str, Any]:
 def _todo(
     todo_id: str,
     *,
-    task_domain: str = "code",
+    task_domain: str | None = "code",
     action_kind: str = "inspect",
     task_repository: str | None = None,
     required_capabilities: list[str] | None = None,
@@ -41,9 +41,10 @@ def _todo(
         "task_class": "advancement_task",
         "priority": "P0",
         "text": f"Advance {todo_id}",
-        "task_domain": task_domain,
         "action_kind": action_kind,
     }
+    if task_domain is not None:
+        item["task_domain"] = task_domain
     if required_capabilities:
         item["required_capabilities"] = required_capabilities
     if required_write_scopes:
@@ -97,12 +98,32 @@ def test_admission_requires_observed_spawn_capability() -> None:
     assert contract is None
 
 
+def test_admission_without_domain_filter_accepts_tagged_and_untagged_lanes() -> None:
+    contract = _contract(
+        [
+            _todo("todo_primary", task_domain=None),
+            _todo("todo_untagged", task_domain=None),
+            _todo("todo_docs", task_domain="docs"),
+        ],
+        available_capabilities=["subagent_spawn"],
+        allowed_domains=[],
+    )
+
+    assert contract is not None
+    assert [lane["todo_id"] for lane in contract["eligible_child_lanes"]] == [
+        "todo_untagged",
+        "todo_docs",
+    ]
+    assert contract["blocked_lanes"] == []
+
+
 def test_admission_emits_complete_child_brief_and_typed_block_reasons() -> None:
     contract = _contract(
         [
             _todo("todo_primary"),
             _todo("todo_child", required_capabilities=["network"]),
             _todo("todo_wrong_domain", task_domain="docs"),
+            _todo("todo_untagged", task_domain=None),
             _todo("todo_waiting", resume_ready=False),
         ],
         available_capabilities=["subagent_spawn", "network"],
@@ -166,6 +187,7 @@ def test_admission_emits_complete_child_brief_and_typed_block_reasons() -> None:
     }
     assert blocked == {
         "todo_wrong_domain": ["task_domain_not_allowed"],
+        "todo_untagged": ["task_domain_not_allowed"],
         "todo_waiting": ["dependency_not_ready"],
     }
 

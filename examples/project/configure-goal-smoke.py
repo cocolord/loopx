@@ -218,6 +218,10 @@ def main() -> int:
             "lark_kanban_heartbeat_sync",
         }
         assert features["multi_subagent"]["current"]["enabled"] is True
+        assert features["multi_subagent"]["required_inputs"] == {}
+        assert "--allowed-domain" not in features["multi_subagent"]["commands"][
+            "preview_enable"
+        ]
         assert features["peer_task_coordination"]["current"] == {
             "enabled": False,
             "coordinator_agent_id": None,

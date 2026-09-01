@@ -350,38 +350,42 @@ def main() -> None:
             assert configure_invalid["error_code"] == "invalid_goal_channel_configure", configure_invalid
 
             registry_before_subagent_preview = registry.read_text(encoding="utf-8")
-            code, missing_domain = request_json(
+            code, invalid_domain = request_json(
                 f"{base_url}/api/chat/goal-subagents/dry-run",
                 method="POST",
                 body={
                     "goal_id": GOAL_ID,
                     "enabled": True,
                     "max_children": 2,
-                    "allowed_domains": [],
+                    "allowed_domains": ["../private"],
                 },
             )
-            assert code == 400, missing_domain
+            assert code == 400, invalid_domain
             assert (
-                missing_domain["error_code"] == "invalid_goal_subagent_configuration"
-            ), missing_domain
+                invalid_domain["error_code"] == "invalid_goal_subagent_configuration"
+            ), invalid_domain
 
-            subagent_request = {
+            unrestricted_subagent_request = {
                 "goal_id": GOAL_ID,
                 "enabled": True,
                 "max_children": 2,
-                "allowed_domains": ["code", "validation"],
             }
-            code, subagent_preview = request_json(
+            code, unrestricted_preview = request_json(
                 f"{base_url}/api/chat/goal-subagents/dry-run",
                 method="POST",
-                body=subagent_request,
+                body=unrestricted_subagent_request,
             )
-            assert code == 200 and subagent_preview["preview_id"], subagent_preview
-            assert subagent_preview["dry_run"] is True, subagent_preview
-            assert subagent_preview["written"] is False, subagent_preview
-            assert subagent_preview["feature_summary"]["multi_subagent"] == "enabled", (
-                subagent_preview
+            assert code == 200 and unrestricted_preview["preview_id"], (
+                unrestricted_preview
             )
+            assert unrestricted_preview["dry_run"] is True, unrestricted_preview
+            assert unrestricted_preview["written"] is False, unrestricted_preview
+            assert unrestricted_preview["after"]["orchestration"].get(
+                "allowed_domains", []
+            ) == [], unrestricted_preview
+            assert unrestricted_preview["feature_summary"]["multi_subagent"] == (
+                "enabled"
+            ), unrestricted_preview
             assert (
                 registry.read_text(encoding="utf-8") == registry_before_subagent_preview
             )
@@ -389,20 +393,72 @@ def main() -> None:
             code, stale_subagent_apply = request_json(
                 f"{base_url}/api/chat/goal-subagents/apply",
                 method="POST",
-                body={**subagent_request, "preview_id": "stale-preview"},
+                body={**unrestricted_subagent_request, "preview_id": "stale-preview"},
             )
             assert code == 409, stale_subagent_apply
             assert (
                 stale_subagent_apply["error_code"] == "stale_goal_subagent_preview"
             ), stale_subagent_apply
-            assert (
-                registry.read_text(encoding="utf-8") == registry_before_subagent_preview
+
+            code, unrestricted_applied = request_json(
+                f"{base_url}/api/chat/goal-subagents/apply",
+                method="POST",
+                body={
+                    **unrestricted_subagent_request,
+                    "preview_id": unrestricted_preview["preview_id"],
+                },
             )
+            assert code == 200 and unrestricted_applied["written"] is True, (
+                unrestricted_applied
+            )
+            assert (
+                unrestricted_applied["global_sync"]["readback"]["verified"] is True
+            ), unrestricted_applied
+            unrestricted_goal = next(
+                item
+                for item in json.loads(registry.read_text(encoding="utf-8"))["goals"]
+                if item["id"] == GOAL_ID
+            )
+            assert unrestricted_goal["spawn_policy"] == {
+                "mode": "multi_subagent",
+                "allowed": True,
+                "max_children": 2,
+                "allowed_domains": [],
+            }, unrestricted_goal
+
+            unrestricted_status = wait_for_json(f"{base_url}/status.json")
+            unrestricted_projected_goal = next(
+                item
+                for item in unrestricted_status["run_history"]["goals"]
+                if item["id"] == GOAL_ID
+            )
+            assert unrestricted_projected_goal["spawn_policy"]["spawn_allowed"] is True
+            assert unrestricted_projected_goal["spawn_policy"]["max_children"] == 2
+            assert (
+                unrestricted_projected_goal["spawn_policy"].get("allowed_domains", []) == []
+            ), unrestricted_projected_goal
+
+            restricted_subagent_request = {
+                "goal_id": GOAL_ID,
+                "enabled": True,
+                "max_children": 2,
+                "allowed_domains": ["code", "validation"],
+            }
+            code, restricted_preview = request_json(
+                f"{base_url}/api/chat/goal-subagents/dry-run",
+                method="POST",
+                body=restricted_subagent_request,
+            )
+            assert code == 200 and restricted_preview["preview_id"], restricted_preview
+            assert restricted_preview["written"] is False, restricted_preview
 
             code, subagent_applied = request_json(
                 f"{base_url}/api/chat/goal-subagents/apply",
                 method="POST",
-                body={**subagent_request, "preview_id": subagent_preview["preview_id"]},
+                body={
+                    **restricted_subagent_request,
+                    "preview_id": restricted_preview["preview_id"],
+                },
             )
             assert code == 200, subagent_applied
             assert subagent_applied["written"] is True, subagent_applied
