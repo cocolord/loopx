@@ -153,7 +153,7 @@ loopx goal-lifecycle --goal-id <goal-id> --operation resume --execute
 
 - **执行健康度**：展示 Session ID、是否可继续以及当前 Agent 状态；
 - **代码仓只读绑定**：明确展示当前绑定的 GitHub / 本地仓库、生效分支及只读隔离属性；
-- **自适应子代理执行**：按 Goal 展示当前开关、允许的 `task_domain` 与最多子代理数；
+- **自适应子代理执行**：按 Goal 展示当前开关、可选的 `task_domain` 限制与最多子代理数；
 - **Lark / 飞书话题连接**：
   - 展示当前绑定的飞书群组与 Topic 话题；
   - **Capture scope**：可选择只接收明确 @ / 回复 App 的消息，或接收该 Goal Topic
@@ -172,11 +172,11 @@ loopx goal-lifecycle --goal-id <goal-id> --operation resume --execute
 该能力默认关闭。要为一个 Goal 开启：
 
 1. 进入该 Goal，点击 **`Goal 详情`**；
-2. 在「自适应子代理执行」中，从当前 Goal 开放 advancement Todo 已声明的
-   `task_domain` 中多选允许领域，并选择最多子代理数；每个选项会显示当前匹配的
-   开放 Todo 数量。控制台优先读取完整 Todo index，压缩的 Goal 卡片 Todo 仅作
-   兼容回退；
-3. 点击开关。此时只生成零写入预览；检查领域与并发上限后，再点击「确认」；
+2. 在「自适应子代理执行」中选择最多子代理数。任务领域限制是可选项：全部不选表示
+   不按领域过滤；需要进一步收窄时，再从当前 Goal 开放 advancement Todo 已声明的
+   `task_domain` 中多选。每个选项会显示当前匹配的开放 Todo 数量。控制台优先读取
+   完整 Todo index，压缩的 Goal 卡片 Todo 仅作兼容回退；
+3. 点击开关。此时只生成零写入预览；检查领域限制与并发上限后，再点击「确认」；
 4. 界面只有在 source registry 写入、共享 registry 同步和读回校验都成功后，才把
    开关显示为「开启」。
 
@@ -196,15 +196,16 @@ loopx configure-goal \
   --execute
 ```
 
-如果当前没有开放 advancement Todo 声明 `task_domain`，界面会显示空状态并阻止
-开启。先通过正常 Todo 创建或更新入口为待并行任务声明领域，再回到这里选择；控制台
-不会从 Todo 文本猜测领域，也不会提供与真实 Todo 无关的固定候选列表。已保存但当前
-匹配数为 0 的领域仍会显示，方便审阅或移除既有边界。
+如果当前没有开放 advancement Todo 声明 `task_domain`，界面会显示说明性空状态，
+但不会阻止开启。此时只是不增加领域过滤，Todo 仍必须通过状态、依赖、quota、能力、
+仓库、写入范围和冲突检查。选择了一个或多个领域后，未声明或不匹配领域的 Todo 会被
+拒绝。控制台不会从 Todo 文本猜测领域，也不会提供与真实 Todo 无关的固定候选列表；
+已保存但当前匹配数为 0 的领域仍会显示，方便审阅或移除既有边界。
 
 这个开关只给运行时增加有界的临时子代理容量，不会强制并行，不会创建持久 Agent
 层级，也不会绕过 Todo 归属、quota、能力、Gate 或写入范围。SSH 状态来源保持只读，
-必须在 Goal 所在主机上修改。`task_domain` 会进入 Goal 配置，不要填写凭证、客户名或
-其他私密信息。完整执行语义见
+必须在 Goal 所在主机上修改。所选 `allowed_domains` 会进入 Goal 配置，不要填写凭证、
+客户名或其他私密信息。完整执行语义见
 [Codex sub-agent orchestration](../integrations/codex-subagent-orchestration.md)。
 
 在「通知设置 → Lark / 飞书 → Connections」中选择 Goal、Target Agent、群聊、

@@ -53,7 +53,7 @@ todos remain. A host name or scheduler runtime profile is metadata and never
 supplies `subagent_spawn` or `subagent_resume`. Each candidate is checked
 against:
 
-- `task_domain` and the goal's `allowed_domains`;
+- `task_domain` when the goal declares a non-empty `allowed_domains` filter;
 - todo status, `resume_ready`, and open user dependencies;
 - `required_capabilities` and observed host capabilities;
 - canonical `task_repository` identity when declared (otherwise the goal
@@ -169,10 +169,14 @@ loopx configure-goal \
   --goal-id example-peer-task-goal \
   --multi-subagent-feature enabled \
   --max-children 2 \
-  --allowed-domain docs \
-  --allowed-domain validation \
   --execute
 ```
+
+Task-domain filtering is optional. With no `--allowed-domain`, both tagged and
+untagged ready Todos remain eligible subject to every other admission boundary.
+Add one or more `--allowed-domain <token>` arguments only to narrow execution to
+matching typed Todos; an untagged or non-matching Todo is then blocked with
+`task_domain_not_allowed`.
 
 `multi_subagent` remains the compatibility name for host child-worker capacity
 and permission policy. It does not ask the user to select a run mode or agent
