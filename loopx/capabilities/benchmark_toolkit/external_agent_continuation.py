@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -34,6 +35,10 @@ BENCHMARK_CONTINUATION_PRIVATE_EVIDENCE_SCHEMA_VERSION = (
 SegmentRunner = Callable[[Sequence[str], Path, Mapping[str, str], str, Path], int]
 ProgressRunner = Callable[[Sequence[str], Path, Mapping[str, str]], Mapping[str, Any]]
 Clock = Callable[[], float]
+
+
+class BenchmarkSegmentTimeout(RuntimeError):
+    pass
 
 
 def _continuation_instruction(instruction: str, progress: Mapping[str, Any]) -> str:
@@ -90,8 +95,18 @@ def _run_solver_segment(
     instruction: str,
     stdout_path: Path,
 ) -> int:
+    try:
+        timeout_ms_value = int(environment["LOOPX_BENCHMARK_SEGMENT_TIMEOUT_MS"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("segment_timeout_ms must be a positive integer") from exc
+    timeout_ms = _positive_int(timeout_ms_value, field="segment_timeout_ms")
     descriptor = os.open(stdout_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as stdout:
+        process_options: dict[str, Any] = {}
+        if os.name == "posix":
+            process_options["start_new_session"] = True
+        elif os.name == "nt":  # pragma: no cover - Windows-only branch.
+            process_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         process = subprocess.Popen(
             list(command),
             cwd=workspace,
@@ -100,8 +115,37 @@ def _run_solver_segment(
             stdout=stdout,
             stderr=subprocess.STDOUT,
             text=True,
+            **process_options,
         )
-        process.communicate(instruction)
+        try:
+            process.communicate(instruction, timeout=timeout_ms / 1000)
+        except subprocess.TimeoutExpired as exc:
+            if os.name == "posix":
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+            elif os.name == "nt":  # pragma: no cover - Windows-only branch.
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:  # pragma: no cover - unsupported platform fallback.
+                process.terminate()
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                if os.name == "posix":
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:  # pragma: no cover - unsupported platform fallback.
+                    process.kill()
+                process.wait()
+            raise BenchmarkSegmentTimeout from exc
     if process.returncode is None:
         raise RuntimeError("benchmark_solver_returncode_missing")
     return int(process.returncode)
@@ -294,6 +338,7 @@ def run_external_agent_continuation_phase(
         )
         stdout_path = evidence_root / f"segment-{segment_index:04d}.stdout.jsonl"
         segment_started = clock()
+        segment_timed_out = False
         try:
             segment_exit_code = segment_runner(
                 command,
@@ -302,6 +347,9 @@ def run_external_agent_continuation_phase(
                 segment_instruction,
                 stdout_path,
             )
+        except BenchmarkSegmentTimeout:
+            segment_exit_code = None
+            segment_timed_out = True
         except (OSError, RuntimeError, subprocess.SubprocessError):
             segment_exit_code = -1
         segment_record: dict[str, Any] = {
@@ -310,6 +358,7 @@ def run_external_agent_continuation_phase(
             "prompt_sha256": _sha256(segment_instruction),
             "stdout_file": stdout_path.name,
             "exit_code": segment_exit_code,
+            "timed_out": segment_timed_out,
             "duration_ms": max(0, int((clock() - segment_started) * 1000)),
         }
         segments.append(segment_record)
@@ -322,7 +371,12 @@ def run_external_agent_continuation_phase(
             result_exit_code = None
             segment_record["stdout_status"] = "missing_or_empty"
             break
-        if segment_exit_code != 0:
+        if segment_timed_out:
+            terminal_decision = BenchmarkContinuationDecision.STOP_TIME_BUDGET.value
+            classification = "continuation_time_budget_exhausted"
+            result_exit_code = 0
+            break
+        if segment_exit_code != 0 and not segment_timed_out:
             terminal_decision = "solver_exited_nonzero"
             classification = "solver_exited_nonzero"
             status = "failed"

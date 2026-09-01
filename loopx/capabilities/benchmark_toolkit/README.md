@@ -100,9 +100,11 @@ loopx benchmark continuation-agent-phase \
 
 The first solver segment receives the original instruction byte-for-byte. Each later
 segment receives the original instruction plus aggregate public progress, and each
-segment gets only its fair share of the remaining total timeout through
-`LOOPX_BENCHMARK_SEGMENT_TIMEOUT_MS`. Provider wrappers must enforce that value; the
-outer benchmark runner remains the hard timeout and containment owner. LoopX rejects
+segment gets only its fair share of the remaining total timeout. The default runner
+enforces that timeout on the complete solver process group;
+`LOOPX_BENCHMARK_SEGMENT_TIMEOUT_MS` remains available to provider wrappers for
+their own bounded cleanup. The outer benchmark runner remains the hard timeout and
+containment owner. LoopX rejects
 progress regression, task-shape drift, prompt mismatch, an empty segment event file,
 or a dirty evidence directory. Raw segment JSONL and the private lifecycle record are
 written with owner-only permissions outside the task workspace; the public result

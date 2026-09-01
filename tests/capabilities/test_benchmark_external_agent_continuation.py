@@ -5,6 +5,7 @@ import json
 import os
 import stat
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,8 @@ from loopx.capabilities.benchmark_toolkit.external_agent import (
 )
 from loopx.capabilities.benchmark_toolkit.external_agent_continuation import (
     BENCHMARK_CONTINUATION_PRIVATE_EVIDENCE_SCHEMA_VERSION,
+    BenchmarkSegmentTimeout,
+    _run_solver_segment,
     execute_external_agent_continuation_request,
     run_external_agent_continuation_phase,
 )
@@ -52,6 +55,63 @@ def _progress(completed: int, total: int = 5) -> dict[str, object]:
 
 def _prompt_digest(request: dict[str, object]) -> str:
     return hashlib.sha256(str(request["instruction"]).encode("utf-8")).hexdigest()
+
+
+def test_default_segment_runner_enforces_allocated_timeout(tmp_path: Path) -> None:
+    stdout_path = tmp_path / "segment.jsonl"
+    started = time.monotonic()
+
+    with pytest.raises(BenchmarkSegmentTimeout):
+        _run_solver_segment(
+            [sys.executable, "-u", "-c", "import time; print('started'); time.sleep(5)"],
+            tmp_path,
+            {
+                "PATH": os.environ.get("PATH", ""),
+                "LOOPX_BENCHMARK_SEGMENT_TIMEOUT_MS": "50",
+            },
+            "prompt",
+            stdout_path,
+        )
+
+    assert time.monotonic() - started < 2
+    assert "started" in stdout_path.read_text(encoding="utf-8")
+
+
+def test_continuation_phase_stops_after_segment_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    request = _request(workspace)
+
+    def timed_out_segment(_command, _cwd, _environment, _instruction, stdout_path):
+        stdout_path.write_text('{"type":"thread.started"}\n', encoding="utf-8")
+        raise BenchmarkSegmentTimeout
+
+    result = run_external_agent_continuation_phase(
+        request,
+        solver_command=["solver"],
+        progress_command=["progress"],
+        expected_first_prompt_sha256=_prompt_digest(request),
+        expected_total_unit_count=5,
+        max_agent_segments=2,
+        private_evidence_root=tmp_path / "evidence",
+        segment_runner=timed_out_segment,
+        progress_runner=lambda *_args: _progress(0),
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["receipt"]["classification"] == (
+        "continuation_time_budget_exhausted"
+    )
+    evidence = json.loads(
+        (tmp_path / "evidence" / "continuation-private.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert evidence["terminal_decision"] == "stop_time_budget"
+    assert evidence["segments"][0]["timed_out"] is True
 
 
 def test_continuation_phase_runs_bounded_segments_and_writes_private_evidence(
@@ -109,6 +169,7 @@ def test_continuation_phase_runs_bounded_segments_and_writes_private_evidence(
         "1",
         "2",
     ]
+    assert all(item["LOOPX_BENCHMARK_SEGMENT_TIMEOUT_MS"] for item in environments)
     evidence_path = evidence_root / "continuation-private.json"
     evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
     assert evidence["schema_version"] == (
@@ -116,6 +177,7 @@ def test_continuation_phase_runs_bounded_segments_and_writes_private_evidence(
     )
     assert evidence["terminal_decision"] == "stop_complete"
     assert len(evidence["segments"]) == 2
+    assert all(segment["timed_out"] is False for segment in evidence["segments"])
     assert evidence["raw_task_recorded"] is False
     if os.name == "posix":
         assert stat.S_IMODE(evidence_root.stat().st_mode) == 0o700
