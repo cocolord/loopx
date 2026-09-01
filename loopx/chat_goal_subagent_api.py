@@ -63,7 +63,7 @@ class GoalSubagentConfigurationRequestMixin:
                     "max_children must be between 1 and "
                     f"{CHAT_GOAL_SUBAGENT_MAX_CHILDREN}"
                 )
-            raw_domains = body.get("allowed_domains")
+            raw_domains = body.get("allowed_domains", [])
             if not isinstance(raw_domains, list):
                 raise ValueError(
                     "allowed_domains must be a list of public-safe task domains"
@@ -77,10 +77,6 @@ class GoalSubagentConfigurationRequestMixin:
                     )
                 if domain not in allowed_domains:
                     allowed_domains.append(domain)
-            if not allowed_domains:
-                raise ValueError(
-                    "enabling Goal sub-agents requires at least one allowed task domain"
-                )
         else:
             if body.get("max_children") not in (None, 0):
                 raise ValueError(

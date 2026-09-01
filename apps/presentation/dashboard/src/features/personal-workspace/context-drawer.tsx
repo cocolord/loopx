@@ -289,7 +289,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
   async function previewGoalSubagentConfiguration(enabled: boolean) {
     if (selection.kind !== "goal" || !callbacks.onPreviewGoalSubagentConfiguration) return;
     const allowedDomains = enabled ? normalizedSubagentDomains() : [];
-    if (enabled && (!allowedDomains || allowedDomains.length === 0)) {
+    if (enabled && !allowedDomains) {
       setSubagentMutationState("error");
       setSubagentFeedback(t("drawer.subagentDomainInvalid"));
       setSubagentPreview(null);
@@ -498,8 +498,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                         className="personal-subagent-switch"
                         disabled={readOnly
                           || subagentBusy
-                          || !callbacks.onPreviewGoalSubagentConfiguration
-                          || (!currentSubagentConfiguration.enabled && subagentAllowedDomains.length === 0)}
+                          || !callbacks.onPreviewGoalSubagentConfiguration}
                         onClick={() => void previewGoalSubagentConfiguration(!currentSubagentConfiguration.enabled)}
                         role="switch"
                         type="button"
@@ -510,7 +509,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                     </div>
                     <p>{t("drawer.subagentDescription")}</p>
                     <dl>
-                      <div><dt>{t("drawer.subagentCurrentBoundary")}</dt><dd>{currentSubagentConfiguration.allowedDomains.join(" · ") || t("common.none")}</dd></div>
+                      <div><dt>{t("drawer.subagentCurrentBoundary")}</dt><dd>{currentSubagentConfiguration.allowedDomains.join(" · ") || t("drawer.subagentDomainsUnrestricted")}</dd></div>
                       <div><dt>{t("drawer.subagentChildLimit")}</dt><dd>{currentSubagentConfiguration.maxChildren || 0}</dd></div>
                     </dl>
                     {readOnly ? (
@@ -575,7 +574,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                         <p>{subagentPreview.enabled
                           ? t("drawer.subagentPreviewSummary", {
                               count: subagentPreview.maxChildren,
-                              domains: subagentPreview.allowedDomains.join(" · "),
+                              domains: subagentPreview.allowedDomains.join(" · ") || t("drawer.subagentDomainsUnrestricted"),
                             })
                           : t("drawer.subagentDisableSummary")}</p>
                         <div>

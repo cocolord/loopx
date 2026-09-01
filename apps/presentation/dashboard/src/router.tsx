@@ -64,6 +64,7 @@ function routerBasepathFromViteBase(baseUrl: string) {
 export const router = createRouter({
   routeTree,
   basepath: routerBasepathFromViteBase(import.meta.env.BASE_URL),
+  trailingSlash: "preserve",
 });
 
 declare module "@tanstack/react-router" {

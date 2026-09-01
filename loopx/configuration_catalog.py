@@ -69,8 +69,6 @@ def build_goal_configuration_catalog(
         "enabled",
         "--max-children",
         str(default_multi_subagent_max_children),
-        "--allowed-domain",
-        "<bounded-domain>",
     )
     peer_coordination = (
         feature_summary.get("peer_task_coordination")
@@ -110,20 +108,16 @@ def build_goal_configuration_catalog(
                     "max_children": orchestration.get("max_children"),
                     "allowed_domains": list(orchestration.get("allowed_domains") or []),
                 },
-                "required_inputs": {
-                    "bounded-domain": (
-                        "Replace the placeholder with one public-safe child-agent "
-                        "responsibility domain. Repeat --allowed-domain when needed."
-                    )
-                },
+                "required_inputs": {},
                 "consider_when": (
                     "The goal has at least two independent, non-overlapping work items and "
                     "the host can run child agents."
                 ),
                 "effect": (
-                    "Sets the hard capacity and responsibility-domain boundary for "
-                    "adaptive child orchestration; the task coordinator still decides "
-                    "whether, what, and how to parallelize."
+                    "Sets the hard capacity boundary for adaptive child orchestration. "
+                    "Optional --allowed-domain values narrow eligible Todo lanes; without "
+                    "them, the task coordinator still decides whether, what, and how to "
+                    "parallelize within every other admission boundary."
                 ),
                 "does_not": [
                     "force single-agent or multi-agent execution",
