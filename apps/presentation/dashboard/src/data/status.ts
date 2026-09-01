@@ -70,6 +70,7 @@ export const todoItemSchema = z.object({
   archive_state: z.string().optional().nullable(),
   source_section: z.string().optional().nullable(),
   task_class: z.string().optional().nullable(),
+  task_domain: z.string().optional().nullable(),
   action_kind: z.string().optional().nullable(),
   claimed_by: z.string().optional().nullable(),
   required_capabilities: z.array(z.string()).optional(),

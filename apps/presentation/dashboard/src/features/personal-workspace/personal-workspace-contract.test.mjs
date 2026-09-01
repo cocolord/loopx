@@ -200,12 +200,16 @@ for (const callback of ["onPreviewGoalSubagentConfiguration", "onApplyGoalSubage
   assert.match(drawer, new RegExp(`callbacks\\.${callback}`), `Goal drawer calls ${callback}`);
 }
 assert.match(drawer, /role="switch"/, "Goal sub-agent control uses an accessible switch");
+assert.match(model, /domainCandidates\??:\s*Array/, "Goal carries finite domain choices projected from current Todos");
+assert.match(drawer, /type="checkbox"/, "Goal sub-agent domains use an accessible multi-select instead of free text");
+assert.match(drawer, /subagentDomainsEmpty/, "Goal sub-agent domains fail closed with an explicit empty state");
 assert.match(drawer, /subagentPreview && subagentMutationState === "ready"/, "Goal sub-agent writes require a visible preview state");
 assert.match(drawer, /normalize.*SubagentDomains|normalizedSubagentDomains/, "Goal sub-agent domains are validated before preview");
 assert.match(chatData, /\/api\/chat\/goal-subagents\/dry-run/, "Dashboard uses the local preview-locked Goal sub-agent API");
 assert.match(chatData, /\/api\/chat\/goal-subagents\/apply/, "Dashboard applies Goal sub-agent settings through the same local API");
 assert.match(chatData, /global_sync\.readback\.verified/, "Goal sub-agent success requires shared-state readback verification");
 assert.match(dashboard, /goal\.spawn_policy\?\.mode === "multi_subagent"/, "Rendered switch state comes from the status spawn-policy projection");
+assert.match(dashboard, /personalSubagentDomainCandidates\(payload, row, goalAgentTodos\)/, "Goal domain choices use the full Todo index with compact-row fallback");
 assert.match(dashboard, /previewGoalSubagentConfiguration/, "Goal setting preview delegates to the canonical Chat data adapter");
 assert.match(dashboard, /applyGoalSubagentConfiguration/, "Goal setting apply delegates to the canonical Chat data adapter");
 assert.match(page, /selection\?\.kind === "goal"[\s\S]*workspaceGoals\.find/, "An open Goal drawer follows refreshed status readback");

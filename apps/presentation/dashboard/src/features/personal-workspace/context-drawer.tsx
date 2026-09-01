@@ -67,6 +67,12 @@ const decisionTransitions = [
 ] as const;
 
 const subagentChildLimits = Array.from({ length: 32 }, (_, index) => index + 1);
+const subagentDomainPattern = /^[a-z][a-z0-9_.-]{0,63}$/u;
+
+function normalizeSubagentDomain(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return subagentDomainPattern.test(normalized) ? normalized : null;
+}
 
 type ContextDrawerSelection = Exclude<WorkspaceDrawerSelection, { kind: "settings" }>;
 
@@ -86,7 +92,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [repositoryCopyState, setRepositoryCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [runDrawerTab, setRunDrawerTab] = useState<"record" | "details">("record");
-  const [subagentAllowedDomains, setSubagentAllowedDomains] = useState("");
+  const [subagentAllowedDomains, setSubagentAllowedDomains] = useState<string[]>([]);
   const [subagentFeedback, setSubagentFeedback] = useState<string | null>(null);
   const [subagentMaxChildren, setSubagentMaxChildren] = useState(2);
   const [subagentMutationState, setSubagentMutationState] = useState<"idle" | "previewing" | "ready" | "applying" | "success" | "error">("idle");
@@ -109,7 +115,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
     setRunDrawerTab("record");
     setTodoResumeWhen("");
     const configuration = selection.kind === "goal" ? selection.item.subagentExecution : undefined;
-    setSubagentAllowedDomains(configuration?.allowedDomains.join(", ") ?? "");
+    setSubagentAllowedDomains(configuration?.allowedDomains ?? []);
     setSubagentMaxChildren(configuration?.maxChildren ? Math.min(configuration.maxChildren, 32) : 2);
     setSubagentFeedback(null);
     setSubagentMutationState("idle");
@@ -223,12 +229,43 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
   }
 
   const currentSubagentConfiguration = selection.kind === "goal"
-    ? selection.item.subagentExecution ?? { allowedDomains: [], enabled: false, maxChildren: 0 }
-    : { allowedDomains: [], enabled: false, maxChildren: 0 };
+    ? selection.item.subagentExecution ?? { allowedDomains: [], domainCandidates: [], enabled: false, maxChildren: 0 }
+    : { allowedDomains: [], domainCandidates: [], enabled: false, maxChildren: 0 };
   const subagentBusy = subagentMutationState === "previewing" || subagentMutationState === "applying";
+  const subagentDomainOptions = (() => {
+    if (selection.kind !== "goal") return [];
+    const options = new Map<string, { matchingTodoCount: number; value: string }>();
+    for (const configuredDomain of currentSubagentConfiguration.allowedDomains) {
+      const value = normalizeSubagentDomain(configuredDomain);
+      if (value) options.set(value, { matchingTodoCount: 0, value });
+    }
+    if (currentSubagentConfiguration.domainCandidates) {
+      for (const candidate of currentSubagentConfiguration.domainCandidates) {
+        const value = normalizeSubagentDomain(candidate.domain);
+        if (!value) continue;
+        const existing = options.get(value);
+        options.set(value, {
+          matchingTodoCount: (existing?.matchingTodoCount ?? 0) + candidate.matchingTodoCount,
+          value,
+        });
+      }
+    } else {
+      for (const todo of selection.item.agentTodos) {
+        if (todo.done || todo.taskClass !== "advancement_task") continue;
+        const value = normalizeSubagentDomain(todo.taskDomain);
+        if (!value) continue;
+        const existing = options.get(value);
+        options.set(value, {
+          matchingTodoCount: (existing?.matchingTodoCount ?? 0) + 1,
+          value,
+        });
+      }
+    }
+    return [...options.values()];
+  })();
 
   function resetSubagentDraft() {
-    setSubagentAllowedDomains(currentSubagentConfiguration.allowedDomains.join(", "));
+    setSubagentAllowedDomains(currentSubagentConfiguration.allowedDomains);
     setSubagentMaxChildren(currentSubagentConfiguration.maxChildren || 2);
     setSubagentFeedback(null);
     setSubagentMutationState("idle");
@@ -236,10 +273,17 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
   }
 
   function normalizedSubagentDomains() {
-    const domains = [...new Set(subagentAllowedDomains.split(/[\s,]+/u).map((value) => value.trim()).filter(Boolean))];
-    return domains.every((domain) => /^[a-z][a-z0-9_.-]{0,63}$/u.test(domain))
-      ? domains
-      : null;
+    const domains = [...new Set(subagentAllowedDomains.map((value) => normalizeSubagentDomain(value)))];
+    return domains.every((domain): domain is string => Boolean(domain)) ? domains : null;
+  }
+
+  function toggleSubagentDomain(domain: string, selected: boolean) {
+    setSubagentAllowedDomains((current) => selected
+      ? [...current, domain].filter((value, index, values) => values.indexOf(value) === index)
+      : current.filter((value) => value !== domain));
+    setSubagentPreview(null);
+    setSubagentMutationState("idle");
+    setSubagentFeedback(null);
   }
 
   async function previewGoalSubagentConfiguration(enabled: boolean) {
@@ -452,7 +496,10 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                         aria-checked={currentSubagentConfiguration.enabled}
                         aria-label={t(currentSubagentConfiguration.enabled ? "drawer.subagentDisable" : "drawer.subagentEnable")}
                         className="personal-subagent-switch"
-                        disabled={readOnly || subagentBusy || !callbacks.onPreviewGoalSubagentConfiguration}
+                        disabled={readOnly
+                          || subagentBusy
+                          || !callbacks.onPreviewGoalSubagentConfiguration
+                          || (!currentSubagentConfiguration.enabled && subagentAllowedDomains.length === 0)}
                         onClick={() => void previewGoalSubagentConfiguration(!currentSubagentConfiguration.enabled)}
                         role="switch"
                         type="button"
@@ -470,23 +517,33 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                       <p className="personal-subagent-read-only">{t("drawer.subagentRemoteReadOnly")}</p>
                     ) : (
                       <div className="personal-subagent-fields">
-                        <label>
-                          <span>{t("drawer.subagentDomains")}</span>
-                          <input
-                            aria-label={t("drawer.subagentDomains")}
-                            disabled={subagentBusy}
-                            onChange={(event) => {
-                              setSubagentAllowedDomains(event.target.value);
-                              setSubagentPreview(null);
-                              setSubagentMutationState("idle");
-                              setSubagentFeedback(null);
-                            }}
-                            placeholder="code, validation"
-                            value={subagentAllowedDomains}
-                          />
+                        <fieldset className="personal-subagent-domain-picker" disabled={subagentBusy}>
+                          <legend>{t("drawer.subagentDomains")}</legend>
+                          {subagentDomainOptions.length > 0 ? (
+                            <div className="personal-subagent-domain-options">
+                              {subagentDomainOptions.map((option) => {
+                                const selected = subagentAllowedDomains.includes(option.value);
+                                return (
+                                  <label className={`personal-subagent-domain-option${selected ? " is-selected" : ""}`} key={option.value}>
+                                    <input
+                                      checked={selected}
+                                      onChange={(event) => toggleSubagentDomain(option.value, event.target.checked)}
+                                      type="checkbox"
+                                    />
+                                    <span>
+                                      <strong>{option.value}</strong>
+                                      <small>{t("drawer.subagentDomainTodoCount", { count: option.matchingTodoCount })}</small>
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="personal-subagent-domain-empty">{t("drawer.subagentDomainsEmpty")}</p>
+                          )}
                           <small>{t("drawer.subagentDomainsHint")}</small>
-                        </label>
-                        <label>
+                        </fieldset>
+                        <label className="personal-subagent-limit-field">
                           <span>{t("drawer.subagentMaxChildren")}</span>
                           <select
                             aria-label={t("drawer.subagentMaxChildren")}

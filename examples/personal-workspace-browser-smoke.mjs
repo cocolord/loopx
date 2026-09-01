@@ -126,6 +126,21 @@ async function installApi(page) {
         source_section: "User Todo",
         total_count: 1,
       };
+      const domainTodos = (first.project_asset?.agent_todos?.items ?? first.agent_todos?.items ?? [])
+        .filter((todo) => !todo.done)
+        .slice(0, 2);
+      for (const [index, todo] of domainTodos.entries()) {
+        todo.task_class = "advancement_task";
+        todo.task_domain = index === 0 ? "code" : "validation";
+        const indexedTodo = fixture.todo_index?.items?.find((item) => item.todo_id === todo.todo_id);
+        if (indexedTodo) {
+          indexedTodo.role = "agent";
+          indexedTodo.task_class = todo.task_class;
+          indexedTodo.task_domain = todo.task_domain;
+        } else if (fixture.todo_index?.items) {
+          fixture.todo_index.items.push({ ...todo, goal_id: first.goal_id, role: "agent", source: "browser-smoke" });
+        }
+      }
     }
     const delayMs = state.nextStatusDelayMs;
     state.nextStatusDelayMs = 0;
@@ -677,7 +692,14 @@ async function main() {
     const subagentSwitch = page.getByRole("switch", { name: "预览开启子代理执行" });
     await subagentSwitch.waitFor({ state: "visible" });
     if (await subagentSwitch.getAttribute("aria-checked") !== "false") throw new Error("Per-Goal sub-agent execution did not default off");
-    await page.getByLabel("允许的任务领域").fill("code, validation");
+    if (await subagentSwitch.isEnabled()) throw new Error("Per-Goal sub-agent execution enabled before the owner selected a detected task domain");
+    const codeDomain = page.getByRole("checkbox", { name: /code/u });
+    const validationDomain = page.getByRole("checkbox", { name: /validation/u });
+    await codeDomain.waitFor({ state: "visible" });
+    await validationDomain.waitFor({ state: "visible" });
+    await codeDomain.check();
+    await validationDomain.check();
+    if (!(await subagentSwitch.isEnabled())) throw new Error("Per-Goal sub-agent execution stayed disabled after selecting detected task domains");
     await page.getByLabel("最多子代理数").selectOption("2");
     const writesBeforeSubagentPreview = api.durableWriteCount;
     await subagentSwitch.click();
@@ -698,8 +720,14 @@ async function main() {
     await disabledSubagentSwitch.waitFor({ state: "visible" });
     if (await disabledSubagentSwitch.getAttribute("aria-checked") !== "false") throw new Error("Verified status readback did not turn the per-Goal switch off");
     if (api.durableWriteCount !== writesBeforeSubagentPreview + 2) throw new Error("Sub-agent disable did not produce exactly one additional durable Goal write");
-    pass(22, "Per-Goal sub-agent execution stays default-off, requires bounded task domains, previews before writing, verifies shared-state readback, and can be disabled again.");
     await page.getByRole("button", { name: /关闭详情/ }).click();
+    await page.locator(".personal-goal-link", { hasText: "Product Release" }).first().click();
+    await page.getByRole("button", { name: "Goal 详情" }).click();
+    await page.getByText("当前没有开放的 advancement Todo 声明 task_domain", { exact: false }).waitFor({ state: "visible" });
+    const emptyDomainSwitch = page.getByRole("switch", { name: "预览开启子代理执行" });
+    if (await emptyDomainSwitch.isEnabled()) throw new Error("A Goal without projected task domains could enable sub-agent execution");
+    await page.getByRole("button", { name: /关闭详情/ }).click();
+    pass(22, "Per-Goal sub-agent execution discovers real Todo domains as a multi-select, blocks the empty state, previews before writing, verifies shared-state readback, and can be disabled again.");
 
     if (await page.locator("html").getAttribute("lang") !== "zh-CN") throw new Error("Desktop did not start in Simplified Chinese");
     await page.getByRole("button", { name: "设置", exact: true }).click();

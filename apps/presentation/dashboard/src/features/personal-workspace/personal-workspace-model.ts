@@ -24,6 +24,7 @@ export type WorkspaceAgentTodo = {
   priority?: string | null;
   status?: string | null;
   taskClass?: string | null;
+  taskDomain?: string | null;
   text: string;
   todoId: string;
 };
@@ -52,6 +53,10 @@ export type WorkspaceRepositoryContext = {
 
 export type WorkspaceGoalSubagentConfiguration = {
   allowedDomains: string[];
+  domainCandidates?: Array<{
+    domain: string;
+    matchingTodoCount: number;
+  }>;
   enabled: boolean;
   maxChildren: number;
 };

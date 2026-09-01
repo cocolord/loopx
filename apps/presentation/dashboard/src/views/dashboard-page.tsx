@@ -244,6 +244,7 @@ type PersonalAgentTodoItem = {
   priority?: string | null;
   status?: string | null;
   taskClass?: string | null;
+  taskDomain?: string | null;
   text: string;
   todoId: string;
 };
@@ -484,6 +485,10 @@ type PersonalGoalItem = {
   state: PersonalGoalState;
   subagentExecution: {
     allowedDomains: string[];
+    domainCandidates: Array<{
+      domain: string;
+      matchingTodoCount: number;
+    }>;
     enabled: boolean;
     maxChildren: number;
   };
@@ -755,6 +760,7 @@ function personalAgentTodoFromItem(todo: TodoItem, row: GoalDirectoryRow): Perso
     priority: todo.priority ?? null,
     status: todo.status ?? null,
     taskClass: todo.task_class ?? null,
+    taskDomain: todo.task_domain ?? null,
     text: personalTodoText(todo),
     todoId: todo.todo_id?.trim() || `${row.goal.id}:agent:${todo.index}`,
   };
@@ -762,6 +768,31 @@ function personalAgentTodoFromItem(todo: TodoItem, row: GoalDirectoryRow): Perso
 
 function personalAgentTodos(row: GoalDirectoryRow): PersonalAgentTodoItem[] {
   return (getShareTodos(row, "agent")?.items ?? []).map((todo) => personalAgentTodoFromItem(todo, row));
+}
+
+function personalSubagentDomainCandidates(
+  payload: StatusPayload,
+  row: GoalDirectoryRow,
+  fallbackTodos: PersonalAgentTodoItem[],
+) {
+  const candidateTodos = new Map<string, PersonalAgentTodoItem>();
+  for (const todo of payload.todo_index?.items ?? []) {
+    if (todo.goal_id !== row.goal.id || todo.role !== "agent") continue;
+    const projected = personalAgentTodoFromItem(todo, row);
+    candidateTodos.set(projected.todoId, projected);
+  }
+  for (const todo of fallbackTodos) {
+    if (!candidateTodos.has(todo.todoId)) candidateTodos.set(todo.todoId, todo);
+  }
+
+  const counts = new Map<string, number>();
+  for (const todo of candidateTodos.values()) {
+    if (todo.done || todo.taskClass !== "advancement_task") continue;
+    const domain = todo.taskDomain?.trim();
+    if (!domain) continue;
+    counts.set(domain, (counts.get(domain) ?? 0) + 1);
+  }
+  return [...counts].map(([domain, matchingTodoCount]) => ({ domain, matchingTodoCount }));
 }
 
 /**
@@ -1195,6 +1226,7 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
       state,
       subagentExecution: {
         allowedDomains: goal.spawn_policy?.allowed_domains ?? [],
+        domainCandidates: personalSubagentDomainCandidates(payload, row, goalAgentTodos),
         enabled: goal.spawn_policy?.mode === "multi_subagent"
           && goal.spawn_policy.spawn_allowed === true
           && goal.spawn_policy.max_children > 0,

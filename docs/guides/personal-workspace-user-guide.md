@@ -172,8 +172,10 @@ loopx goal-lifecycle --goal-id <goal-id> --operation resume --execute
 该能力默认关闭。要为一个 Goal 开启：
 
 1. 进入该 Goal，点击 **`Goal 详情`**；
-2. 在「自适应子代理执行」中填写一个或多个 Todo `task_domain`，例如
-   `code, validation`，并选择最多子代理数；
+2. 在「自适应子代理执行」中，从当前 Goal 开放 advancement Todo 已声明的
+   `task_domain` 中多选允许领域，并选择最多子代理数；每个选项会显示当前匹配的
+   开放 Todo 数量。控制台优先读取完整 Todo index，压缩的 Goal 卡片 Todo 仅作
+   兼容回退；
 3. 点击开关。此时只生成零写入预览；检查领域与并发上限后，再点击「确认」；
 4. 界面只有在 source registry 写入、共享 registry 同步和读回校验都成功后，才把
    开关显示为「开启」。
@@ -193,6 +195,11 @@ loopx configure-goal \
   --multi-subagent-feature off \
   --execute
 ```
+
+如果当前没有开放 advancement Todo 声明 `task_domain`，界面会显示空状态并阻止
+开启。先通过正常 Todo 创建或更新入口为待并行任务声明领域，再回到这里选择；控制台
+不会从 Todo 文本猜测领域，也不会提供与真实 Todo 无关的固定候选列表。已保存但当前
+匹配数为 0 的领域仍会显示，方便审阅或移除既有边界。
 
 这个开关只给运行时增加有界的临时子代理容量，不会强制并行，不会创建持久 Agent
 层级，也不会绕过 Todo 归属、quota、能力、Gate 或写入范围。SSH 状态来源保持只读，

@@ -301,8 +301,22 @@
 .personal-subagent-switch:disabled { cursor: default; opacity: .55; }
 .personal-subagent-fields { display: grid; grid-template-columns: minmax(0, 1fr) 112px; gap: 10px; margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--pw-line); }
 .personal-subagent-fields label { display: grid; align-content: start; gap: 6px; color: var(--pw-text); font-size: 11.5px; font-weight: 650; }
-.personal-subagent-fields input, .personal-subagent-fields select { min-width: 0; min-height: 38px; padding: 0 10px; border: 1px solid var(--pw-line-strong); border-radius: 9px; background: #fff; color: var(--pw-text); font: inherit; font-size: 12px; }
+.personal-subagent-fields input:not([type="checkbox"]), .personal-subagent-fields select { min-width: 0; min-height: 38px; padding: 0 10px; border: 1px solid var(--pw-line-strong); border-radius: 9px; background: #fff; color: var(--pw-text); font: inherit; font-size: 12px; }
 .personal-subagent-fields label small { color: var(--pw-faint); font-size: 10.5px; font-weight: 450; line-height: 1.45; }
+.personal-subagent-domain-picker { grid-column: 1 / -1; min-width: 0; margin: 0; padding: 0; border: 0; }
+.personal-subagent-domain-picker > legend { margin-bottom: 7px; padding: 0; color: var(--pw-text); font-size: 11.5px; font-weight: 650; }
+.personal-subagent-domain-picker > small { display: block; margin-top: 7px; color: var(--pw-faint); font-size: 10.5px; line-height: 1.45; }
+.personal-subagent-domain-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.personal-subagent-domain-option { display: grid !important; grid-template-columns: auto minmax(0, 1fr); align-items: center !important; min-height: 44px; padding: 8px 9px; border: 1px solid var(--pw-line-strong); border-radius: 9px; background: #fff; cursor: pointer; }
+.personal-subagent-domain-option:hover { border-color: #b9c9dc; }
+.personal-subagent-domain-option:has(input:focus-visible) { outline: 2px solid var(--pw-blue); outline-offset: 2px; }
+.personal-subagent-domain-option.is-selected { border-color: #9fc4ed; background: var(--pw-blue-soft); }
+.personal-subagent-domain-option input { width: 15px; height: 15px; margin: 0; accent-color: var(--pw-blue); }
+.personal-subagent-domain-option > span { display: grid; min-width: 0; gap: 1px; }
+.personal-subagent-domain-option strong { overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.personal-subagent-domain-option small { font-size: 9.5px !important; font-weight: 450 !important; }
+.personal-subagent-domain-empty { grid-column: 1 / -1; margin: 0; padding: 10px; border: 1px dashed var(--pw-line-strong); border-radius: 9px; background: var(--pw-bg); color: var(--pw-muted); font-size: 10.5px; line-height: 1.5; }
+.personal-subagent-limit-field { grid-column: 1 / -1; width: 112px; }
 .personal-subagent-fields .personal-secondary-action { grid-column: 1 / -1; margin-top: 0; }
 .personal-subagent-preview { margin-top: 13px; padding: 12px; border: 1px solid #d8c67a; border-radius: 10px; background: #fffbed; }
 .personal-subagent-preview > strong { font-size: 12.5px; }
@@ -962,8 +976,9 @@
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-inline-agent-select select { border: 2px solid #141414; border-radius: 4px; color: #141414; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-inline-resume-when input { border: 2px solid #141414; border-radius: 4px; color: #141414; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-switch,
-.personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-fields input,
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-fields input:not([type="checkbox"]),
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-fields select,
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-domain-option,
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-preview { border: 2px solid #141414; border-radius: 4px; color: #141414; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-switch { background: #fff; box-shadow: 2px 2px 0 #141414; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-subagent-switch[aria-checked="true"] { background: #baf2c7; }
