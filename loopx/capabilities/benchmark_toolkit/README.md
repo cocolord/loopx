@@ -106,7 +106,9 @@ enforces that timeout on the complete solver process group;
 their own bounded cleanup. The outer benchmark runner remains the hard timeout and
 containment owner. A timed-out segment is drained before LoopX probes public
 progress; a later segment may use the remaining shared budget when the continuation
-decision still admits it. LoopX rejects
+decision still admits it. Initial and post-segment progress probes use the lesser of
+their 30-second cap and the remaining shared budget; a probe timeout fails closed
+before another solver segment starts. LoopX rejects
 progress regression, task-shape drift, prompt mismatch, an empty segment event file,
 or a dirty evidence directory. Raw segment JSONL and the private lifecycle record are
 written with owner-only permissions outside the task workspace; the public result
