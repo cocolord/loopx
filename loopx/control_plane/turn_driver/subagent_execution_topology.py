@@ -567,9 +567,14 @@ def subagent_host_request_projection(
 
 
 def child_execution_receipts_json_schema() -> dict[str, Any]:
+    opaque_ref = {
+        "type": "string",
+        "pattern": r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$",
+        "maxLength": 192,
+    }
     nullable_ref = {
         "anyOf": [
-            {"type": "string", "maxLength": 192},
+            dict(opaque_ref),
             {"type": "null"},
         ]
     }
@@ -578,18 +583,18 @@ def child_execution_receipts_json_schema() -> dict[str, Any]:
             "type": "string",
             "enum": [SUBAGENT_HOST_EXECUTION_RECEIPT_SCHEMA_VERSION],
         },
-        "bundle_id": {"type": "string", "maxLength": 192},
-        "lane_id": {"type": "string", "maxLength": 192},
-        "goal_id": {"type": "string", "maxLength": 192},
-        "todo_id": {"type": "string", "maxLength": 192},
+        "bundle_id": dict(opaque_ref),
+        "lane_id": dict(opaque_ref),
+        "goal_id": dict(opaque_ref),
+        "todo_id": dict(opaque_ref),
         "execution_kind": {
             "type": "string",
             "enum": sorted(EXECUTION_KINDS),
         },
-        "runtime_id": {"type": "string", "maxLength": 192},
-        "worker_ref": {"type": "string", "maxLength": 192},
-        "source_state_ref": {"type": "string", "maxLength": 192},
-        "task_packet_digest": {"type": "string", "maxLength": 192},
+        "runtime_id": dict(opaque_ref),
+        "worker_ref": dict(opaque_ref),
+        "source_state_ref": dict(opaque_ref),
+        "task_packet_digest": dict(opaque_ref),
         "context_mode": {
             "type": "string",
             "enum": sorted(CHILD_CONTEXT_MODES),
@@ -606,7 +611,8 @@ def child_execution_receipts_json_schema() -> dict[str, Any]:
         },
         "evidence_refs": {
             "type": "array",
-            "items": {"type": "string", "maxLength": 192},
+            "items": dict(opaque_ref),
+            "minItems": 1,
             "maxItems": MAX_EVIDENCE_REFS,
         },
         "raw_transcript_copied": {"type": "boolean", "enum": [False]},

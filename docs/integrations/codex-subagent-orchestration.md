@@ -142,6 +142,24 @@ proves versioned execution state, copy-on-write workspace isolation, capacity
 reservation, branch lease, held-result settlement, cancellation, and recovery.
 Context choice is advisory execution strategy and cannot widen LoopX authority.
 
+## Receipt And Enforcement Boundary
+
+Each observed child returns a bounded host receipt. `runtime_id` identifies the
+stable host kind, not a process, executable, workspace, Session file, or other
+local path. The built-in Codex adapter pins it to `codex-cli`; `worker_ref`
+remains an opaque host child reference. LoopX rejects receipts that copy local
+paths or fail to bind the planned bundle, lane, task-packet digest, context,
+workspace, or effect classes. Evidence references are one or more opaque tokens
+such as `artifact:child-result`, never prose, URLs, transcripts, or local paths.
+
+The prevention-first packet check is enforced before launch. Result
+reconciliation is currently observation-only: it can mark missing, rejected,
+cancelled, drifted, or aligned child evidence and require parent acceptance,
+but it does not intercept live host tools or automatically terminate a running
+child. A receipt therefore makes evidence eligible for parent review; it does
+not itself authorize settlement, publication, external writes, or production
+actions.
+
 ## Claims, Leases, And Worktrees
 
 Registered peers claim work through LoopX todos and leases. The control plane

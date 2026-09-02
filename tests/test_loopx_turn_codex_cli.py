@@ -196,6 +196,14 @@ def test_codex_cli_result_schema_requires_only_bounded_contract_fields() -> None
         "fresh",
         "resume",
     ]
+    assert receipt_properties["runtime_id"] == {
+        "type": "string",
+        "enum": ["codex-cli"],
+    }
+    assert receipt_properties["evidence_refs"]["items"]["pattern"] == (
+        r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$"
+    )
+    assert receipt_properties["evidence_refs"]["minItems"] == 1
     assert {
         field: schema["properties"][field]["maxLength"]
         for field in (
@@ -332,6 +340,9 @@ def test_codex_cli_prompt_isolates_subagent_instructions_to_enabled_request() ->
     assert "fresh maps to fork_context=false" in prompt
     assert "forked_snapshot maps to fork_context=true" in prompt
     assert "never infer native arguments inside the generic LoopX task packet" in prompt
+    assert "set runtime_id to the stable host id codex-cli" in prompt
+    assert "Never use an executable, workspace, session-file" in prompt
+    assert "opaque evidence_refs such as artifact:child-result" in prompt
 
 
 def test_codex_cli_host_starts_then_resumes_opaque_session(

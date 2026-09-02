@@ -410,6 +410,10 @@ def test_child_receipt_schema_excludes_registered_peer_authority() -> None:
     assert {"agent_id", "session_ref", "task_lease_ref"}.isdisjoint(
         item_schema["required"]
     )
+    opaque_pattern = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$"
+    assert properties["worker_ref"]["pattern"] == opaque_pattern
+    assert properties["evidence_refs"]["items"]["pattern"] == opaque_pattern
+    assert properties["evidence_refs"]["minItems"] == 1
 
 
 def test_child_receipt_rejects_unknown_context_mode() -> None:
