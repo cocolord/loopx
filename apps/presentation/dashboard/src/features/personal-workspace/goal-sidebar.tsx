@@ -125,7 +125,11 @@ export function GoalSidebar({
 
       <div className="personal-sidebar-footer">
         {onOpenSettings ? (
-          <button className="personal-sidebar-utility" onClick={onOpenSettings} type="button"><Settings2 size={17} /><span>{t("settings.open")}</span></button>
+          <button aria-label={t("settings.open")} className="personal-sidebar-utility" onClick={onOpenSettings} type="button">
+            <span className="personal-sidebar-utility-icon"><Settings2 size={17} /></span>
+            <span className="personal-sidebar-utility-copy"><strong>{t("settings.open")}</strong><small>{t("settings.eyebrow")}</small></span>
+            <ChevronRight aria-hidden="true" size={15} />
+          </button>
         ) : null}
       </div>
     </div>

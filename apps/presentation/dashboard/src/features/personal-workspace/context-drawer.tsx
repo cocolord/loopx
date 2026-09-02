@@ -28,6 +28,7 @@ import type {
   WorkspaceDrawerSelection,
   WorkspaceGoal,
   WorkspaceGoalNotification,
+  WorkspaceGoalSubagentConfiguration,
   WorkspaceRun,
   WorkspaceTodo,
 } from "./personal-workspace-model";
@@ -95,8 +96,9 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
   const [subagentAllowedDomains, setSubagentAllowedDomains] = useState<string[]>([]);
   const [subagentFeedback, setSubagentFeedback] = useState<string | null>(null);
   const [subagentMaxChildren, setSubagentMaxChildren] = useState(2);
-  const [subagentMutationState, setSubagentMutationState] = useState<"idle" | "previewing" | "ready" | "applying" | "success" | "error">("idle");
+  const [subagentMutationState, setSubagentMutationState] = useState<"idle" | "previewing" | "ready" | "applying" | "success" | "warning" | "error">("idle");
   const [subagentPreview, setSubagentPreview] = useState<GoalSubagentPreview | null>(null);
+  const [verifiedSubagentConfiguration, setVerifiedSubagentConfiguration] = useState<WorkspaceGoalSubagentConfiguration | null>(null);
   const [todoAgentId, setTodoAgentId] = useState(agents.find((agent) => agent.available)?.agentId ?? "codex");
   const [todoResumeWhen, setTodoResumeWhen] = useState("");
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -120,6 +122,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
     setSubagentFeedback(null);
     setSubagentMutationState("idle");
     setSubagentPreview(null);
+    setVerifiedSubagentConfiguration(null);
   }, [selectionIdentity]);
 
   useEffect(() => {
@@ -229,7 +232,9 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
   }
 
   const currentSubagentConfiguration = selection.kind === "goal"
-    ? selection.item.subagentExecution ?? { allowedDomains: [], domainCandidates: [], enabled: false, maxChildren: 0 }
+    ? verifiedSubagentConfiguration
+      ?? selection.item.subagentExecution
+      ?? { allowedDomains: [], domainCandidates: [], enabled: false, maxChildren: 0 }
     : { allowedDomains: [], domainCandidates: [], enabled: false, maxChildren: 0 };
   const subagentBusy = subagentMutationState === "previewing" || subagentMutationState === "applying";
   const subagentDomainOptions = (() => {
@@ -307,6 +312,12 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
     try {
       const preview = await callbacks.onPreviewGoalSubagentConfiguration(request);
       if (!preview.changed) {
+        setVerifiedSubagentConfiguration({
+          ...preview.configuration,
+          domainCandidates: currentSubagentConfiguration.domainCandidates,
+        });
+        setSubagentAllowedDomains(preview.configuration.allowedDomains);
+        setSubagentMaxChildren(preview.configuration.maxChildren || 2);
         setSubagentMutationState("success");
         setSubagentFeedback(t("drawer.subagentNoChange"));
         return;
@@ -325,16 +336,28 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
     setSubagentMutationState("applying");
     setSubagentFeedback(t("drawer.subagentApplying"));
     try {
-      await callbacks.onApplyGoalSubagentConfiguration({
+      const verifiedConfiguration = await callbacks.onApplyGoalSubagentConfiguration({
         allowedDomains: subagentPreview.allowedDomains,
         enabled: subagentPreview.enabled,
         goalId: subagentPreview.goalId,
         maxChildren: subagentPreview.maxChildren,
         previewId: subagentPreview.previewId,
       });
+      setVerifiedSubagentConfiguration({
+        ...verifiedConfiguration,
+        domainCandidates: currentSubagentConfiguration.domainCandidates,
+      });
+      setSubagentAllowedDomains(verifiedConfiguration.allowedDomains);
+      setSubagentMaxChildren(verifiedConfiguration.maxChildren || 2);
       setSubagentMutationState("success");
       setSubagentFeedback(t("drawer.subagentApplied"));
       setSubagentPreview(null);
+      try {
+        await callbacks.onRefresh?.();
+      } catch {
+        setSubagentMutationState("warning");
+        setSubagentFeedback(t("drawer.subagentAppliedRefreshFailed"));
+      }
     } catch (error) {
       setSubagentMutationState("error");
       setSubagentFeedback(error instanceof Error ? error.message : t("drawer.subagentApplyFailed"));
@@ -494,20 +517,47 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                       </div>
                       <button
                         aria-checked={currentSubagentConfiguration.enabled}
-                        aria-label={t(currentSubagentConfiguration.enabled ? "drawer.subagentDisable" : "drawer.subagentEnable")}
+                        aria-label={t(subagentPreview && subagentMutationState === "ready"
+                          ? "drawer.subagentPending"
+                          : currentSubagentConfiguration.enabled ? "drawer.subagentDisable" : "drawer.subagentEnable")}
                         className="personal-subagent-switch"
+                        data-pending={subagentPreview && subagentMutationState === "ready" ? "true" : undefined}
                         disabled={readOnly
                           || subagentBusy
+                          || Boolean(subagentPreview)
                           || !callbacks.onPreviewGoalSubagentConfiguration}
                         onClick={() => void previewGoalSubagentConfiguration(!currentSubagentConfiguration.enabled)}
                         role="switch"
                         type="button"
                       >
                         <span />
-                        {t(currentSubagentConfiguration.enabled ? "common.on" : "common.off")}
+                        {t(subagentPreview && subagentMutationState === "ready"
+                          ? "drawer.subagentPending"
+                          : currentSubagentConfiguration.enabled ? "common.on" : "common.off")}
                       </button>
                     </div>
                     <p>{t("drawer.subagentDescription")}</p>
+                    {subagentPreview && subagentMutationState === "ready" ? (
+                      <div className="personal-subagent-preview">
+                        <strong>{t(subagentPreview.enabled ? "drawer.subagentConfirmEnable" : "drawer.subagentConfirmDisable")}</strong>
+                        <p>{subagentPreview.enabled
+                          ? t("drawer.subagentPreviewSummary", {
+                              count: subagentPreview.maxChildren,
+                              domains: subagentPreview.allowedDomains.join(" · ") || t("drawer.subagentDomainsUnrestricted"),
+                            })
+                          : t("drawer.subagentDisableSummary")}</p>
+                        <div>
+                          <button className="personal-primary-action" onClick={() => void applyGoalSubagentConfiguration()} type="button">{t("common.confirm")}</button>
+                          <button className="personal-secondary-action" onClick={resetSubagentDraft} type="button">{t("common.cancel")}</button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {subagentFeedback ? (
+                      <p className={`personal-subagent-feedback is-${subagentMutationState}`} role="status">
+                        {subagentMutationState === "previewing" || subagentMutationState === "applying" ? <RotateCcw className="personal-spin" size={13} /> : null}
+                        {subagentFeedback}
+                      </p>
+                    ) : null}
                     <dl>
                       <div><dt>{t("drawer.subagentCurrentBoundary")}</dt><dd>{currentSubagentConfiguration.allowedDomains.join(" · ") || t("drawer.subagentDomainsUnrestricted")}</dd></div>
                       <div><dt>{t("drawer.subagentChildLimit")}</dt><dd>{currentSubagentConfiguration.maxChildren || 0}</dd></div>
@@ -568,27 +618,6 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                         ) : null}
                       </div>
                     )}
-                    {subagentPreview && subagentMutationState === "ready" ? (
-                      <div className="personal-subagent-preview">
-                        <strong>{t(subagentPreview.enabled ? "drawer.subagentConfirmEnable" : "drawer.subagentConfirmDisable")}</strong>
-                        <p>{subagentPreview.enabled
-                          ? t("drawer.subagentPreviewSummary", {
-                              count: subagentPreview.maxChildren,
-                              domains: subagentPreview.allowedDomains.join(" · ") || t("drawer.subagentDomainsUnrestricted"),
-                            })
-                          : t("drawer.subagentDisableSummary")}</p>
-                        <div>
-                          <button className="personal-primary-action" onClick={() => void applyGoalSubagentConfiguration()} type="button">{t("common.confirm")}</button>
-                          <button className="personal-secondary-action" onClick={resetSubagentDraft} type="button">{t("common.cancel")}</button>
-                        </div>
-                      </div>
-                    ) : null}
-                    {subagentFeedback ? (
-                      <p className={`personal-subagent-feedback is-${subagentMutationState}`} role="status">
-                        {subagentMutationState === "previewing" || subagentMutationState === "applying" ? <RotateCcw className="personal-spin" size={13} /> : null}
-                        {subagentFeedback}
-                      </p>
-                    ) : null}
                   </section>
                   {!readOnly ? <section className="personal-detail-card personal-goal-notification">
                   <small>{t("drawer.larkConnection")}</small>

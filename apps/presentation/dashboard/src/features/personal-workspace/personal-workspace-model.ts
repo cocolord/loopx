@@ -314,10 +314,14 @@ export type PersonalWorkspaceCallbacks = {
   onOpenOutput?: (output: WorkspaceOutput) => void;
   onPreviewGoalSubagentConfiguration?: (
     request: WorkspaceGoalSubagentConfiguration & { goalId: string },
-  ) => Promise<{ changed: boolean; previewId: string }>;
+  ) => Promise<{
+    changed: boolean;
+    configuration: WorkspaceGoalSubagentConfiguration;
+    previewId: string;
+  }>;
   onApplyGoalSubagentConfiguration?: (
     request: WorkspaceGoalSubagentConfiguration & { goalId: string; previewId: string },
-  ) => Promise<void>;
+  ) => Promise<WorkspaceGoalSubagentConfiguration>;
   onGoalActivationStateChange?: (goalId: string, activationState: "active" | "stopped") => void;
   onGoalDeleted?: (goalId: string) => void;
   onReconcileStatus?: () => void | Promise<void>;

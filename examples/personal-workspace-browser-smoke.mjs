@@ -56,7 +56,9 @@ async function installApi(page) {
     durableResources: new Set(),
     durableWriteCount: 0,
     failNextLifecycleApply: false,
+    failNextGoalSubagentResponse: false,
     failNextStatusRequest: false,
+    freezeGoalSubagentStatusProjection: false,
     goalActivationStates: new Map([
       ["product-release", "active"],
       ["research-monitor", "active"],
@@ -79,6 +81,10 @@ async function installApi(page) {
   await page.route(`http://127.0.0.1:${port}/status.json`, async (route) => {
     state.statusRequestCount += 1;
     const fixture = structuredClone(require(resolve(repoRoot, "examples/status.example.json")));
+    const defaultSubagentConfiguration = { mode: "default", spawn_allowed: false, max_children: 0, allowed_domains: [] };
+    const projectedSubagentConfiguration = (goalId, fallback) => state.freezeGoalSubagentStatusProjection
+      ? fallback ?? defaultSubagentConfiguration
+      : runtime.goalSubagentConfigurations.get(goalId) ?? fallback ?? defaultSubagentConfiguration;
     const directoryFixtures = [
       { id: "product-release", display_name: "Product Release" },
       { id: "research-monitor", display_name: "Research Monitor" },
@@ -90,8 +96,7 @@ async function installApi(page) {
       const existingGoal = fixture.run_history.goals.find((goal) => goal.id === directoryGoal.id);
       if (existingGoal) {
         existingGoal.activation_state = activation_state;
-        existingGoal.spawn_policy = runtime.goalSubagentConfigurations.get(directoryGoal.id)
-          ?? { mode: "default", spawn_allowed: false, max_children: 0, allowed_domains: [] };
+        existingGoal.spawn_policy = projectedSubagentConfiguration(directoryGoal.id, existingGoal.spawn_policy);
         continue;
       }
       fixture.run_history.goals.push({
@@ -99,16 +104,13 @@ async function installApi(page) {
         status: "active-read-only", registry_member: true,
         legacy_runtime_goal: false, adapter_kind: "generic_project_goal_v0", adapter_status: "connected",
         lifecycle_phase: "registered", lifecycle_flags: ["registered"],
-        spawn_policy: runtime.goalSubagentConfigurations.get(directoryGoal.id)
-          ?? { mode: "default", spawn_allowed: false, max_children: 0, allowed_domains: [] },
+        spawn_policy: projectedSubagentConfiguration(directoryGoal.id),
         quota: { compute: 1, window_hours: 24, slot_minutes: 1, allowed_slots: 1440, spent_slots: 0, state: activation_state === "stopped" ? "paused" : "waiting" },
         index_exists: false, raw_index_records: 0, unique_runs: 0, latest_runs: [],
       });
     }
     for (const fixtureGoal of fixture.run_history.goals) {
-      fixtureGoal.spawn_policy = runtime.goalSubagentConfigurations.get(fixtureGoal.id)
-        ?? fixtureGoal.spawn_policy
-        ?? { mode: "default", spawn_allowed: false, max_children: 0, allowed_domains: [] };
+      fixtureGoal.spawn_policy = projectedSubagentConfiguration(fixtureGoal.id, fixtureGoal.spawn_policy);
     }
     if (!fixture.run_history.goals.some((goal) => goal.id === "stale-browser-goal")) {
       fixture.run_history.goals.push({
@@ -284,6 +286,11 @@ async function installApi(page) {
       return;
     }
     if (["/api/chat/goal-subagents/dry-run", "/api/chat/goal-subagents/apply"].includes(url.pathname) && request.method() === "POST") {
+      if (state.failNextGoalSubagentResponse) {
+        state.failNextGoalSubagentResponse = false;
+        await route.fulfill({ body: "", contentType: "text/plain", status: 502 });
+        return;
+      }
       const body = request.postDataJSON();
       const apply = url.pathname.endsWith("/apply");
       const before = runtime.goalSubagentConfigurations.get(body.goal_id)
@@ -683,29 +690,90 @@ async function main() {
     pass(1, "Goal stop applies directly without a redundant confirmation, while resume stays reviewed; both update optimistically, roll back rejected applies, and reconcile status in the background.");
     if (await page.locator(".personal-timeline-row").filter({ hasText: /纠偏/u }).count()) throw new Error("Browse rows expose repeated correction actions");
     pass(2, "Browse rows are full-row click targets and Session rows state that they open execution progress and results.");
+    const workspaceSettingsEntry = page.getByRole("button", { name: "设置", exact: true });
+    const settingsEntryVisual = await workspaceSettingsEntry.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const icon = element.querySelector(".personal-sidebar-utility-icon")?.getBoundingClientRect();
+      const rect = element.getBoundingClientRect();
+      return {
+        backgroundColor: style.backgroundColor,
+        borderTopWidth: style.borderTopWidth,
+        height: rect.height,
+        iconHeight: icon?.height ?? 0,
+        width: rect.width,
+      };
+    });
+    if (settingsEntryVisual.height < 52 || settingsEntryVisual.iconHeight < 32 || settingsEntryVisual.width < 180) {
+      throw new Error(`Settings entry is not a prominent navigation target: ${JSON.stringify(settingsEntryVisual)}`);
+    }
+    if (settingsEntryVisual.borderTopWidth === "0px" || settingsEntryVisual.backgroundColor === "rgba(0, 0, 0, 0)") {
+      throw new Error(`Settings entry still renders as a weak transparent footer row: ${JSON.stringify(settingsEntryVisual)}`);
+    }
     await page.screenshot({ path: resolve(outputDir, "desktop-first-screen.png"), fullPage: false, animations: "disabled" });
     pass(4, "First viewport exposes needs-you, running, observing, and scheduled Goal lanes with collapsed history.");
     pass(15, "Desktop viewport matches the approved single-sidebar/channel/drawer composition.");
 
     await page.locator(".personal-goal-link").first().click();
     await page.getByRole("button", { name: "Goal 详情" }).click();
+    const drawerHeaderVisual = await page.locator(".personal-drawer-header").evaluate((element) => {
+      const close = element.querySelector(".personal-drawer-close")?.getBoundingClientRect();
+      const header = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        closeHeight: close?.height ?? 0,
+        closeTopInset: close ? close.top - header.top : 0,
+        closeWidth: close?.width ?? 0,
+        headerHeight: header.height,
+        paddingTop: Number.parseFloat(style.paddingTop),
+      };
+    });
+    if (drawerHeaderVisual.closeHeight < 44 || drawerHeaderVisual.closeWidth < 44) {
+      throw new Error(`Goal drawer close control is below the 44px target: ${JSON.stringify(drawerHeaderVisual)}`);
+    }
+    if (drawerHeaderVisual.headerHeight < 84 || drawerHeaderVisual.paddingTop < 18 || drawerHeaderVisual.closeTopInset < 18) {
+      throw new Error(`Goal drawer header is still pinned too close to the top edge: ${JSON.stringify(drawerHeaderVisual)}`);
+    }
     const subagentSwitch = page.getByRole("switch", { name: "预览开启子代理执行" });
     await subagentSwitch.waitFor({ state: "visible" });
     if (await subagentSwitch.getAttribute("aria-checked") !== "false") throw new Error("Per-Goal sub-agent execution did not default off");
     if (!(await subagentSwitch.isEnabled())) throw new Error("Per-Goal sub-agent execution still required a task-domain selection");
     await page.getByLabel("最多子代理数").selectOption("2");
     const writesBeforeSubagentPreview = api.durableWriteCount;
+    api.freezeGoalSubagentStatusProjection = true;
     await subagentSwitch.click();
     await page.getByText("预览已锁定，确认后才会写入这个 Goal。", { exact: true }).waitFor({ state: "visible" });
     if (api.durableWriteCount !== writesBeforeSubagentPreview) throw new Error("Unrestricted sub-agent preview mutated durable Goal state");
     if (api.goalSubagentPreviews.at(-1)?.allowed_domains.length !== 0) throw new Error("Unrestricted sub-agent preview invented a task-domain filter");
     await page.getByText("最多允许创建 2 个子代理；任务领域限制：不限制任务领域。", { exact: true }).waitFor({ state: "visible" });
+    const previewPlacement = await page.locator(".personal-goal-subagents").evaluate((element) => {
+      const preview = element.querySelector(".personal-subagent-preview");
+      const currentSummary = element.querySelector("dl");
+      const switchBounds = element.querySelector(".personal-subagent-switch")?.getBoundingClientRect();
+      const previewBounds = preview?.getBoundingClientRect();
+      return {
+        gapFromSwitch: switchBounds && previewBounds ? previewBounds.top - switchBounds.bottom : Number.POSITIVE_INFINITY,
+        previewBeforeCurrentSummary: Boolean(preview && currentSummary
+          && (preview.compareDocumentPosition(currentSummary) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      };
+    });
+    if (!previewPlacement.previewBeforeCurrentSummary || previewPlacement.gapFromSwitch > 150) {
+      throw new Error(`Sub-agent confirmation is detached from its switch: ${JSON.stringify(previewPlacement)}`);
+    }
     await page.locator(".personal-subagent-preview").getByRole("button", { name: "确认", exact: true }).click();
     await page.getByText("已写入，并通过共享 Goal 状态读回校验。", { exact: true }).waitFor({ state: "visible" });
     const enabledSubagentSwitch = page.getByRole("switch", { name: "预览关闭子代理执行" });
     await enabledSubagentSwitch.waitFor({ state: "visible" });
-    if (await enabledSubagentSwitch.getAttribute("aria-checked") !== "true") throw new Error("Verified unrestricted status readback did not turn the per-Goal switch on");
+    if (await enabledSubagentSwitch.getAttribute("aria-checked") !== "true") throw new Error("Verified apply receipt did not keep the per-Goal switch on while the status projection remained stale");
     if (api.durableWriteCount !== writesBeforeSubagentPreview + 1) throw new Error("Unrestricted sub-agent apply did not produce exactly one durable Goal write");
+    await page.getByRole("button", { name: /关闭详情/ }).click();
+    await page.getByRole("button", { name: "Goal 详情", exact: true }).click();
+    const staleProjectionSwitch = page.getByRole("switch", { name: "预览开启子代理执行" });
+    await staleProjectionSwitch.waitFor({ state: "visible" });
+    await staleProjectionSwitch.click();
+    await page.getByText("当前 Goal 已是这个设置，没有写入任何内容。", { exact: true }).waitFor({ state: "visible" });
+    const reconciledNoChangeSwitch = page.getByRole("switch", { name: "预览关闭子代理执行" });
+    if (await reconciledNoChangeSwitch.getAttribute("aria-checked") !== "true") throw new Error("A no-change canonical preview did not reconcile the stale off projection");
+    if (api.durableWriteCount !== writesBeforeSubagentPreview + 1) throw new Error("No-change sub-agent reconciliation produced a durable write");
 
     const codeDomain = page.getByRole("checkbox", { name: /code/u });
     const validationDomain = page.getByRole("checkbox", { name: /validation/u });
@@ -734,12 +802,20 @@ async function main() {
     await page.getByText("当前没有开放的 advancement Todo 声明 task_domain", { exact: false }).waitFor({ state: "visible" });
     const emptyDomainSwitch = page.getByRole("switch", { name: "预览开启子代理执行" });
     if (!(await emptyDomainSwitch.isEnabled())) throw new Error("A Goal without projected task domains could not enable unrestricted sub-agent execution");
+    api.failNextGoalSubagentResponse = true;
+    await emptyDomainSwitch.click();
+    await page.getByText("LoopX Chat 服务暂时不可用（HTTP 502）。请确认 Dashboard 与 Chat 服务已启动且来自同一版本。", { exact: true }).waitFor({ state: "visible" });
+    if ((await page.locator(".personal-goal-subagents").innerText()).includes("Unexpected end of JSON input")) {
+      throw new Error("Empty Chat API responses still expose a raw JSON parser failure");
+    }
+    if (api.durableWriteCount !== writesBeforeSubagentPreview + 3) throw new Error("A failed Goal sub-agent preview wrote Goal state");
     await emptyDomainSwitch.click();
     await page.getByText("预览已锁定，确认后才会写入这个 Goal。", { exact: true }).waitFor({ state: "visible" });
     if (api.goalSubagentPreviews.at(-1)?.allowed_domains.length !== 0) throw new Error("A Goal without task-domain candidates invented a restriction");
     await page.locator(".personal-subagent-preview").getByRole("button", { name: "取消", exact: true }).click();
     if (api.durableWriteCount !== writesBeforeSubagentPreview + 3) throw new Error("Canceling an unrestricted preview wrote Goal state");
     await page.getByRole("button", { name: /关闭详情/ }).click();
+    api.freezeGoalSubagentStatusProjection = false;
     pass(22, "Per-Goal sub-agent execution supports unrestricted and restricted policies, previews before writing, verifies shared-state readback, leaves no-domain Goals usable, and can be disabled again.");
 
     if (await page.locator("html").getAttribute("lang") !== "zh-CN") throw new Error("Desktop did not start in Simplified Chinese");

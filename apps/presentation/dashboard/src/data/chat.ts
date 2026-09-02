@@ -401,15 +401,34 @@ export async function transitionTypedAction(
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(chatApiUrl(url), {
-    cache: "no-store",
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
-  });
-  const payload = (await response.json()) as Record<string, unknown>;
+  let response: Response;
+  try {
+    response = await fetch(chatApiUrl(url), {
+      cache: "no-store",
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...init?.headers,
+      },
+    });
+  } catch {
+    throw new ChatApiError(
+      "无法连接 LoopX Chat 服务。请确认 Dashboard 与 Chat 服务已启动且来自同一版本。",
+      { error_code: "chat_api_unavailable" },
+    );
+  }
+  const responseText = await response.text();
+  let parsedPayload: unknown = null;
+  if (responseText.trim()) {
+    try {
+      parsedPayload = JSON.parse(responseText);
+    } catch {
+      parsedPayload = null;
+    }
+  }
+  const payload = parsedPayload && typeof parsedPayload === "object" && !Array.isArray(parsedPayload)
+    ? parsedPayload as Record<string, unknown>
+    : {};
   if (!response.ok) {
     const proposal = payload.proposal && typeof payload.proposal === "object"
       ? payload.proposal as Record<string, unknown>
@@ -417,9 +436,20 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
     const staleMessage = proposal?.status === "stale"
       ? "来源状态已变化，请重新生成预览。"
       : null;
-    throw new ChatApiError(staleMessage ?? String(payload.error || `HTTP ${response.status}`), payload);
+    const serviceMessage = response.status >= 500
+      ? `LoopX Chat 服务暂时不可用（HTTP ${response.status}）。请确认 Dashboard 与 Chat 服务已启动且来自同一版本。`
+      : `LoopX Chat 请求失败（HTTP ${response.status}）。`;
+    throw new ChatApiError(staleMessage ?? String(payload.error || serviceMessage), Object.keys(payload).length
+      ? payload
+      : { error_code: "chat_api_unavailable", http_status: response.status });
   }
-  return payload as T;
+  if (parsedPayload === null) {
+    throw new ChatApiError(
+      `LoopX Chat 服务返回了无法识别的响应（HTTP ${response.status}）。请确认 Dashboard 与 Chat 服务来自同一版本。`,
+      { error_code: "invalid_chat_api_response", http_status: response.status },
+    );
+  }
+  return parsedPayload as T;
 }
 
 export async function fetchChatStatus() {

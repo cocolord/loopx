@@ -2504,12 +2504,21 @@ function PersonalGoalHome({
             const preview = await previewGoalSubagentConfiguration(request);
             return {
               changed: preview.changed,
+              configuration: {
+                allowedDomains: preview.after.orchestration.allowed_domains,
+                enabled: preview.feature_summary.multi_subagent === "enabled",
+                maxChildren: preview.after.orchestration.max_children,
+              },
               previewId: preview.preview_id,
             };
           },
           onApplyGoalSubagentConfiguration: async ({ previewId, ...request }) => {
-            await applyGoalSubagentConfiguration(request, previewId);
-            await onRefresh();
+            const result = await applyGoalSubagentConfiguration(request, previewId);
+            return {
+              allowedDomains: result.after.orchestration.allowed_domains,
+              enabled: result.feature_summary.multi_subagent === "enabled",
+              maxChildren: result.after.orchestration.max_children,
+            };
           },
           onGoalActivationStateChange,
           onGoalDeleted,
