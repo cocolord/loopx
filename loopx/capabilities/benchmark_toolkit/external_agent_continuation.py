@@ -33,8 +33,11 @@ BENCHMARK_CONTINUATION_PRIVATE_EVIDENCE_SCHEMA_VERSION = (
 )
 
 SegmentRunner = Callable[[Sequence[str], Path, Mapping[str, str], str, Path], int]
-ProgressRunner = Callable[[Sequence[str], Path, Mapping[str, str]], Mapping[str, Any]]
+ProgressRunner = Callable[
+    [Sequence[str], Path, Mapping[str, str], int], Mapping[str, Any]
+]
 Clock = Callable[[], float]
+_PROGRESS_PROBE_TIMEOUT_CAP_MS = 30_000
 
 
 class BenchmarkSegmentTimeout(RuntimeError):
@@ -106,7 +109,9 @@ def _run_solver_segment(
         if os.name == "posix":
             process_options["start_new_session"] = True
         elif os.name == "nt":  # pragma: no cover - Windows-only branch.
-            process_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            process_options["creationflags"] = getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP"
+            )
         process = subprocess.Popen(
             list(command),
             cwd=workspace,
@@ -155,7 +160,9 @@ def _run_progress_probe(
     command: Sequence[str],
     workspace: Path,
     environment: Mapping[str, str],
+    timeout_ms: int,
 ) -> Mapping[str, Any]:
+    bounded_timeout_ms = _positive_int(timeout_ms, field="progress_probe_timeout_ms")
     completed = subprocess.run(
         list(command),
         cwd=workspace,
@@ -163,7 +170,7 @@ def _run_progress_probe(
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         text=True,
-        timeout=30,
+        timeout=bounded_timeout_ms / 1000,
         check=False,
     )
     if completed.returncode != 0:
@@ -175,6 +182,32 @@ def _run_progress_probe(
     if not isinstance(payload, Mapping):
         raise ValueError("benchmark_progress_probe_output_invalid")
     return payload
+
+
+def _remaining_budget_ms(*, started: float, total_budget_ms: int, clock: Clock) -> int:
+    elapsed_ms = max(0, int((clock() - started) * 1000))
+    return max(0, total_budget_ms - elapsed_ms)
+
+
+def _run_bounded_progress_probe(
+    progress_runner: ProgressRunner,
+    command: Sequence[str],
+    workspace: Path,
+    environment: Mapping[str, str],
+    *,
+    started: float,
+    total_budget_ms: int,
+    clock: Clock,
+) -> Mapping[str, Any]:
+    timeout_ms = min(
+        _PROGRESS_PROBE_TIMEOUT_CAP_MS,
+        _remaining_budget_ms(
+            started=started, total_budget_ms=total_budget_ms, clock=clock
+        ),
+    )
+    if timeout_ms == 0:
+        raise subprocess.TimeoutExpired(command, 0)
+    return progress_runner(command, workspace, environment, timeout_ms)
 
 
 def _private_evidence(
@@ -286,8 +319,21 @@ def run_external_agent_continuation_phase(
 
     try:
         initial_progress = normalize_benchmark_public_progress(
-            progress_runner(progress_argv, workspace, safe_environment)
+            _run_bounded_progress_probe(
+                progress_runner,
+                progress_argv,
+                workspace,
+                safe_environment,
+                started=started,
+                total_budget_ms=total_budget_ms,
+                clock=clock,
+            )
         )
+    except subprocess.TimeoutExpired:
+        terminal_decision = "progress_probe_timed_out"
+        classification = "continuation_progress_probe_timed_out"
+        status = "failed"
+        result_exit_code = None
     except (OSError, subprocess.SubprocessError, TypeError, ValueError):
         terminal_decision = "progress_probe_failed"
         classification = "continuation_progress_probe_failed"
@@ -315,7 +361,9 @@ def run_external_agent_continuation_phase(
             BenchmarkContinuationDecision.STOP_COMPLETE.value
         ):
             break
-        elapsed_before_ms = max(0, int((clock() - started) * 1000))
+        elapsed_before_ms = total_budget_ms - _remaining_budget_ms(
+            started=started, total_budget_ms=total_budget_ms, clock=clock
+        )
         remaining_segments = max_segments - segment_index + 1
         remaining_budget_ms = max(0, total_budget_ms - elapsed_before_ms)
         if remaining_budget_ms == 0:
@@ -379,8 +427,23 @@ def run_external_agent_continuation_phase(
             break
         try:
             progress = normalize_benchmark_public_progress(
-                progress_runner(progress_argv, workspace, safe_environment)
+                _run_bounded_progress_probe(
+                    progress_runner,
+                    progress_argv,
+                    workspace,
+                    safe_environment,
+                    started=started,
+                    total_budget_ms=total_budget_ms,
+                    clock=clock,
+                )
             )
+        except subprocess.TimeoutExpired:
+            terminal_decision = "progress_probe_timed_out"
+            classification = "continuation_progress_probe_timed_out"
+            status = "failed"
+            result_exit_code = None
+            segment_record["progress_probe_status"] = "timed_out"
+            break
         except (OSError, subprocess.SubprocessError, TypeError, ValueError):
             terminal_decision = "progress_probe_failed"
             classification = "continuation_progress_probe_failed"
