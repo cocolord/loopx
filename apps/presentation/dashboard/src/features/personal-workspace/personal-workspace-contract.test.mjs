@@ -154,7 +154,7 @@ assert.match(dashboard, /statusRequestCanCommit\(statusRequestFenceRef\.current,
 assert.match(sidebar, /Trash2/, "Stopped Goals expose a delete icon");
 assert.match(sidebar, /onRequestGoalLifecycle\(goal, "delete"\)/, "Goal deletion stays behind the lifecycle request boundary");
 assert.match(page, /\{ select: operation !== "stop" \}/, "Goal stop suppresses the confirmation drawer while other lifecycle actions retain it");
-assert.match(page, /await applyProposal\(proposal, \{ presentation: "feedback" \}\)/, "Goal stop reuses the canonical apply state machine and surfaces its receipt as feedback");
+assert.match(page, /await applyProposal\(proposal, \{[\s\S]*lifecycleProjection: stopProjection \?\? undefined,[\s\S]*presentation: "feedback",[\s\S]*\}\)/, "Goal stop reuses the canonical apply state machine with its optimistic lifecycle projection and surfaces the receipt as feedback");
 assert.match(page, /if \(proposal\.status === "ready"\)[\s\S]*setSelection\(\{ item: proposal, kind: "proposal" \}\)/, "A stop action only bypasses review when its typed preview is ready");
 assert.match(page, /A newly discovered authority gate always deserves review/, "A direct action escalates a newly discovered authority gate to the drawer");
 assert.match(sidebar, /disabled=\{lifecycleBusyGoalIds\?\.has\(goal\.goalId\)\}/, "An in-flight Goal stop cannot be submitted twice from the sidebar");

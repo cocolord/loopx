@@ -20,6 +20,30 @@ const outputDir = resolve(repoRoot, "output/playwright/personal-workspace");
 const port = Number(process.env.LOOPX_PERSONAL_WORKSPACE_PORT ?? "5196");
 const packaged = process.env.LOOPX_PERSONAL_WORKSPACE_PACKAGED === "1";
 
+const periodicReportProjection = {
+  schema_version: "periodic_report_workspace_projection_v0",
+  goal_id: "product-release",
+  agent_id: "codex",
+  generation_id: "generation-workspace-smoke",
+  generated_at: "2026-09-01T10:00:00Z",
+  title: "Product Release milestone report",
+  summary: "A verified incremental report shown with the Goal's other durable outputs.",
+  content_sha256: `sha256:${"7".repeat(64)}`,
+  period_window: { start_at: "2026-08-25T10:00:00Z", end_at: "2026-09-01T10:00:00Z" },
+  interaction: { attention_kind: "progress", interaction: "inform", delivery: "surface", form: "milestone_report", writable: false },
+  delta: {
+    added_count: 1,
+    changed_count: 1,
+    item_count: 2,
+    items: [
+      { fact_id: "fact-added", source_ref: "todo:release-ready", title: "Release candidate verified", summary: "The candidate passed the bounded verification suite.", status: "done", content_kind: "outcome", change_kind: "added" },
+      { fact_id: "fact-changed", source_ref: "todo:rollout", title: "Rollout plan updated", summary: "The next rollout step now carries an explicit readback gate.", status: "open", content_kind: "next_action", change_kind: "changed", previous_status: "blocked" },
+    ],
+  },
+  publication: { publication_id: "publication-workspace-smoke", delivered_at: "2026-09-01T10:05:00Z", predecessor_publication_id: "publication-workspace-previous", cursor_id: "cursor-workspace-smoke" },
+  truth_contract: { published_cursor_is_source_of_truth: true, generation_receipt_is_delivery_receipt: false, projection_is_writable: false, browser_write_api: false },
+};
+
 function startServer() {
   if (packaged) {
     return spawn(process.env.LOOPX_PYTHON_BIN || "python3", [
@@ -57,6 +81,7 @@ async function installApi(page) {
     durableWriteCount: 0,
     failNextLifecycleApply: false,
     failNextGoalSubagentResponse: false,
+    failNextLifecyclePreview: false,
     failNextStatusRequest: false,
     freezeGoalSubagentStatusProjection: false,
     goalActivationStates: new Map([
@@ -72,6 +97,7 @@ async function installApi(page) {
     actionTransitions: [],
     allowNextHeartbeatApply: false,
     nextLifecycleApplyDelayMs: 0,
+    nextLifecyclePreviewDelayMs: 0,
     nextStatusDelayMs: 0,
     statusRequestCount: 0,
     turnRequests: [],
@@ -85,6 +111,11 @@ async function installApi(page) {
     const projectedSubagentConfiguration = (goalId, fallback) => state.freezeGoalSubagentStatusProjection
       ? fallback ?? defaultSubagentConfiguration
       : runtime.goalSubagentConfigurations.get(goalId) ?? fallback ?? defaultSubagentConfiguration;
+    fixture.local_dashboard_api = {
+      ...(fixture.local_dashboard_api ?? {}),
+      periodic_report_index_url: "/periodic-report-workspace",
+      periodic_report_detail_url: "/periodic-report-workspace-projection",
+    };
     const directoryFixtures = [
       { id: "product-release", display_name: "Product Release" },
       { id: "research-monitor", display_name: "Research Monitor" },
@@ -227,6 +258,31 @@ async function installApi(page) {
       return;
     }
     await route.fulfill({ contentType: "application/json", json: fixture, status: 200 });
+  });
+  await page.route("**/periodic-report-workspace?*", async (route) => {
+    const goalId = new URL(route.request().url()).searchParams.get("goal_id");
+    const items = goalId === periodicReportProjection.goal_id ? [{
+      goal_id: periodicReportProjection.goal_id,
+      agent_id: periodicReportProjection.agent_id,
+      generation_id: periodicReportProjection.generation_id,
+      publication_id: periodicReportProjection.publication.publication_id,
+      delivered_at: periodicReportProjection.publication.delivered_at,
+      predecessor_publication_id: periodicReportProjection.publication.predecessor_publication_id,
+      detail_ref: {
+        goal_id: periodicReportProjection.goal_id,
+        agent_id: periodicReportProjection.agent_id,
+        generation_id: periodicReportProjection.generation_id,
+        content_sha256: periodicReportProjection.content_sha256,
+      },
+    }] : [];
+    await route.fulfill({
+      contentType: "application/json",
+      json: { ok: true, periodic_reports: { schema_version: "periodic_report_workspace_index_v0", count: items.length, items } },
+      status: 200,
+    });
+  });
+  await page.route("**/periodic-report-workspace-projection?*", async (route) => {
+    await route.fulfill({ contentType: "application/json", json: { ok: true, projection: periodicReportProjection }, status: 200 });
   });
   await page.route(`http://127.0.0.1:${port}/api/ssh-source/ensure`, async (route) => {
     await route.fulfill({
@@ -523,6 +579,18 @@ async function installApi(page) {
     const url = new URL(request.url());
     if (url.pathname === "/api/actions/preview") {
       const body = request.postDataJSON();
+      const lifecycleDelayMs = body.action_kind === "goal.lifecycle" ? state.nextLifecyclePreviewDelayMs : 0;
+      state.nextLifecyclePreviewDelayMs = 0;
+      if (lifecycleDelayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, lifecycleDelayMs));
+      if (body.action_kind === "goal.lifecycle" && state.failNextLifecyclePreview) {
+        state.failNextLifecyclePreview = false;
+        await route.fulfill({
+          contentType: "application/json",
+          json: { error: "Lifecycle preview temporarily unavailable", error_code: "preview_unavailable", ok: false },
+          status: 503,
+        });
+        return;
+      }
       const proposal_id = `proposal-${body.idempotency_key}`;
       actionKinds.set(proposal_id, body.action_kind);
       state.actionPreviews.push({ ...body, proposalId: proposal_id });
@@ -704,6 +772,7 @@ async function main() {
     if (!(await stoppedDirectory.isVisible()) || await stoppedDirectory.getAttribute("open") !== null) throw new Error("Stopped Goals are not available in a collapsed directory section");
     const writesBeforeLifecyclePreview = api.durableWriteCount;
     const statusRequestsBeforeStop = api.statusRequestCount;
+    api.nextLifecyclePreviewDelayMs = 900;
     api.nextLifecycleApplyDelayMs = 900;
     api.nextStatusDelayMs = 900;
     await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
@@ -712,6 +781,9 @@ async function main() {
       null,
       { timeout: 600 },
     );
+    const pendingStop = page.locator('.personal-stopped-goals .personal-goal-lifecycle[aria-label="恢复 Product Release"]');
+    if (await pendingStop.getAttribute("aria-busy") !== "true") throw new Error("Pending Goal stop does not expose accessible progress");
+    await page.waitForTimeout(1_000);
     const stopPreview = api.actionPreviews.findLast((preview) => preview.action_kind === "goal.lifecycle" && preview.normalized_parameters.operation === "stop");
     if (!stopPreview || stopPreview.normalized_parameters.goal_id !== "product-release") throw new Error("Goal stop did not create the expected typed preview");
     if (api.durableWriteCount !== writesBeforeLifecyclePreview) throw new Error("Goal stop wrote durable state before its typed apply completed");
@@ -741,6 +813,13 @@ async function main() {
     await page.getByRole("button", { name: "停止 Product Release", exact: true }).waitFor({ state: "attached" });
     await page.waitForTimeout(1_800);
     if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 4) throw new Error("A stale background response overwrote a newer optimistic Goal transition");
+
+    api.failNextLifecyclePreview = true;
+    api.nextLifecyclePreviewDelayMs = 900;
+    await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
+    await page.getByRole("button", { name: "恢复 Product Release", exact: true }).waitFor({ state: "attached", timeout: 600 });
+    await page.getByRole("button", { name: "停止 Product Release", exact: true }).waitFor({ state: "attached", timeout: 2_000 });
+    if (api.goalActivationStates.get("product-release") !== "active") throw new Error("Rejected Goal stop preview mutated the durable fixture state");
 
     api.failNextLifecycleApply = true;
     api.nextLifecycleApplyDelayMs = 900;
@@ -1296,9 +1375,18 @@ async function main() {
     await editDialog.getByRole("button", { name: "取消" }).click();
     await page.screenshot({ path: resolve(outputDir, "lark-goal-connections.png"), fullPage: false, animations: "disabled" });
     await page.getByRole("button", { name: "返回工作区", exact: true }).click();
+    await selectProductReleaseGoal();
     await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: "Tasks" }).click();
     await page.locator(".personal-object-list").first().waitFor({ state: "visible" });
     await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: "Files" }).click();
+    const reportOutput = page.getByTestId("personal-goal-outputs").getByRole("button", { name: /Product Release milestone report/ });
+    await reportOutput.waitFor({ state: "visible" });
+    await reportOutput.click();
+    await page.getByTestId("personal-periodic-report-detail").getByText("Release candidate verified", { exact: true }).waitFor({ state: "visible" });
+    await page.getByTestId("personal-periodic-report-detail").getByText("Rollout plan updated", { exact: true }).waitFor({ state: "visible" });
+    if (await page.locator('[data-testid="frontstage-milestone-reports"]').count()) throw new Error("Milestone report still rendered in the deprecated Ops Frontstage");
+    await page.getByRole("button", { name: /关闭详情/ }).click();
+    await selectFirstGoal();
     await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: "Chat" }).click();
 
     const composer = page.getByLabel("向 LoopX 发送消息");
