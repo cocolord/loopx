@@ -807,6 +807,26 @@ async function main() {
     if (drawerHeaderVisual.headerHeight < 84 || drawerHeaderVisual.paddingTop < 18 || drawerHeaderVisual.closeTopInset < 18) {
       throw new Error(`Goal drawer header is still pinned too close to the top edge: ${JSON.stringify(drawerHeaderVisual)}`);
     }
+    const goalDrawerOrder = await page.locator(".personal-drawer-body").evaluate((element) => {
+      const lark = element.querySelector(".personal-goal-notification");
+      const session = element.querySelector(".personal-goal-session");
+      const actions = element.querySelector(".personal-drawer-action-grid");
+      const subagents = element.querySelector(".personal-goal-subagents");
+      const precedes = (earlier, later) => Boolean(earlier && later
+        && (earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING));
+      return {
+        actionsBeforeSubagents: precedes(actions, subagents),
+        larkBeforeSession: precedes(lark, session),
+        sessionBeforeSubagents: precedes(session, subagents),
+        subagentsLast: subagents?.nextElementSibling === null,
+      };
+    });
+    if (!goalDrawerOrder.larkBeforeSession
+      || !goalDrawerOrder.sessionBeforeSubagents
+      || !goalDrawerOrder.actionsBeforeSubagents
+      || !goalDrawerOrder.subagentsLast) {
+      throw new Error(`Goal drawer did not keep Lark and Session ahead of advanced sub-agent settings: ${JSON.stringify(goalDrawerOrder)}`);
+    }
     const subagentSwitch = page.getByRole("switch", { name: "预览开启子代理执行" });
     await subagentSwitch.waitFor({ state: "visible" });
     if (await subagentSwitch.getAttribute("aria-checked") !== "false") throw new Error("Per-Goal sub-agent execution did not default off");
