@@ -64,6 +64,13 @@ export type WorkspaceGoalSubagentConfiguration = {
 export type WorkspaceGoal = {
   activationState: "active" | "stopped";
   agentId: string;
+  agentLanes?: Array<{
+    agentId: string;
+    label: string;
+    lastActivityAt?: string | null;
+    state?: string | null;
+  }>;
+  agentLaneCount?: number;
   agentLabel?: string;
   agentSentence: string;
   agentTodos: WorkspaceAgentTodo[];
@@ -303,7 +310,7 @@ export type WorkspaceDrawerSelection =
   | { item: WorkspaceRun; kind: "run" }
   | { item: WorkspaceOutput; kind: "output" }
   | { item: WorkspaceActionPreview; kind: "proposal" }
-  | { goalId?: string; kind: "settings"; tab?: "appearance" | "lark" }
+  | { goalId?: string; kind: "settings"; tab?: "appearance" | "language" | "lark" | "machine" }
   | {
       item: WorkspaceSchedule;
       kind: "schedule";

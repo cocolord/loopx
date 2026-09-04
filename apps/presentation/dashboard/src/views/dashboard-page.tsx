@@ -225,6 +225,7 @@ type GoalDirectoryRow = {
 type AgentManagementRow = {
   agentId: string;
   claimedTodos: TodoExplorerItem[];
+  currentTodo: AgentManagementProjection["agents"][number]["current_todo"];
   evidenceRefs: string[];
   goalIds: string[];
   handoffNote: string | null;
@@ -449,6 +450,7 @@ function buildAgentManagementRows(
     return {
       agentId,
       claimedTodos,
+      currentTodo: projected?.current_todo ?? null,
       evidenceRefs: [],
       goalIds,
       handoffNote: null,
@@ -792,6 +794,37 @@ function personalSubagentDomainCandidates(
     counts.set(domain, (counts.get(domain) ?? 0) + 1);
   }
   return [...counts].map(([domain, matchingTodoCount]) => ({ domain, matchingTodoCount }));
+}
+
+function personalAgentTodoFromProjection(
+  todo: NonNullable<AgentManagementProjection["agents"][number]["current_todo"]>,
+  row: GoalDirectoryRow,
+): PersonalAgentTodoItem {
+  return {
+    claimedBy: todo.claimed_by ?? null,
+    done: todo.status === "done" || todo.status === "completed",
+    index: -1,
+    priority: todo.priority ?? null,
+    status: todo.status ?? null,
+    taskClass: todo.task_class ?? null,
+    text: compactShareText(todo.title, 112),
+    todoId: todo.todo_id?.trim() || `${row.goal.id}:agent:${todo.claimed_by ?? "unknown"}:current`,
+  };
+}
+
+function mergePersonalAgentTodos(
+  projectedTodos: PersonalAgentTodoItem[],
+  agentRows: AgentManagementRow[],
+  row: GoalDirectoryRow,
+): PersonalAgentTodoItem[] {
+  const merged = new Map(projectedTodos.map((todo) => [todo.todoId, todo]));
+  for (const agent of agentRows) {
+    const current = agent.currentTodo;
+    if (!current || current.goal_id !== row.goal.id) continue;
+    const todo = personalAgentTodoFromProjection(current, row);
+    if (!merged.has(todo.todoId)) merged.set(todo.todoId, todo);
+  }
+  return [...merged.values()];
 }
 
 /**
@@ -1192,18 +1225,17 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
     const state = personalGoalState(payload, row);
     const needsYouTodo = allUserTodos.find((todo) => todo.goalId === goal.id);
     const needsYou = needsYouTodo?.text ?? null;
-    const goalAgentTodos = personalAgentTodos(row);
     const agentTodoFacts = personalAgentTodoFacts(row);
     const goalAgentRows = agentRows.filter(
-      (agent) => agent.goalIds.includes(goal.id) && !/unassigned|unknown/i.test(agent.agentId),
+      (agent) => agent.goalIds.includes(goal.id)
+        && !/unassigned|unknown/i.test(agent.agentId)
+        && (agent.currentTodo?.goal_id === goal.id || agent.claimedTodos.some((todo) => todo.goalId === goal.id)),
     );
-    const agentRow =
-      goalAgentRows.find(
-        (agent) => /codex/i.test(agent.agentId) && agent.status.variant !== "danger",
-      ) ??
-      goalAgentRows.find((agent) => agent.status.variant !== "danger") ??
-      goalAgentRows.find((agent) => /codex/i.test(agent.agentId)) ??
-      goalAgentRows[0];
+    const sortedGoalAgentRows = [...goalAgentRows].sort((left, right) =>
+      (right.lastActivity ?? "").localeCompare(left.lastActivity ?? ""),
+    );
+    const agentRow = sortedGoalAgentRows[0];
+    const goalAgentTodos = mergePersonalAgentTodos(personalAgentTodos(row), sortedGoalAgentRows, row);
     const nextSentence = [
       agentTodoFacts.nextTodoText,
       row.queueItem?.recommended_action,
@@ -1214,6 +1246,14 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
     return [{
       activationState: goal.activation_state,
       agentId: agentRow?.agentId ?? "codex",
+      agentLaneCount: sortedGoalAgentRows.length,
+      agentLanes: sortedGoalAgentRows.map((agent) => ({
+        agentId: agent.agentId,
+        label: agent.agentId,
+        lastActivityAt: agent.lastActivity,
+        state: agent.status.label,
+      })),
+      agentLabel: agentRow?.agentId,
       agentSentence: personalAgentSentence(payload, row, state),
       agentTodos: [...goalAgentTodos, ...agentTodoFacts.recentCompleted],
       doneTodoCount: agentTodoFacts.doneTodoCount,

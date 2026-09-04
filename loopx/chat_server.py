@@ -35,6 +35,7 @@ from .chat_lark_api import (
     build_goal_repository_contexts as build_goal_repository_contexts,
     build_lark_goal_topic_runtime_snapshot,
 )
+from . import chat_machine_configuration_api as machine_config_api
 from .extensions.lark import LARK_EXTENSION_ID, LARK_GOAL_CHANNEL_PERMISSION
 from .extensions.lark.app_setup import LarkAppSetupManager
 from .extensions.lark.cli_resolution import (
@@ -434,6 +435,7 @@ class ChatRequestHandler(
     SshSourceRequestMixin,
     GoalSubagentConfigurationRequestMixin,
     LarkChatRequestMixin,
+    machine_config_api.MachineConfigurationRequestMixin,
     BaseHTTPRequestHandler,
 ):
     server: ChatHTTPServer
@@ -1324,6 +1326,7 @@ class ChatRequestHandler(
             CHAT_LARK_CHATS_PATH: self._lark_chats,
             CHAT_LARK_CONNECTIONS_PATH: self._lark_connections,
             CHAT_GOAL_CHANNEL_TARGETS_PATH: self._goal_channel_targets,
+            machine_config_api.CHAT_MACHINE_CONFIGURATION_PATH: self._machine_configuration_inspect,
             DEFAULT_CHAT_STATUS_PATH: self._status,
             SSH_HOST_CATALOG_PATH: self._ssh_hosts,
         }
@@ -1365,6 +1368,9 @@ class ChatRequestHandler(
             CHAT_GOAL_CHANNEL_CONFIGURE_PATH: self._goal_channel_configure,
             CHAT_LARK_APP_SETUPS_PATH: self._lark_setup_start,
             CHAT_LARK_CONNECTIONS_PATH: self._lark_connect,
+            machine_config_api.CHAT_MACHINE_CONFIGURATION_PREVIEW_PATH: lambda: self._machine_configuration_update(execute=False),
+            machine_config_api.CHAT_MACHINE_CONFIGURATION_APPLY_PATH: lambda: self._machine_configuration_update(execute=True),
+            machine_config_api.CHAT_MACHINE_CONFIGURATION_ROLLBACK_PATH: self._machine_configuration_rollback,
             SSH_SOURCE_ENSURE_PATH: self._ssh_source_ensure,
         }
         if path in post_dispatch:
@@ -1453,6 +1459,7 @@ def serve_chat(
     )
     server = ChatHTTPServer((host, port), ChatRequestHandler)
     server.registry_path = resolved_registry_path
+    server.runtime_root = runtime_root
     server.runtime_root_override = resolved_runtime_root_override
     server.scan_roots = resolved_scan_roots
     server.limit = limit
