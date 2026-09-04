@@ -21,6 +21,9 @@ from loopx.control_plane.turn_driver.codex_cli import (
     run_codex_cli_host,
 )
 from loopx.control_plane.turn_driver.executor import BuiltInHostError
+from loopx.control_plane.turn_driver.subagent_execution_topology import (
+    OPAQUE_REF_PATTERN,
+)
 
 
 FAILURE_ENVELOPE_FIXTURES = (
@@ -200,8 +203,9 @@ def test_codex_cli_result_schema_requires_only_bounded_contract_fields() -> None
         "type": "string",
         "enum": ["codex-cli"],
     }
-    assert receipt_properties["evidence_refs"]["items"]["pattern"] == (
-        r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$"
+    assert (
+        receipt_properties["evidence_refs"]["items"]["pattern"]
+        == OPAQUE_REF_PATTERN
     )
     assert receipt_properties["evidence_refs"]["minItems"] == 1
     assert {

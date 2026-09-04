@@ -214,11 +214,15 @@ assert.match(chatData, /\/api\/chat\/goal-subagents\/dry-run/, "Dashboard uses t
 assert.match(chatData, /\/api\/chat\/goal-subagents\/apply/, "Dashboard applies Goal sub-agent settings through the same local API");
 assert.match(chatData, /global_sync\.readback\.verified/, "Goal sub-agent success requires shared-state readback verification");
 assert.match(dashboard, /goal\.spawn_policy\?\.mode === "multi_subagent"/, "Rendered switch state comes from the status spawn-policy projection");
+assert.match(dashboard, /capabilities\.goal_subagent_configuration === "preview_locked"/, "Goal sub-agent UI requires the authoritative Chat capability opt-in");
+assert.match(dashboard, /goalSubagentConfigurationEnabled \? \{[\s\S]*subagentExecution:/, "Capability-off models omit the Goal sub-agent UI contract");
 assert.match(dashboard, /personalSubagentDomainCandidates\(payload, row, goalAgentTodos\)/, "Goal domain choices use the full Todo index with compact-row fallback");
 assert.match(dashboard, /previewGoalSubagentConfiguration/, "Goal setting preview delegates to the canonical Chat data adapter");
 assert.match(dashboard, /applyGoalSubagentConfiguration/, "Goal setting apply delegates to the canonical Chat data adapter");
 assert.match(page, /selection\?\.kind === "goal"[\s\S]*workspaceGoals\.find/, "An open Goal drawer follows refreshed status readback");
 assert.doesNotMatch(drawer, /localStorage[\s\S]{0,120}subagent|subagent[\s\S]{0,120}localStorage/i, "Goal sub-agent state is never stored in browser-local authority");
+assert.match(drawer, /authoritativeSupersedesReceipt/, "A newer authoritative status supersedes an apply receipt without closing the drawer");
+assert.match(drawer, /!subagentConfigurationsMatch\([\s\S]*baseline,[\s\S]*authoritativeSubagentConfiguration/, "Status changes away from the pre-apply baseline supersede the receipt even when they do not echo it");
 assert.match(i18n, /drawer\.subagentDescription/, "Sub-agent authority boundaries are localized in the Goal drawer");
 
 for (const lane of ["needs_you", "running", "observing", "scheduled", "history"]) {

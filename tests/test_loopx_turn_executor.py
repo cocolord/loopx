@@ -17,6 +17,7 @@ from loopx.control_plane.turn_driver import (
     validate_loopx_turn_host_result,
 )
 from loopx.control_plane.turn_driver.subagent_execution_topology import (
+    OPAQUE_REF_PATTERN,
     child_execution_receipts_json_schema,
 )
 from loopx.control_plane.turn_driver.executor import (
@@ -410,9 +411,11 @@ def test_child_receipt_schema_excludes_registered_peer_authority() -> None:
     assert {"agent_id", "session_ref", "task_lease_ref"}.isdisjoint(
         item_schema["required"]
     )
-    opaque_pattern = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$"
-    assert properties["worker_ref"]["pattern"] == opaque_pattern
-    assert properties["evidence_refs"]["items"]["pattern"] == opaque_pattern
+    assert properties["worker_ref"]["pattern"] == OPAQUE_REF_PATTERN
+    assert (
+        properties["evidence_refs"]["items"]["pattern"]
+        == OPAQUE_REF_PATTERN
+    )
     assert properties["evidence_refs"]["minItems"] == 1
 
 
@@ -729,6 +732,40 @@ def test_enabled_host_result_rejects_receipt_local_path() -> None:
     rejected = validate_loopx_turn_host_result(plan, result)
     assert rejected["ok"] is False
     assert "absolute local path" in " ".join(rejected["errors"])
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("worker_ref", "C:/workspace/private/worker.json"),
+        ("evidence_refs", ["file:/tmp/private-result.json"]),
+    ],
+)
+def test_enabled_host_result_rejects_path_shaped_opaque_refs(
+    field: str,
+    value: object,
+) -> None:
+    plan = _adaptive_observation_plan()
+    result = _host_result(plan)
+    receipt = _child_execution_receipt(plan)
+    receipt[field] = value
+    result["child_execution_receipts"] = [receipt]
+
+    rejected = validate_loopx_turn_host_result(plan, result)
+
+    assert rejected["ok"] is False
+    assert "opaque 1-192 character public-safe reference" in " ".join(
+        rejected["errors"]
+    )
+    assert "child_execution_receipts" not in rejected["result"]
+    rejected_value = value[0] if isinstance(value, list) else value
+    assert rejected_value not in json.dumps(
+        rejected["result"],
+        ensure_ascii=False,
+    )
+    reconciliation = rejected["result"]["subagent_reconciliation"]
+    assert reconciliation["counts"]["observed"] == 0
+    assert reconciliation["lanes"][0]["receipt_present"] is False
 
 
 def test_observation_only_reconciliation_does_not_change_settlement(

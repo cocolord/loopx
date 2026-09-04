@@ -276,6 +276,46 @@ def main() -> None:
             str(assets / "index.html"),
             "--no-open",
         ]
+        disabled_server = subprocess.Popen(
+            command,
+            cwd=root / "project",
+            env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            disabled_capabilities = wait_for_json(
+                f"{base_url}/api/chat/capabilities"
+            )
+            assert "goal_subagent_configuration" not in disabled_capabilities
+            disabled_status = wait_for_json(f"{base_url}/status.json")
+            assert all(
+                "spawn_policy" not in goal
+                for goal in disabled_status["run_history"]["goals"]
+            ), disabled_status
+            for route in (
+                "/api/chat/goal-subagents/dry-run",
+                "/api/chat/goal-subagents/apply",
+            ):
+                code, disabled_route = request_json(
+                    f"{base_url}{route}",
+                    method="POST",
+                    body={"goal_id": GOAL_ID, "enabled": False},
+                )
+                assert code == 404, disabled_route
+        finally:
+            disabled_server.terminate()
+            try:
+                disabled_server.wait(timeout=5)
+            except subprocess.TimeoutExpired:  # pragma: no cover - defensive cleanup.
+                disabled_server.kill()
+                disabled_server.wait(timeout=5)
+
+        port = free_port()
+        base_url = f"http://127.0.0.1:{port}"
+        command[command.index("--port") + 1] = str(port)
+        command.append("--enable-goal-subagent-configuration")
         server = subprocess.Popen(
             command,
             cwd=root / "project",

@@ -36,6 +36,7 @@ def _status_server(tmp_path: Path) -> Iterator[str]:
     server.configure_goal_dry_run_path = DEFAULT_CONFIGURE_GOAL_DRY_RUN_PATH
     server.configure_goal_apply_path = DEFAULT_CONFIGURE_GOAL_APPLY_PATH
     server.control_plane_write_enabled = False
+    server.goal_subagent_configuration_enabled = False
     server.verbose = False
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -67,6 +68,7 @@ def test_status_endpoint_defers_repository_boundary_scan(
     assert payload["ok"] is True
     assert len(calls) == 1
     assert calls[0]["include_public_boundary_scan"] is False
+    assert calls[0]["include_goal_subagent_configuration"] is False
 
 
 def test_status_service_identity_is_public_and_versioned(tmp_path: Path) -> None:

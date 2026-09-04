@@ -141,6 +141,7 @@ def main() -> int:
             runtime_root_override=str(runtime),
             scan_roots=[registry_path.parent.parent],
             limit=5,
+            include_goal_subagent_configuration=True,
         )
     markdown = render_status_markdown(payload)
     goal = payload["run_history"]["goals"][0]
