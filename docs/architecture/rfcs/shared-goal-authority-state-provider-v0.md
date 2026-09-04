@@ -3,7 +3,7 @@
 - Status: Draft, under maintainer review
 - Initially proposed by: NoKV Lab
 - Widened by: LoopX maintainers
-- Date: 2026-08-05; revised 2026-09-02
+- Date: 2026-08-05; revised 2026-09-04
 - Scope: one provider-neutral LoopX authority contract with built-in file,
   optional NoKV, and optional PostgreSQL provider profiles, complementing
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
@@ -20,6 +20,28 @@
 - Language note: the
   [Chinese version](./shared-goal-authority-state-provider-v0.zh-CN.md) and this
   English version are semantic mirrors. A difference between them is a defect.
+
+## Document map and maintenance contract
+
+This RFC separates durable decisions from delivery evidence:
+
+- Sections 0-10 define the problem, authority contract, provider boundary,
+  migration rules, and acceptance criteria.
+- Section 11.1 is the normative delivery plan. Section 11.2 is a
+  non-normative execution ledger: it records what a dated `main` revision has
+  proved, but does not silently amend the contract. Section 11.3 lists the
+  remaining qualification and promotion work.
+- Section 12 contains unresolved owner decisions. An implementation may not
+  infer approval from a proposed answer.
+- Appendices A and B retain evidence and decision history; Appendix C contains
+  the detailed Stage 2C contract proposed by Section 12. When implementation
+  changes, update the ledger; when architecture changes, update the normative
+  section and record the decision explicitly.
+
+RFC maturity and delivery maturity are independent. A shipped experiment does
+not accept this RFC, and a dated status entry never overrides a normative
+invariant. If the execution ledger becomes difficult to review, it moves to a
+companion `*-execution.md` document without dropping its evidence links.
 
 ---
 
@@ -1014,6 +1036,8 @@ particular deployment topology are deliberately non-normative.
 
 ## 11. Staged Delivery
 
+### 11.1 Normative stage plan
+
 The delivery program has one shared foundation and two provider-specific
 tracks. Workstream labels are responsibility boundaries, not authority grants:
 
@@ -1057,15 +1081,17 @@ The sequence is:
    the NoKV adapter and storage envelope; the PostgreSQL owner implements the
    generic service/provider. Both reuse the same LoopX transition and receipt
    semantics.
-4. **Stage 2C - promote the local canonical file aggregate.** First shadow the
-   current Markdown/task-lease writers into `FileAuthorityStore` without reading
-   it for decisions. Prove parity, crash recovery, migration, and one-command
-   rollback; then, in a separately reviewed promotion, make the file aggregate
-   the local coordination authority and fence the legacy writers. Markdown and
-   task-lease files become projections only after that promotion. Projection
-   shape or head-digest parity alone is insufficient: promotion must also prove
-   that the provider reproduces the complete consumer-visible Todo semantics at
-   the exact qualified revision.
+4. **Stage 2C - qualify and promote the first canonical profile.** First shadow
+   the current Markdown/task-lease writers into `FileAuthorityStore` without
+   reading it for decisions. Prove parity, crash recovery, migration, and
+   one-command rollback; then, in a separately reviewed promotion, make that
+   profile the local coordination authority and fence the legacy writers.
+   Markdown and task-lease files become projections only after promotion. The
+   state machine, complete field manifest, receipts, and acceptance rows remain
+   provider-neutral so NoKV and PostgreSQL can qualify through the same route.
+   Projection shape or head-digest parity alone is insufficient: promotion
+   must prove complete consumer-visible Todo and lease semantics at the exact
+   qualified revision.
 5. **Stage 3 - one-way remote shadow parity.** The promoted local
    `FileAuthorityStore` remains the only authority while committed observations
    are projected to a NoKV or PostgreSQL candidate. Provider parity compares
@@ -1084,6 +1110,23 @@ The sequence is:
    make the shared LoopX service the sole writer. Local `.loopx` state becomes
    cache, offline projection, and diagnostic material. Never keep a long-lived
    dual-write or dual-master mode.
+
+### 11.2 Current implementation and evidence ledger (non-normative)
+
+The dated entries below preserve shipped boundaries, experiments, and review
+findings. They are evidence for the stage plan, not additional specification.
+Later entries supersede earlier status claims only when they identify the
+relevant contract, exact implementation boundary, and validation evidence.
+
+| Ledger entry | What it records |
+| --- | --- |
+| Stage 2C observation foundation | Default-off post-commit capture and its crash window |
+| Implementation prerequisite / Stage 1 Part 2 | Provider-neutral decision extraction and remaining Python/TypeScript ownership boundary |
+| Stage 2B PostgreSQL candidate | PostgreSQL store/RLS conformance, without runtime promotion |
+| Stage 2C runtime shadow | Parity, read-candidate, bootstrap, rollback, cutover kernel, and writer fence |
+| Stage 2 slice | Reference aggregate/provider implementation and initial NoKV evidence |
+| Stage 3 slice | Recoverable lifecycle, retention findings, and live provider limits |
+| Stage-ladder evidence | Executable stage claims, environment gates, and pending rows |
 
 #### Stage 2C observation foundation: local post-commit capture
 
@@ -1120,7 +1163,7 @@ write or migration seed refreshes the full current projection, but no durable
 shadow outbox or transaction-correlated receipt is claimed here. This plumbing
 is not parity evidence and cannot by itself support Stage 2C promotion.
 
-### Implementation prerequisite: put local file mode behind the same coordination contract
+#### Implementation prerequisite: put local file mode behind the same coordination contract
 
 Before wiring a live NoKV or another remote provider, the runtime should first
 extract the domain decisions in the current todo/lease write paths into a
@@ -1672,7 +1715,9 @@ migration seed-and-drain, growth measurement) are declared as pending rows,
 not claimed. This subsection records executable evidence for the stages above;
 it does not promote any provider or complete the Stage 2C promotion.
 
-### P0: contract and deterministic proof
+### 11.3 Remaining qualification and promotion plan
+
+#### P0: contract and deterministic proof
 
 - this ownership matrix and explicit shared-mode boundary;
 - deterministic `loopx_command_v0` normalization and request digest;
@@ -1684,7 +1729,7 @@ it does not promote any provider or complete the Stage 2C promotion.
 - A/B/A, identity-mismatch, crash-window, eligibility, privacy, and no-GC
   checks within the stated evidence boundary.
 
-### Later runtime promotion and reviewed slices
+#### Later runtime promotion and reviewed slices
 
 - the LoopX-owned TypeScript transaction/store boundary and file-provider
   conformance described in Section 6.2;
@@ -1740,6 +1785,94 @@ it does not promote any provider or complete the Stage 2C promotion.
    store identity or lineage, and an explicit TEST ONLY canary marker; a Goal
    without that marker cannot be admitted by a shared-authority guard, and
    the runtime resolves the provider from the record rather than from argv.*
+8. Which head shape does promotion commit, and which fields does the aggregate
+   own? `main` now defines `loopx_todo_canonical_read_record_v0` as a versioned,
+   complete Todo read-record manifest and makes the TypeScript projection
+   reject an upsert that omits fields already present on the stored record.
+   *Proposed answer: the promoted head stores the complete normalized Todo and
+   lease records, flattened enough for a provider-independent readback. Every
+   field that has legally entered a canonical record remains present, including
+   `updated_at`, routing, capability, decision, dependency, resume, monitor,
+   completion, note/evidence, and archival fields. Omission is never a delete;
+   mutation must clear a field explicitly under its schema rule. A new field
+   must enter the versioned manifest before qualification, otherwise promotion
+   fails closed. "Complete" does not mean copying raw Markdown, host-local
+   paths, credentials, the whole registry, or data owned by another ledger.*
+
+   *A later field reduction is a governed schema change even when the field is
+   stored but has no known runtime reader. Its PR must include a field inventory,
+   producer/reader/writer and static-reference research, historical and external
+   compatibility findings, migration and rollback, and proof that behavior is
+   preserved. The maintainer must approve the named removal explicitly in the
+   RFC decision log or PR review; absence of a discovered consumer is not
+   approval.*
+9. Does v0 promotion cover only `hard_lease` goals? *Proposed answer: yes. A
+   `legacy` or `soft_claim` goal first switches mode under the Appendix B
+   quiescence rule; promotion never changes the mode implicitly.*
+10. After the provider-first read flip, Markdown and lease files are
+    projections and the kernel forbids fallback to them. Which data belongs in
+    the head, and how are compatibility views rendered? *Proposed answer:
+    every field in the canonical Todo/lease manifests, including monitor,
+    dependency, resume, decision, completion, text, note, evidence references,
+    and any feedback field admitted by the manifest, persists in the head. A
+    transaction-bound projection
+    outbox only renders Markdown and lease-file compatibility views; it is not
+    a second persistence path for omitted authority fields. Readers compare the
+    projection watermark with the head revision and replay the outbox when
+    behind. Rendering lag may make a view stale, but must not change a decision.*
+11. What declares a promoted goal, and who may write that declaration? The
+    merged TypeScript-owned file fence is the first local implementation,
+    bound to a fence id, source version, and qualified shadow revision; current
+    Todo and task-lease writers check it under their mutation locks. *Proposed
+    answer: define one provider-neutral authority binding containing provider
+    profile, store identity and lineage, schema manifest, `promoted_at`,
+    promotion operation id, source digest, and optional `rolled_back_from`.
+    Only the promotion orchestrator and rollback operation may change it. The
+    file profile realizes the binding with the durable local fence and registry
+    discovery copy; NoKV and PostgreSQL must realize the same logical fence,
+    CAS/transaction precondition, and readback receipt in their qualified store
+    contract. A provider-specific path or table name is not part of the
+    authority protocol. `configure-goal` refuses to edit the binding and
+    bootstrap refuses a promoted goal. An endpoint that cannot validate the
+    active binding fails closed rather than writing a legacy projection.*
+12. Which retention, fast-path, and capacity rules gate promotion, and may a
+    retained transaction replace its projection with a digest? *Proposed
+    answer: the logical contract is common to file, NoKV, and PostgreSQL: the
+    latest complete head, ordered cursor, original operation receipt, segment
+    or row-chain integrity, deterministic scan, and recovery readback remain
+    available under a declared retention version. A digest may replace an old
+    transaction's duplicated projection only when the complete canonical head
+    and every field required by replay, audit, parity, and migration remain
+    reconstructable and the conformance matrix proves equivalence. Physical
+    policy is provider-specific: sealed create-only segments for file, a
+    qualified document/segment strategy for NoKV, and append rows with reviewed
+    indexing/partitioning for PostgreSQL. Each profile declares measured limits
+    and fails closed with `store_capacity_exhausted`; one file-size constant is
+    not a cross-provider contract. Host renewals remain authority transactions
+    because their rate drives every profile's retention envelope.*
+13. What happens to the Python reference executor (`executor.py`,
+    `file_provider.py`, `head.py`, `goal_state_shadow.py`)? *Proposed answer:
+    keep it coverage-only until the kernel's mutation path is routed from the
+    CLI, port its scenario batteries to TypeScript tests, then delete it in
+    the promotion PR; two local aggregate formats cannot both be canonical.
+    Flipping the file profile's `qualification_holds` to `[]` and its `stage`
+    literal happens only inside that PR.*
+14. `main` now carries two default-off shadow lineages for the same writers:
+    the observation capture of #3818 (`coordination.authority_shadow`,
+    `authority-shadow/file/<goal>`, projection v0) and the runtime shadow
+    (`coordination.runtime_shadow`, `authority-shadow/file-v0`, projection v0
+    with `inspect`, `qualify`, `bootstrap`, `rollback`, and `read-candidate`).
+    Both re-sample the source after the primary commit, so both share the
+    concurrent-writer and commit-to-dispatch loss windows that the review of
+    #3818 named. Which lineage is Stage 2C's, and what closes those windows?
+    *Proposed answer: the runtime shadow is the lineage, because the parity
+    report, bootstrap, quarantine rollback, read shape, and promotion kernel
+    already bind to it. The transaction-bound outbox of the parity half
+    (prepared entry inside the writer's own lock, committed marker after the
+    primary write, bounded drain with `operation_id = entry id`) becomes the
+    durable capture that feeds `coordination.runtime_shadow.commit`, and the
+    #3818 observation path retires once that capture is wired. The RFC must
+    not keep two shadow record formats.*
 
 ---
 
@@ -1890,3 +2023,149 @@ claim overriding an active lease; the completion fence disarming in the
 conflicted state; authorization running before the lease fence; claim-change
 entry points not yet gated; the window between the lease acquire's projection
 read and the state-file lock.
+
+
+## Appendix C: Stage 2C Promotion Design (proposal, 2026-09-04)
+
+This appendix resolves questions 8 to 14 as a provider-neutral promotion
+contract. It distinguishes logical authority semantics from each provider's
+physical retention strategy. Nothing below is implemented by this document;
+the unresolved gates remain prerequisites for a real promotion.
+
+### Decision summary
+
+1. Stage 2C promotes one canonical coordination head, not a file format.
+   File, NoKV, and PostgreSQL implement the same `AuthorityStore` semantics.
+2. Canonical Todo and lease state is complete by default. Promotion may not
+   reduce it to the fields currently used by a known consumer.
+3. Any later field removal requires field-level compatibility research,
+   migration and rollback evidence, and explicit maintainer approval.
+4. Markdown and lease files become rendered projections after read flip. They
+   never supply missing decision state.
+5. Retention is logically common and physically provider-specific. A provider
+   may segment or normalize history without changing head/readback semantics.
+
+### Shipped on `main` (2026-09-03)
+
+- The default-off runtime shadow: one `AuthorityStore` transaction per
+  committed Todo or task-lease mutation, keyed by the mutation's rollout event
+  id and `updated_at`, with receipt replay, content-drift rejection,
+  ambiguous-commit reconciliation, and read-back.
+- `loopx coordination-shadow inspect | qualify | read-candidate | bootstrap |
+  rollback`: typed one-point parity (`missing | matched | drifted` with both
+  digests), a coverage-based sustained parity report, the provider-first read
+  shape (still `decision_read_from_shadow=false`), the bootstrap of an empty
+  shadow from the legacy projection, and a revision-fenced quarantine rollback
+  of a pre-promotion lineage.
+- The cutover kernel: a pure reducer from mutation to projection, event, and
+  receipt; `coordination.local_authority.promote` requiring a qualified shadow
+  at one exact revision and digest plus an independently persisted legacy
+  writer fence bound to that revision; provider-first `mutate` and
+  `todo_read` that never fall back to Markdown.
+- The fence integration: every Python Todo mutation and every native task-lease
+  acquire, renew, transfer, and release checks the durable fence while holding
+  its own lock; an absent fence costs no runtime call; a present, unreadable,
+  or invalid fence fails closed.
+- The complete Todo read model: `loopx_todo_canonical_read_record_v0` publishes
+  a versioned field manifest, and the TypeScript projection rejects a
+  replacement that drops fields already present on a stored record.
+
+### Normative promotion contract
+
+The promotion state machine is independent of provider kind:
+
+1. Resolve a reviewed goal-level authority binding to a qualified
+   `AuthorityStore` profile and exact store lineage.
+2. Under the legacy Todo and lease locks, verify sustained parity at one source
+   revision, projection digest, field-manifest version, and provider cursor.
+3. Engage the provider profile's durable writer fence, then commit the complete
+   canonical head and promotion receipt with a compare-and-set or transaction
+   precondition. A file marker, NoKV document identity, or PostgreSQL row/table
+   layout is an implementation detail.
+4. Read back the binding, head, receipt, cursor, manifest, and digest before
+   allowing provider-first decisions. Any mismatch fails closed.
+5. Render compatibility projections through the transaction-bound outbox. A
+   stale projection is repaired from the head; it is never consulted to fill a
+   missing canonical field.
+
+The canonical head preserves every field legally present in the normalized
+Todo and lease records. The field manifest is part of qualification and parity.
+An upsert carries a complete replacement or uses a typed patch whose clear
+operations are explicit. Unknown additions fail closed until the manifest is
+versioned. A removal proposal must enumerate the field and all producers,
+readers, writers, persisted fixtures, static references, historical versions,
+and known external consumers; state the migration, downgrade, rollback, and
+semantic-equivalence argument; and receive explicit maintainer approval. A
+field is not removable merely because code search found no current reader.
+
+This completeness boundary excludes raw Markdown formatting, credentials,
+host-local paths, whole registry documents, raw evidence bodies, and state
+owned by quota, run-history, settlement, inbox, scheduler, or another ledger.
+Those remain references governed by their own contracts.
+
+The common retention contract keeps the latest complete head, ordered cursor,
+original operation receipt, integrity chain, deterministic scan, and recovery
+readback. Physical profiles may differ:
+
+- **file:** create-only sealed history segments plus a bounded head document;
+- **NoKV:** a qualified document/segment layout with lineage-bound conditional
+  publication and recovery readback;
+- **PostgreSQL:** transactionally appended history/receipt rows plus a current
+  head, with reviewed indexes, partitioning, RLS, and tenant context.
+
+All profiles expose the same logical result and field manifest. Each publishes
+measured capacity limits and returns typed `store_capacity_exhausted` before a
+write that cannot preserve the contract.
+
+### Still missing before promotion
+
+- Provider-first CLI routing and the lock-owning promotion orchestrator (the
+  kernel's own next slice): take the Todo and lease legacy locks, require
+  `qualify` to be `qualified` at the current revision and digest, engage the
+  fence, run `promote`, render the projections, and record the declaration of
+  question 11; refuse a rerun whose source digest changed unless the abandoned
+  store is explicitly discarded.
+- A transaction-bound capture (question 14): the runtime shadow samples the
+  source after the commit, from outside the writer's lock, so a concurrent
+  writer can land inside the sampled projection and a crash between the commit
+  and the dispatch loses the mirror. The parity-half outbox closes both: the
+  prepared entry is written inside the lock the writer already holds, the
+  committed marker after the primary write returns, and a bounded drain turns
+  each entry into exactly one shadow transaction whose `operation_id` is the
+  entry id. `qualify` then counts entries, not samples.
+- The provider-neutral authority binding, compatibility projection outbox,
+  and conformance rows for file, NoKV, and PostgreSQL. This does not require all
+  providers to promote together; each profile must pass the same contract
+  before it is eligible.
+- Retention, fast path, and measured capacity for the selected first-promotion
+  profile; the reference executor's removal and status flips (question 13).
+- Post-promotion rollback: the shipped rollback quarantines a pre-promotion
+  lineage. After the first authority write (`authority_revision > 0`) the
+  return path is question 3's reviewed fenced export: quiescence, an empty
+  projection outbox, export of the head into the Markdown coordination fields
+  and the final lease records, an `equal` verify, removal of the watermark and
+  fence, and retirement of the lineage; never automatic, never during an
+  active lease.
+
+### Growth is a promotion prerequisite
+
+`retain_all_v0` in one document is quadratic: a 600 s TTL renewed every
+300 s with three active todos produces 864 transitions a day and 25,920 in a
+30-day month. At a 15 KiB complete head, cumulative rewritten payload alone is
+about 380 MiB before receipt and envelope overhead; final document size depends
+on the retained record layout and must be measured rather than inferred from
+that rewrite total. This rate is already enough to require provider-specific
+capacity, latency, response-size, and recovery tests. Retaining everything in
+one document is acceptable only for promotion bootstrap and bounded test goals.
+
+### Sequence
+
+A. transaction-bound capture feeding `coordination.runtime_shadow.commit`,
+retiring the duplicate observation lineage; B. freeze and test the complete
+Todo/lease manifests and omission/explicit-clear rules; C. implement the common
+authority binding and profile conformance, including retention/capacity for the
+selected provider; D. add provider-first CLI routing, the lock-owning promotion
+orchestrator, and compatibility projection outbox on the shipped kernel; E. a
+separately reviewed promotion PR deletes the reference-only duplicate aggregate,
+flips holds and stage literals, and updates the execution ledger. A profile is
+eligible only after A-D pass for its exact implementation and lineage.
