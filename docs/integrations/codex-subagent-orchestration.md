@@ -180,7 +180,18 @@ but must not be reclaimed by that author.
 
 ## Enabling Bounded Orchestration
 
-The feature remains opt-in:
+The configuration surface and the runtime policy are separate opt-ins. To
+expose the local preview-locked API, status field, and Dashboard control, start
+the loopback Dashboard explicitly with:
+
+```bash
+loopx dashboard --enable-goal-subagent-configuration
+```
+
+Without that startup flag, Chat capabilities omit the feature, both
+`/api/chat/goal-subagents/*` routes return 404, status omits `spawn_policy`, and
+the Dashboard does not render the control. After enabling the surface, opt one
+Goal into bounded orchestration:
 
 ```bash
 loopx configure-goal \
@@ -206,6 +217,12 @@ not cross-agent scheduling authority.
 Use `--multi-subagent-feature off` to disable worker spawning. The low-level
 `--orchestration-mode` and `--spawn-allowed` flags remain available for host
 integrations.
+
+To remove the configuration surface itself, stop the Dashboard and restart it
+without `--enable-goal-subagent-configuration`. The flag only exposes a local,
+preview-locked configuration contract. It grants no Goal ownership, repository
+write, credential, publication, production, or settlement authority; the Goal
+policy and the observed host capabilities remain independently authoritative.
 
 ## Explicit Registered-Peer Coordination
 

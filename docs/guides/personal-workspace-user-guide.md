@@ -169,7 +169,14 @@ loopx goal-lifecycle --goal-id <goal-id> --operation resume --execute
 
 ### 6.1 按 Goal 体验自适应子代理执行
 
-该能力默认关闭。要为一个 Goal 开启：
+该控制面默认不对外暴露。先在 Goal 所在主机上显式启动带权威 opt-in 的本地
+Dashboard；不带此参数启动时，配置 API、状态字段和界面卡片都会保持缺失：
+
+```bash
+loopx dashboard --enable-goal-subagent-configuration
+```
+
+然后要为一个 Goal 开启运行时能力：
 
 1. 进入该 Goal，点击 **`Goal 详情`**；
 2. 在「自适应子代理执行」中选择最多子代理数。任务领域限制是可选项：全部不选表示
@@ -186,6 +193,10 @@ loopx goal-lifecycle --goal-id <goal-id> --operation resume --execute
 loopx configure-goal --goal-id <goal-id>
 loopx quota should-run --goal-id <goal-id>
 ```
+
+要撤销 Dashboard 配置面的 opt-in，停止当前 Dashboard 后不带
+`--enable-goal-subagent-configuration` 重新启动。这个启动参数只暴露本机 loopback
+上的 preview-locked 配置合同，不授予 Agent 新的 Goal、仓库、凭证、发布或生产权限。
 
 关闭时再次点击开关、检查预览并确认；也可以使用同一配置入口：
 
