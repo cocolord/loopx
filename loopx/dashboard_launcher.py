@@ -64,7 +64,10 @@ def _probe_existing_chat(
             status = response.status
         finally:
             connection.close()
-    except ConnectionRefusedError:
+    except (ConnectionRefusedError, TimeoutError):
+        # Some native Windows execution environments time out instead of
+        # returning WSAECONNREFUSED for an unused loopback port. Treat that as
+        # non-reusable and let the later server bind remain authoritative.
         return "unavailable"
     except (OSError, http.client.HTTPException):
         return "foreign"

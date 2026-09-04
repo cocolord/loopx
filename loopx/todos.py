@@ -762,6 +762,7 @@ def add_goal_todo(
 
     with legacy_todo_write_transaction(
         registry_path, goal_id, resolved_state_file, agent_id or claimed_by, "todo_add", dry_run,
+        runtime_root=shadow_runtime_root,
     ), ExitStack() as handoff_gate_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
@@ -1081,6 +1082,7 @@ def update_goal_todo(
     resume_monitor_generation: int | None = None
     with legacy_todo_write_transaction(
         registry_path, goal_id, resolved_state_file, agent_id or claimed_by, "todo_update", dry_run,
+        runtime_root=shadow_runtime_root,
     ), ExitStack() as handoff_gate_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
@@ -1509,6 +1511,7 @@ def complete_goal_todo(
         return validation_failure
     with legacy_todo_write_transaction(
         registry_path, goal_id, resolved_state_file, agent_id or claimed_by, "todo_complete", dry_run,
+        runtime_root=shadow_runtime_root,
     ), ExitStack() as lease_fence_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
@@ -1869,6 +1872,7 @@ def supersede_goal_todo(
     )
     with legacy_todo_write_transaction(
         registry_path, goal_id, resolved_state_file, agent_id, "todo_supersede", dry_run,
+        runtime_root=shadow_runtime_root,
     ), ExitStack() as lease_fence_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
@@ -2066,6 +2070,7 @@ def archive_completed_todos(
 
     with legacy_todo_write_transaction(
         registry_path, goal_id, resolved_state_file, None, "todo_archive_completed", dry_run,
+        runtime_root=shadow_runtime_root,
     ):
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
