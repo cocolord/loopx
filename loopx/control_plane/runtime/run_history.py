@@ -65,6 +65,7 @@ def build_run_history(
     quota_status: QuotaStatus,
     display_limit: int | None = None,
     recent_run_limit: int | None = None,
+    include_goal_subagent_configuration: bool = False,
 ) -> dict[str, Any]:
     display_limit = None if display_limit is None else max(0, display_limit)
     goals: list[dict[str, Any]] = []
@@ -105,9 +106,6 @@ def build_run_history(
                 "explore_graph": goal.get("explore_graph")
                 if isinstance(goal.get("explore_graph"), dict)
                 else None,
-                "spawn_policy": compact_orchestration_policy(goal.get("spawn_policy"))
-                if isinstance(goal.get("spawn_policy"), dict)
-                else None,
                 "guards": goal.get("guards") if isinstance(goal.get("guards"), list) else [],
                 "next_probe": goal.get("next_probe"),
                 "authority_registry": goal.get("authority_registry"),
@@ -120,6 +118,12 @@ def build_run_history(
                 "latest_runs": latest_runs,
             }
         )
+        if include_goal_subagent_configuration:
+            goals[-1]["spawn_policy"] = (
+                compact_orchestration_policy(goal.get("spawn_policy"))
+                if isinstance(goal.get("spawn_policy"), dict)
+                else None
+            )
         if semantic_history is not None:
             goals[-1]["semantic_history"] = semantic_history
 

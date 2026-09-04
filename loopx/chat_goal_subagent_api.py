@@ -14,6 +14,33 @@ CHAT_GOAL_SUBAGENT_APPLY_PATH = "/api/chat/goal-subagents/apply"
 CHAT_GOAL_SUBAGENT_MAX_CHILDREN = 32
 
 
+def goal_subagent_configuration_enabled(server: Any) -> bool:
+    return bool(getattr(server, "goal_subagent_configuration_enabled", False))
+
+
+def add_goal_subagent_capability(
+    capabilities: dict[str, Any],
+    *,
+    server: Any,
+) -> None:
+    if goal_subagent_configuration_enabled(server):
+        capabilities["goal_subagent_configuration"] = "preview_locked"
+
+
+def add_goal_subagent_routes(
+    routes: dict[str, Any],
+    *,
+    handler: Any,
+) -> None:
+    if goal_subagent_configuration_enabled(handler.server):
+        routes[CHAT_GOAL_SUBAGENT_DRY_RUN_PATH] = (
+            lambda: handler._goal_subagent_configuration(apply=False)
+        )
+        routes[CHAT_GOAL_SUBAGENT_APPLY_PATH] = (
+            lambda: handler._goal_subagent_configuration(apply=True)
+        )
+
+
 class GoalSubagentConfigurationRequestMixin:
     """Preview and apply the existing canonical Goal orchestration policy."""
 

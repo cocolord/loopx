@@ -77,6 +77,16 @@ function normalizeSubagentDomain(value: string | null | undefined) {
   return subagentDomainPattern.test(normalized) ? normalized : null;
 }
 
+function subagentConfigurationsMatch(
+  left: WorkspaceGoalSubagentConfiguration,
+  right: WorkspaceGoalSubagentConfiguration,
+) {
+  return left.enabled === right.enabled
+    && left.maxChildren === right.maxChildren
+    && [...left.allowedDomains].sort().join("\u0000")
+      === [...right.allowedDomains].sort().join("\u0000");
+}
+
 type ContextDrawerSelection = Exclude<WorkspaceDrawerSelection, { kind: "settings" }>;
 
 export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals = [], inspectorExpanded = false, larkConnections = [], onClose, onToggleInspectorSize, readOnly = false, runs = [], selection }: {
@@ -103,6 +113,8 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
   const [subagentMutationState, setSubagentMutationState] = useState<"idle" | "previewing" | "ready" | "applying" | "success" | "warning" | "error">("idle");
   const [subagentPreview, setSubagentPreview] = useState<GoalSubagentPreview | null>(null);
   const [verifiedSubagentConfiguration, setVerifiedSubagentConfiguration] = useState<WorkspaceGoalSubagentConfiguration | null>(null);
+  const lastAuthoritativeSubagentConfigurationRef = useRef<WorkspaceGoalSubagentConfiguration | null>(null);
+  const verifiedSubagentBaselineRef = useRef<WorkspaceGoalSubagentConfiguration | null>(null);
   const [todoAgentId, setTodoAgentId] = useState(agents.find((agent) => agent.available)?.agentId ?? "codex");
   const [todoResumeWhen, setTodoResumeWhen] = useState("");
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -129,7 +141,59 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
     setSubagentMutationState("idle");
     setSubagentPreview(null);
     setVerifiedSubagentConfiguration(null);
+    lastAuthoritativeSubagentConfigurationRef.current = configuration ?? null;
+    verifiedSubagentBaselineRef.current = null;
   }, [selectionIdentity]);
+
+  const authoritativeSubagentConfiguration = selection.kind === "goal"
+    ? selection.item.subagentExecution
+    : undefined;
+
+  useEffect(() => {
+    const previousAuthoritativeConfiguration = lastAuthoritativeSubagentConfigurationRef.current;
+    const authoritativeConfigurationChanged = authoritativeSubagentConfiguration
+      ? !previousAuthoritativeConfiguration
+        || !subagentConfigurationsMatch(
+          previousAuthoritativeConfiguration,
+          authoritativeSubagentConfiguration,
+        )
+      : previousAuthoritativeConfiguration !== null;
+    lastAuthoritativeSubagentConfigurationRef.current = authoritativeSubagentConfiguration
+      ?? null;
+    if (!verifiedSubagentConfiguration) {
+      if (authoritativeConfigurationChanged && authoritativeSubagentConfiguration) {
+        setSubagentAllowedDomains(authoritativeSubagentConfiguration.allowedDomains);
+        setSubagentMaxChildren(authoritativeSubagentConfiguration.maxChildren || 2);
+        setSubagentFeedback(null);
+        setSubagentMutationState("idle");
+        setSubagentPreview(null);
+      }
+      return;
+    }
+    const baseline = verifiedSubagentBaselineRef.current;
+    const authoritativeSupersedesReceipt = !authoritativeSubagentConfiguration
+      || subagentConfigurationsMatch(
+        verifiedSubagentConfiguration,
+        authoritativeSubagentConfiguration,
+      )
+      || Boolean(
+        baseline
+        && !subagentConfigurationsMatch(
+          baseline,
+          authoritativeSubagentConfiguration,
+        ),
+      );
+    if (authoritativeSupersedesReceipt) {
+      if (authoritativeSubagentConfiguration) {
+        setSubagentAllowedDomains(authoritativeSubagentConfiguration.allowedDomains);
+        setSubagentMaxChildren(
+          authoritativeSubagentConfiguration.maxChildren || 2,
+        );
+      }
+      verifiedSubagentBaselineRef.current = null;
+      setVerifiedSubagentConfiguration(null);
+    }
+  }, [authoritativeSubagentConfiguration, verifiedSubagentConfiguration]);
 
   useEffect(() => {
     const activeElement = document.activeElement;
@@ -330,6 +394,8 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
     try {
       const preview = await callbacks.onPreviewGoalSubagentConfiguration(request);
       if (!preview.changed) {
+        verifiedSubagentBaselineRef.current = authoritativeSubagentConfiguration
+          ?? null;
         setVerifiedSubagentConfiguration({
           ...preview.configuration,
           domainCandidates: currentSubagentConfiguration.domainCandidates,
@@ -361,6 +427,8 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
         maxChildren: subagentPreview.maxChildren,
         previewId: subagentPreview.previewId,
       });
+      verifiedSubagentBaselineRef.current = authoritativeSubagentConfiguration
+        ?? null;
       setVerifiedSubagentConfiguration({
         ...verifiedConfiguration,
         domainCandidates: currentSubagentConfiguration.domainCandidates,
@@ -582,7 +650,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
               <button className="personal-secondary-action" onClick={() => callbacks.onRequestScheduleConfig?.("heartbeat", selection.item.goalId)} type="button"><Radio size={16} />{t("drawer.setupHeartbeat")}</button>
               <button className="personal-secondary-action" onClick={() => callbacks.onRequestScheduleConfig?.("monitor", selection.item.goalId)} type="button"><CalendarClock size={16} />{t("drawer.scheduleAdd")}</button>
             </div> : null}
-            <section className="personal-detail-card personal-goal-subagents">
+            {selection.item.subagentExecution ? <section className="personal-detail-card personal-goal-subagents">
               <div className="personal-subagent-heading">
                 <div>
                   <small>{t("drawer.subagentLabel")}</small>
@@ -691,7 +759,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                   ) : null}
                 </div>
               )}
-            </section>
+            </section> : null}
           </>
         ) : null}
 

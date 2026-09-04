@@ -493,7 +493,7 @@ type PersonalGoalItem = {
   nextSentence: string;
   runEvidence?: PersonalRunEvidence | null;
   state: PersonalGoalState;
-  subagentExecution: {
+  subagentExecution?: {
     allowedDomains: string[];
     domainCandidates: Array<{
       domain: string;
@@ -1168,7 +1168,11 @@ function answerPersonalManagerQuestion(
 }
 
 
-function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]): PersonalHomeModel {
+function buildPersonalHomeModel(
+  payload: StatusPayload,
+  rows: GoalDirectoryRow[],
+  goalSubagentConfigurationEnabled = false,
+): PersonalHomeModel {
   const rowById = new Map(rows.map((row) => [row.goal.id, row]));
   const stoppedGoalIds = new Set(
     payload.run_history.goals
@@ -1267,14 +1271,16 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
       nextSentence,
       runEvidence: personalRunEvidence(payload, row),
       state,
-      subagentExecution: {
-        allowedDomains: goal.spawn_policy?.allowed_domains ?? [],
-        domainCandidates: personalSubagentDomainCandidates(payload, row, goalAgentTodos),
-        enabled: goal.spawn_policy?.mode === "multi_subagent"
-          && goal.spawn_policy.spawn_allowed === true
-          && goal.spawn_policy.max_children > 0,
-        maxChildren: goal.spawn_policy?.max_children ?? 0,
-      },
+      ...(goalSubagentConfigurationEnabled ? {
+        subagentExecution: {
+          allowedDomains: goal.spawn_policy?.allowed_domains ?? [],
+          domainCandidates: personalSubagentDomainCandidates(payload, row, goalAgentTodos),
+          enabled: goal.spawn_policy?.mode === "multi_subagent"
+            && goal.spawn_policy.spawn_allowed === true
+            && goal.spawn_policy.max_children > 0,
+          maxChildren: goal.spawn_policy?.max_children ?? 0,
+        },
+      } : {}),
       title: personalGoalTitle(goal.id, goal.display_name),
       usage: (() => {
         const goalUsage = usageById.get(goal.id);
@@ -1390,7 +1396,12 @@ function PersonalGoalHome({
     tool_calls?: boolean;
     trust_scope?: string;
   }>>([]);
-  const model = buildPersonalHomeModel(payload, rows);
+  const [goalSubagentConfigurationEnabled, setGoalSubagentConfigurationEnabled] = useState(false);
+  const model = buildPersonalHomeModel(
+    payload,
+    rows,
+    goalSubagentConfigurationEnabled,
+  );
   const selectedGoal = model.goals.find((goal) => goal.goalId === selectedGoalId) ?? null;
   const [periodicReport, setPeriodicReport] = useState<PeriodicReportProjection | null>(null);
   const [periodicReportError, setPeriodicReportError] = useState<string | null>(null);
@@ -1550,14 +1561,21 @@ function PersonalGoalHome({
   useEffect(() => {
     if (readOnly) {
       setRuntimeAgents([]);
+      setGoalSubagentConfigurationEnabled(false);
       return;
     }
     let cancelled = false;
     void fetchChatCapabilities()
       .then((capabilities) => {
-        if (!cancelled) setRuntimeAgents(capabilities.adapters ?? []);
+        if (!cancelled) {
+          setRuntimeAgents(capabilities.adapters ?? []);
+          setGoalSubagentConfigurationEnabled(
+            capabilities.goal_subagent_configuration === "preview_locked",
+          );
+        }
       })
       .catch(() => {
+        if (!cancelled) setGoalSubagentConfigurationEnabled(false);
         // The Codex fallback stays visible while the local control plane reconnects.
       });
     return () => {
@@ -2626,6 +2644,7 @@ function PersonalGoalHome({
             });
           },
           onOpenOutput: (output) => openGoalChat(output.goalId),
+          ...(goalSubagentConfigurationEnabled ? {
           onPreviewGoalSubagentConfiguration: async (request) => {
             const preview = await previewGoalSubagentConfiguration(request);
             return {
@@ -2646,6 +2665,7 @@ function PersonalGoalHome({
               maxChildren: result.after.orchestration.max_children,
             };
           },
+          } : {}),
           onGoalActivationStateChange,
           onGoalDeleted,
           onReconcileStatus,

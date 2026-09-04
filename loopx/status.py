@@ -1258,6 +1258,7 @@ def build_status_runtime_summaries(
     display_limit: int,
     todo_index_limit: int,
     recent_run_limit: int | None = None,
+    include_goal_subagent_configuration: bool = False,
 ) -> dict[str, Any]:
     return _build_status_runtime_summaries_read_model(
         history=history,
@@ -1267,6 +1268,9 @@ def build_status_runtime_summaries(
         display_limit=display_limit,
         todo_index_limit=todo_index_limit,
         recent_run_limit=recent_run_limit,
+        include_goal_subagent_configuration=(
+            include_goal_subagent_configuration
+        ),
         context=build_status_runtime_summary_context(),
     )
 
@@ -1301,6 +1305,7 @@ def collect_status(
     available_capabilities: Any = None,
     include_public_boundary_scan: bool = True,
     recent_run_limit: int | None = None,
+    include_goal_subagent_configuration: bool = False,
 ) -> dict[str, Any]:
     return _collect_status_read_model(
         registry_path=registry_path,
@@ -1312,5 +1317,8 @@ def collect_status(
         available_capabilities=available_capabilities,
         include_public_boundary_scan=include_public_boundary_scan,
         recent_run_limit=recent_run_limit,
+        include_goal_subagent_configuration=(
+            include_goal_subagent_configuration
+        ),
         context=build_status_collection_context(),
     )

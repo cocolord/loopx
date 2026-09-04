@@ -49,7 +49,15 @@ CHILD_FALLBACK_ACTIONS = (
     "serial_takeover",
     "ignore_optional_result",
 )
-_OPAQUE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$")
+# Keep this grammar shared by runtime validation and the host-result JSON schema.
+# Slash-delimited opaque ids remain valid, but filesystem-shaped values do not.
+OPAQUE_REF_PATTERN = (
+    r"^(?![A-Za-z][A-Za-z0-9+.-]*:/)"
+    r"(?!\.{1,2}(?:/|$))"
+    r"(?!.*?/\.{1,2}(?:/|$))"
+    r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$"
+)
+_OPAQUE_REF = re.compile(OPAQUE_REF_PATTERN)
 _RECEIPT_FIELDS = frozenset(
     {
         "schema_version",
@@ -115,8 +123,6 @@ def _opaque_ref(
             raise ValueError(f"{field} is required")
         return None
     validate_public_safe_value(text, path=field)
-    if "://" in text:
-        raise ValueError(f"{field} must be an opaque public-safe reference")
     if not _OPAQUE_REF.fullmatch(text):
         raise ValueError(
             f"{field} must be an opaque 1-192 character public-safe reference"
@@ -569,7 +575,7 @@ def subagent_host_request_projection(
 def child_execution_receipts_json_schema() -> dict[str, Any]:
     opaque_ref = {
         "type": "string",
-        "pattern": r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$",
+        "pattern": OPAQUE_REF_PATTERN,
         "maxLength": 192,
     }
     nullable_ref = {
