@@ -1064,7 +1064,7 @@ async function main() {
     await page.getByRole("button", { name: "预览边界调整", exact: true }).click();
     await page.getByText("预览已锁定，确认后才会写入这个 Goal。", { exact: true }).waitFor({ state: "visible" });
     if (api.durableWriteCount !== writesBeforeSubagentPreview + 1) throw new Error("Restricted sub-agent preview mutated durable Goal state");
-    if ([...(api.goalSubagentPreviews.at(-1)?.allowed_domains ?? [])].sort().join(",") !== "code,validation") throw new Error("Sub-agent preview lost the bounded task domains");
+    if ([...(api.goalSubagentPreviews.at(-1)?.allowed_domains ?? [])].sort((a, b) => a.localeCompare(b)).join(",") !== "code,validation") throw new Error("Sub-agent preview lost the bounded task domains");
     await page.locator(".personal-subagent-preview").getByRole("button", { name: "确认", exact: true }).click();
     await page.getByText("已写入，并通过共享 Goal 状态读回校验。", { exact: true }).waitFor({ state: "visible" });
     if (api.durableWriteCount !== writesBeforeSubagentPreview + 2) throw new Error("Restricted sub-agent apply did not produce exactly one additional Goal write");

@@ -83,8 +83,8 @@ function subagentConfigurationsMatch(
 ) {
   return left.enabled === right.enabled
     && left.maxChildren === right.maxChildren
-    && [...left.allowedDomains].sort().join("\u0000")
-      === [...right.allowedDomains].sort().join("\u0000");
+    && [...left.allowedDomains].sort((a, b) => a.localeCompare(b)).join("\u0000")
+      === [...right.allowedDomains].sort((a, b) => a.localeCompare(b)).join("\u0000");
 }
 
 type ContextDrawerSelection = Exclude<WorkspaceDrawerSelection, { kind: "settings" }>;
@@ -716,6 +716,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                           return (
                             <label className={`personal-subagent-domain-option${selected ? " is-selected" : ""}`} key={option.value}>
                               <input
+                                aria-label={option.value}
                                 checked={selected}
                                 onChange={(event) => toggleSubagentDomain(option.value, event.target.checked)}
                                 type="checkbox"

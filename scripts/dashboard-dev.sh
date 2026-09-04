@@ -13,7 +13,7 @@ CLAUDE_BIN="claude"
 LARK_CLI_BIN=""
 LARK_CLI_ARGS=()
 GOAL_SUBAGENT_ARGS=()
-if [ "${LOOPX_ENABLE_GOAL_SUBAGENT_CONFIGURATION:-0}" = "1" ]; then
+if [[ "${LOOPX_ENABLE_GOAL_SUBAGENT_CONFIGURATION:-0}" = "1" ]]; then
   GOAL_SUBAGENT_ARGS=(--enable-goal-subagent-configuration)
 fi
 
