@@ -22,6 +22,7 @@ from loopx.control_plane.testing.quota_fixtures import (
     quota_todo_summary,
 )
 from loopx.control_plane.todos.projection import todo_advancement_frontier_counts
+from loopx.control_plane.todos.summary_item import todo_planning_source_items
 from loopx.quota import build_quota_should_run
 
 GOAL_ID = "vision-fallback-disposition-fixture"
@@ -143,8 +144,11 @@ def _status_payload(
     )
 
 
-def _frontier_projection(payload: dict) -> dict:
+def _frontier_projection(payload: dict, *, include_source: bool = True) -> dict:
     item = payload["attention_queue"]["items"][0]
+    source_items = (
+        todo_planning_source_items(item["agent_todos"]) if include_source else None
+    )
     context = build_goal_frontier_projection_context_from_status(
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
@@ -153,6 +157,7 @@ def _frontier_projection(payload: dict) -> dict:
         project_asset=item["project_asset"],
         user_todo_summary=item["user_todos"],
         agent_todo_summary=item["agent_todos"],
+        agent_todo_source_items=source_items,
         work_lane_contract=None,
         neutral_replan_ack_classifications=set(),
         registered_agent_ids=[PRIMARY_AGENT, AGENT_ID],
@@ -248,7 +253,39 @@ def test_declared_fallback_without_resolution_projects_single_gap() -> None:
         scheduler_execution_context=(GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT),
     )
     quota_projection = decision["goal_frontier_projection"]
-    assert quota_projection["fallback_gaps"][0]["unresolved_todo_ids"] == [FALLBACK_ID]
+    gap = quota_projection["fallback_gaps"][0]
+    assert gap["kind"] == "vision_fallback_lookup_uncertain"
+    assert gap["lookup_uncertain_todo_ids"] == [FALLBACK_ID]
+
+    authoritative_decision = build_quota_should_run(
+        payload,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        authoritative_fallback_todo_items=[],
+        scheduler_execution_context=(GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT),
+    )
+    authoritative_gap = authoritative_decision["goal_frontier_projection"][
+        "fallback_gaps"
+    ][0]
+    assert authoritative_gap["kind"] == "vision_fallback_unresolved"
+    assert authoritative_gap["unresolved_todo_ids"] == [FALLBACK_ID]
+
+
+def test_missing_authoritative_source_projects_uncertainty_not_absence() -> None:
+    payload = _status_payload(
+        fallback_runnable=False,
+        latest_runs=[_fallback_vision_run(todo_delta=[f"retain:{FALLBACK_ID}"])],
+    )
+
+    frontier = _frontier_projection(payload, include_source=False)
+
+    gap = frontier["fallback_gaps"][0]
+    assert gap["kind"] == "vision_fallback_lookup_uncertain"
+    assert gap["reason_code"] == (
+        "declared_fallback_authoritative_lookup_unavailable"
+    )
+    assert gap["lookup_uncertain_todo_ids"] == [FALLBACK_ID]
+    assert "unresolved_todo_ids" not in gap
 
 
 def test_retaining_only_the_blocked_primary_successor_is_no_declaration() -> None:
@@ -349,6 +386,41 @@ def test_other_agent_primary_todo_does_not_resolve_the_gap() -> None:
     assert gaps[0]["unresolved_todo_ids"] == [FALLBACK_ID]
 
 
+@pytest.mark.parametrize(
+    "ownership_metadata",
+    [
+        {"claimed_by": PRIMARY_AGENT},
+        {"excluded_agents": [AGENT_ID]},
+    ],
+    ids=["peer-claimed", "current-agent-excluded"],
+)
+def test_authoritative_fallback_keeps_existing_ownership_and_exclusion_semantics(
+    ownership_metadata: dict[str, Any],
+) -> None:
+    payload = _status_payload(
+        fallback_runnable=False,
+        latest_runs=[_fallback_vision_run(todo_delta=[f"retain:{FALLBACK_ID}"])],
+    )
+    fallback = quota_todo_item(
+        todo_id=FALLBACK_ID,
+        index=3,
+        text="[P1] Deliver the declared fallback direction.",
+        **ownership_metadata,
+    )
+
+    decision = build_quota_should_run(
+        payload,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        authoritative_fallback_todo_items=[fallback],
+        scheduler_execution_context=(GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT),
+    )
+
+    gap = decision["goal_frontier_projection"]["fallback_gaps"][0]
+    assert gap["kind"] == "vision_fallback_unresolved"
+    assert gap["unresolved_todo_ids"] == [FALLBACK_ID]
+
+
 def test_declared_fallback_linked_to_monitor_todo_keeps_the_gap() -> None:
     # A linked Todo that is not advancement work is not a runnable fallback
     # successor, so the declaration stays unresolved.
@@ -367,6 +439,9 @@ def test_declared_fallback_linked_to_monitor_todo_keeps_the_gap() -> None:
     summary = _agent_todos(fallback_runnable=False)
     for slot in ("executable_backlog_items", "backlog_items"):
         summary[slot] = list(summary.get(slot) or []) + [monitor]
+    summary["monitor_open_items"] = list(summary.get("monitor_open_items") or []) + [
+        monitor
+    ]
     item["agent_todos"] = summary
 
     frontier = _frontier_projection(payload)
@@ -374,6 +449,55 @@ def test_declared_fallback_linked_to_monitor_todo_keeps_the_gap() -> None:
     gaps = frontier["fallback_gaps"]
     assert len(gaps) == 1
     assert gaps[0]["unresolved_todo_ids"] == [FALLBACK_ID]
+
+
+@pytest.mark.parametrize(
+    ("resume_monitor_generation", "expected_gap_kind"),
+    [
+        (3, None),
+        (None, "vision_fallback_unresolved"),
+    ],
+    ids=["valid-pending-monitor-wait", "invalid-missing-generation-baseline"],
+)
+def test_fallback_monitor_wait_uses_typed_resume_evaluator(
+    resume_monitor_generation: int | None,
+    expected_gap_kind: str | None,
+) -> None:
+    payload = _status_payload(
+        fallback_runnable=False,
+        latest_runs=[_fallback_vision_run(todo_delta=[f"retain:{FALLBACK_ID}"])],
+    )
+    fallback = quota_todo_item(
+        todo_id=FALLBACK_ID,
+        index=3,
+        text="[P1] Resume the declared fallback after observation changes.",
+        claimed_by=AGENT_ID,
+        resume_when="monitor_changed:todo_fallback_monitor",
+        resume_monitor_generation=resume_monitor_generation,
+    )
+    monitor = quota_todo_item(
+        todo_id="todo_fallback_monitor",
+        index=4,
+        text="[P2] Observe the fallback dependency.",
+        task_class="continuous_monitor",
+        claimed_by=AGENT_ID,
+        material_change_generation=3,
+    )
+
+    decision = build_quota_should_run(
+        payload,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        authoritative_fallback_todo_items=[fallback, monitor],
+        scheduler_execution_context=(GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT),
+    )
+
+    gaps = decision["goal_frontier_projection"].get("fallback_gaps", [])
+    if expected_gap_kind is None:
+        assert gaps == []
+    else:
+        assert gaps[0]["kind"] == expected_gap_kind
+        assert gaps[0]["unresolved_todo_ids"] == [FALLBACK_ID]
 
 
 @pytest.mark.parametrize(

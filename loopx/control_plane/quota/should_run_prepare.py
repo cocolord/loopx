@@ -454,6 +454,7 @@ def _prepare_quota_should_run_item(
     receipt_bound_monitor_phase: ReceiptBoundMonitorPhase | None,
     receipt_bound_replay_phase: ReceiptBoundReplayPhase | None,
     receipt_bound_replan_obligation_id: str | None,
+    authoritative_fallback_todo_items: list[dict[str, Any]] | None = None,
 ) -> _QuotaDecisionPreparation:
     quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
     state = str(quota.get("state") or "unknown")
@@ -749,6 +750,11 @@ def _prepare_quota_should_run_item(
         user_todo_summary=user_todo_summary,
         agent_todo_summary=agent_todo_summary,
         agent_todo_source_items=agent_todo_source_items,
+        fallback_todo_source_items=authoritative_fallback_todo_items,
+        fallback_todo_source_authoritative=(
+            authoritative_fallback_todo_items is not None
+        ),
+        available_capabilities=effective_available_capabilities,
         work_lane_contract=work_lane_contract,
         neutral_replan_ack_classifications=AUTONOMOUS_REPLAN_ACK_NEUTRAL_CLASSIFICATIONS,
         registered_agent_ids=registered_agent_ids,
