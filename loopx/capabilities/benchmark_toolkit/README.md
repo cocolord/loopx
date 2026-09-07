@@ -20,8 +20,8 @@ loopx benchmark agent-phase \
   --execute
 ```
 
-The v1 command writes one `external_agent_result_v1` result with hashes and
-its historical bounded lifecycle fields. It does not provision a task, start Docker,
+The command writes one `external_agent_result_v1` result with hashes and
+bounded lifecycle fields only. It does not provision a task, start Docker,
 access a verifier, calculate a score, upload a result, or grant model or
 credential authority. The solver command is runner-owned and executes in the
 runner-selected current directory; the request workspace must match that
@@ -33,66 +33,22 @@ without a benchmark-specific driver. A provider that needs credentials must
 define a separate explicit authorization contract rather than widening this
 generic boundary.
 
-For runs that require evidence lineage, `external_agent_request_v2` replaces the
-v1 request with the same execution fields plus one full
-`benchmark_launch_admission_receipt_v0` under `launch_admission`. The receipt binds
-public run and arm identifiers, instruction and integrity-policy digests, the
-expected provider/model route, compact containment/runtime binding digests, and
-credential/controller isolation mechanism evidence. Its
-`launch_binding_digest` is SHA-256 over compact, sort-key canonical JSON of every
-receipt field except `launch_binding_digest` and `public_boundary`. The v2 result
-keeps the same four top-level fields as v1, uses the provider-neutral inner
-schema `external_agent_phase_receipt_v2`, and records only terminal execution
-facts plus `receipt.launch_binding_digest`. Its `command_argument_count` describes
-the formal solver argv executed by `agent-phase`; a harness may separately retain
-redacted provenance for its outer bridge argv. The result makes no containment,
-timeout, or post-exit absence claim; v1 request and result behavior is unchanged,
-including its historical `drained_before_result_consumption` declaration.
-For the request-level public linkage, `containment_binding_sha256` is SHA-256 of
-the exact UTF-8 bytes of `containment.verification.receipt_ref`. Runtime binding
-remains opaque and is checked later against the runtime integrity attestation.
-
-The runner may assemble pre-launch identity and expectation facts before launch,
-then reduce post-launch containment, runtime, and isolation observations to hashes.
-Only the finalized receipt crosses this public boundary. It never records raw
-container or session identities, paths, commands, credentials, or controller state.
-After capturing the raw terminal result bytes, the runner must destroy the
-admitted containment and independently prove its absence before parsing the
-result. Use `build_benchmark_trajectory_lineage_receipt` only then to bind the
-exact parsed v2 result and private ATIF digests to the run, arm, launch digest,
-runner authority, containment binding,
-`destroyed_before_result_consumption` postcondition, verified-absence fact, and
-absence-evidence digest.
-Then use `build_strict_benchmark_integrity_qualification` when a score-eligibility
-gate must bind the launch receipt, terminal result, trajectory lineage, v1 runtime
-attestation, and v1 route receipt. Any run, arm, policy, binding, authority,
-mechanism, result, trajectory, or route mismatch fails closed; the legacy integrity
-reducer remains available with its existing behavior.
-The policy digest preimage is the output of
-`normalize_benchmark_integrity_policy`: the schema and policy id, effective network
-mode, and sorted effective marker sets serialized as compact sort-key JSON.
-
 Execution also requires an `external_agent_containment_v1` request object.
 The runner must own a non-escapable containment such as a container, cgroup v2,
 PID namespace, virtual machine, or Windows Job Object, and declare
 `timeout_owner=runner` plus
-`termination_postcondition=destroyed_before_result_consumption`. The request must
+`termination_postcondition=drained_before_result_consumption`. The request must
 also carry a runner-owned `external_agent_containment_verification_v1` receipt
-reference with `status=pending`, because destruction cannot be observed until
-after the terminal bytes are captured. The runner later proves the postcondition
-in the separate containment-absence evidence. Legacy v1 requests still require
-`status=verified` for their historical declaration; other statuses are rejected.
+reference with `status=verified`; an unverified prose declaration is rejected.
 A POSIX process group is not sufficient because the solver can create a new
 session. LoopX validates this contract before launch but does not claim to
 create or inspect the containment, does not enforce the timeout itself, and
 never writes a `solver_timeout` result. On timeout, the runner must destroy its
-containment and prove that the admitted containment instance no longer exists
-before recording the timeout. After any solver result, the runner must likewise
-capture the result bytes, destroy the admitted containment, prove its absence,
-and only then parse or consume the result or start a verifier, because the solver
-may exit while leaving
-detached descendants behind. A runner without that lifecycle must fail closed
-before invoking `agent-phase`.
+containment and read back that it is empty before recording the timeout. After
+any solver result, the runner must likewise drain the containment before
+consuming the result or starting a verifier, because the solver may exit while
+leaving detached descendants behind. A runner without that lifecycle must fail
+closed before invoking `agent-phase`.
 
 ### Bounded continuation decision
 
@@ -386,10 +342,6 @@ loopx benchmark traex-evidence \
   --atif-output .local/private-run/agent/trajectory.json \
   --route-receipt-output .local/private-run/public/model-route.json \
   --requested-model GPT-5.4 \
-  --run-id "$RUN_ID" \
-  --arm-id "$ARM_ID" \
-  --launch-binding-digest "$LAUNCH_BINDING_DIGEST" \
-  --authority "$PROVIDER_AUTHORITY" \
   --require-runtime-route \
   --execute --format json
 ```
@@ -399,9 +351,7 @@ ATIF retains tool arguments and observations for local integrity analysis. The r
 receipt contains only compact requested and observed route labels and one of
 `runtime_route_verified`, `runtime_route_mismatch`, `runtime_route_ambiguous`, or
 `route_requested_not_runtime_audited`; it never contains prompts, raw tool content,
-or paths. The four binding flags are all-or-none: when supplied they emit the v1
-receipt required by strict integrity qualification; omitting all four preserves the
-unbound v0 compatibility receipt. Stdout JSONL normally has no runtime route event, so omitting
+or paths. Stdout JSONL normally has no runtime route event, so omitting
 `--route-source-jsonl` does not prove which model ran. When a separate archive is
 supplied, its session id must exactly match the stdout `thread.started` id. The
 converter covers the observed TraeX command and file-change stdout events plus
@@ -420,20 +370,10 @@ export BENCHMARK_PROVIDER_CANARY='a-private-value-known-to-the-controller'
 loopx benchmark integrity-qualification \
   --trajectory-json .local/private-run/agent/trajectory.json \
   --runtime-attestation-json .local/private-run/runtime-attestation.json \
-  --launch-admission-json .local/private-run/public/launch-admission.json \
-  --route-receipt-json .local/private-run/public/model-route.json \
-  --external-agent-result-json .local/private-run/public/agent-result.json \
-  --trajectory-lineage-receipt-json .local/private-run/public/trajectory-lineage.json \
   --sensitive-value-env BENCHMARK_PROVIDER_CANARY \
   --require-qualified \
   --format json
 ```
-
-The four strict lineage inputs are also all-or-none. Supplying none keeps the legacy
-qualification path; supplying only part of the bundle fails closed. The runner owns
-the runtime attestation and trajectory-lineage receipt, while the provider adapter
-owns the bound route receipt. LoopX validates and reduces those receipts but does not
-claim task provisioning, containment, verifier, scoring, or provider authority.
 
 Automated restricted-source and host-boundary probe matches are suspicion signals,
 not a cheating verdict. They keep `integrity_qualified=true`, emit
@@ -511,6 +451,66 @@ It becomes true only after the post-run analyst confirms both restricted-materia
 disclosure and causal use. A scanner hit, missing isolation proof, or credential leak
 does not by itself become confirmed answer cheating; isolation and credential
 failures can still make the run uncountable through their independent blockers.
+
+### Bind evidence to an existing external-agent launch
+
+The optional `benchmark_evidence_binding_v0` seal prevents an audit from mixing
+artifacts after collection. It uses the instruction digest and runner verification
+reference already returned by `external_agent_result_v1`; request/result formats,
+solver execution, TraeX publication and shared locks are unchanged.
+
+Use it when a runner retains several attempts or comparison arms. The runner must
+allocate a fresh containment verification `receipt_ref` for each launch, even when
+the instruction is identical. A reused reference cannot distinguish identical
+launches. The pin and final seal must stay in runner-controlled storage outside the
+solver's writable workspace.
+
+| When | Runner operation | Evidence owner |
+| --- | --- | --- |
+| Before execution | Call `prepare_benchmark_evidence_launch(request, expected_model=..., expected_provider=..., policy=...)` in the admitted workspace; persist the returned `launch.sha256` independently. | Runner pins its existing v1 request and experiment policy. |
+| After the solver | Collect the v1 result, private ATIF, runtime model-route receipt and existing v0 runtime attestation for that exact attempt. | Solver bridge, provider adapter and runner each produce their existing artifacts. |
+| After cleanup | Independently observe that the exact containment is empty, retain that observation privately, then call `build_benchmark_evidence_binding(launch=launch, external_agent_result=result, trajectory=atif, runtime_attestation=attestation, route_receipt=route, containment_drained=True, containment_evidence_sha256=cleanup_sha256)`. | Runner supplies a post-execution observation; parent exit or a launch declaration alone is insufficient. |
+| Before consuming results | Publish the returned seal with the existing `registry.atomic_write_json`, then run the audit below with the previously pinned digest. | The qualifier checks the supplied artifact hashes, result/launch and model matches, policy, and existing integrity rules. |
+
+Use fresh per-attempt output locations with one trusted producer. If any artifact
+write or cleanup fails, retain the private diagnostics and do not publish a seal.
+This is a completed-evidence reference, not a transaction across arbitrary output
+paths: missing files, partial opt-in, changed artifacts or a different launch pin
+cannot qualify. Private ATIF stays separate from the compact seal and route output.
+
+```bash
+loopx benchmark integrity-qualification \
+  --trajectory-json "$PRIVATE_ATIF" \
+  --runtime-attestation-json "$RUNTIME_ATTESTATION" \
+  --evidence-binding-json "$RUNNER_EVIDENCE_BINDING" \
+  --expected-launch-sha256 "$PINNED_LAUNCH_SHA256" \
+  --external-agent-result-json "$EXTERNAL_AGENT_RESULT" \
+  --route-receipt-json "$MODEL_ROUTE_RECEIPT" \
+  --require-qualified --format json
+```
+
+Pass the same `--policy-json` used when pinning a non-default policy. Supply all four
+binding options together; omit all four to use the unchanged legacy audit. The
+bound audit adds `evidence_binding_verified` to the existing v0 qualification and
+never upgrades an unsuccessful integrity audit or an official score claim.
+
+Hash equality establishes correspondence with a trusted seal, not authenticity of
+its observations. The runner remains responsible for collecting the right logs,
+verifying containment and protecting the pin/seal from replacement. Replacing the
+trusted seal and all its inputs cannot be detected by unkeyed hashes. This feature
+adds no execution, cleanup, verifier, scoring or submission authority.
+
+The runnable integration fixture exercises v1 solver invocation, native TraeX CLI
+publication, seal construction and CLI qualification:
+
+```bash
+python -m pytest -q tests/capabilities/test_benchmark_evidence_binding.py
+```
+
+It uses a synthetic subprocess and fixture isolation observations, with real
+filesystem IO; it does not claim to qualify a real benchmark or container. The same
+test runs in native Windows CI. Production runners supply their own observed
+isolation and cleanup evidence at the points above.
 
 ### Network access policy
 
