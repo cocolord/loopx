@@ -30,6 +30,24 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _inject_path_identity_mismatch(
+    monkeypatch: pytest.MonkeyPatch, target: Path
+) -> None:
+    # Inject only the path identity: the real descriptor and mismatch detector
+    # remain active even where Windows forbids renaming an open file.
+    real_lstat = Path.lstat
+
+    def changed_identity(path: Path) -> os.stat_result:
+        info = real_lstat(path)
+        if path == target:
+            fields = list(info)
+            fields[1] = info.st_ino + 1
+            return os.stat_result(fields)
+        return info
+
+    monkeypatch.setattr(Path, "lstat", changed_identity)
+
+
 def _start_stalled_holder(target: Path) -> subprocess.Popen[str]:
     script = """
 import sys
@@ -114,20 +132,18 @@ def test_exclusive_lock_can_expose_revalidatable_lease(tmp_path: Path) -> None:
 
 
 def test_exclusive_lock_lease_detects_replacement_before_context_exit(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = tmp_path / "state.json"
-    lock_path = target.with_name(f"{target.name}.lock")
-    detached = tmp_path / "detached.lock"
-    replacement = tmp_path / "replacement.lock"
-
-    with pytest.raises(OSError, match="lock_file_replaced_during_lock"):
-        with exclusive_file_lock(target, expose_lease=True) as lease:
-            assert isinstance(lease, file_lock.ExclusiveFileLockLease)
-            lock_path.rename(detached)
-            replacement.write_text("", encoding="utf-8")
-            replacement.replace(lock_path)
-            lease.check()
+    with exclusive_file_lock(target, expose_lease=True) as lease:
+        assert isinstance(lease, file_lock.ExclusiveFileLockLease)
+        with monkeypatch.context() as mismatch:
+            _inject_path_identity_mismatch(mismatch, lease.path)
+            with pytest.raises(OSError, match="lock_file_replaced_during_lock"):
+                lease.check()
+        # Restore the identity before exit to prove the explicit lease check,
+        # rather than the context manager's final check, raised the error.
+        lease.check()
 
 
 def test_stalled_holder_times_out_and_records_independent_incident(
@@ -391,32 +407,32 @@ def test_append_incident_reports_false_when_path_is_replaced_after_write(
 ) -> None:
     target = tmp_path / "todos.md"
     incident_path = lock_incident_path(target)
-    detached = tmp_path / "detached.incidents.jsonl"
-    replacement = tmp_path / "replacement.incidents.jsonl"
     real_assert_live = file_lock._assert_live_incident_path_matches_descriptor
+    detected = False
 
     def replace_then_revalidate(path: Path, descriptor: int) -> None:
-        incident_path.rename(detached)
-        replacement.write_text("replacement\n", encoding="utf-8")
-        replacement.replace(incident_path)
-        real_assert_live(path, descriptor)
+        nonlocal detected
+        _inject_path_identity_mismatch(monkeypatch, path)
+        try:
+            real_assert_live(path, descriptor)
+        except OSError as error:
+            assert str(error) == "lock_incident_replaced_during_open"
+            detected = True
+            raise
 
     monkeypatch.setattr(
         file_lock,
         "_assert_live_incident_path_matches_descriptor",
         replace_then_revalidate,
     )
-
     recorded = file_lock._append_incident(
         target,
         {"error_code": "lock_acquire_timeout", "lock_id": "opaque"},
     )
 
     assert recorded is False
-    assert detached.exists()
-    assert incident_path.exists()
-    assert detached.read_text(encoding="utf-8").startswith("{")
-    assert incident_path.read_text(encoding="utf-8") == "replacement\n"
+    assert detected
+    assert json.loads(incident_path.read_text(encoding="utf-8"))["lock_id"] == "opaque"
 
 
 def test_exclusive_file_lock_rejects_path_replacement_after_kernel_lock(
@@ -424,94 +440,82 @@ def test_exclusive_file_lock_rejects_path_replacement_after_kernel_lock(
 ) -> None:
     target = tmp_path / "state.json"
     lock_path = target.with_name(f"{target.name}.lock")
-    detached = tmp_path / "detached.lock"
     real_try_acquire = file_lock._try_acquire_kernel_lock
-    calls = 0
 
-    def replace_before_first_lock(lock_file: object) -> bool:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            lock_path.rename(detached)
-            replacement = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-            os.close(replacement)
-        return real_try_acquire(lock_file)  # type: ignore[arg-type]
+    def replace_after_lock(lock_file: object) -> bool:
+        acquired = real_try_acquire(lock_file)  # type: ignore[arg-type]
+        assert acquired
+        _inject_path_identity_mismatch(monkeypatch, lock_path)
+        return acquired
 
-    monkeypatch.setattr(
-        file_lock, "_try_acquire_kernel_lock", replace_before_first_lock
-    )
-
+    monkeypatch.setattr(file_lock, "_try_acquire_kernel_lock", replace_after_lock)
     with pytest.raises(OSError, match="lock_file_replaced_during_lock"):
         with exclusive_file_lock(target, timeout_seconds=0):
             pytest.fail("replaced lock unexpectedly acquired")
 
-    assert detached.exists()
-    assert lock_path.exists()
-    assert detached.stat().st_ino != lock_path.stat().st_ino
 
-
-def test_exclusive_file_lock_rejects_path_replacement_while_held(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("try_once", [False, True], ids=["exclusive", "try-exclusive"])
+def test_file_lock_rejects_path_replacement_while_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, try_once: bool
 ) -> None:
     target = tmp_path / "state.json"
-    lock_path = target.with_name(f"{target.name}.lock")
-    detached = tmp_path / "detached.lock"
-    replacement = tmp_path / "replacement.lock"
-    real_assert_live = file_lock._assert_live_lock_path_matches_descriptor
-    checks = 0
-
-    def replace_on_second_check(path: Path, descriptor: int) -> None:
-        nonlocal checks
-        checks += 1
-        if checks == 2:
-            path.rename(detached)
-            replacement.write_text("", encoding="utf-8")
-            replacement.replace(path)
-        real_assert_live(path, descriptor)
-
-    monkeypatch.setattr(
-        file_lock, "_assert_live_lock_path_matches_descriptor", replace_on_second_check
-    )
-
+    context = try_exclusive_file_lock(target) if try_once else exclusive_file_lock(target)
     with pytest.raises(OSError, match="lock_file_replaced_during_lock"):
-        with exclusive_file_lock(target, timeout_seconds=0):
-            pass
-
-    assert detached.exists()
-    assert lock_path.exists()
-    assert detached.stat().st_ino != lock_path.stat().st_ino
+        with context as lock_path:
+            assert isinstance(lock_path, Path)
+            _inject_path_identity_mismatch(monkeypatch, lock_path)
 
 
-def test_try_exclusive_file_lock_rejects_path_replacement_while_held(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("kind", ["lock", "incident"])
+def test_open_file_replacement_obeys_native_platform_contract(
+    tmp_path: Path, kind: str
 ) -> None:
-    target = tmp_path / "state.json"
-    lock_path = target.with_name(f"{target.name}.lock")
-    detached = tmp_path / "detached.lock"
-    replacement = tmp_path / "replacement.lock"
-    real_assert_live = file_lock._assert_live_lock_path_matches_descriptor
-    checks = 0
-
-    def replace_on_second_check(path: Path, descriptor: int) -> None:
-        nonlocal checks
-        checks += 1
-        if checks == 2:
-            path.rename(detached)
-            replacement.write_text("", encoding="utf-8")
-            replacement.replace(path)
-        real_assert_live(path, descriptor)
-
-    monkeypatch.setattr(
-        file_lock, "_assert_live_lock_path_matches_descriptor", replace_on_second_check
+    path = tmp_path / f"active.{kind}"
+    detached = tmp_path / f"detached.{kind}"
+    opener = (
+        file_lock._open_verified_lock_descriptor
+        if kind == "lock"
+        else file_lock._open_verified_incident_descriptor
     )
-
-    with pytest.raises(OSError, match="lock_file_replaced_during_lock"):
-        with try_exclusive_file_lock(target):
-            pass
-
-    assert detached.exists()
-    assert lock_path.exists()
-    assert detached.stat().st_ino != lock_path.stat().st_ino
+    check = (
+        file_lock._assert_live_lock_path_matches_descriptor
+        if kind == "lock"
+        else file_lock._assert_live_incident_path_matches_descriptor
+    )
+    error_code = (
+        "lock_file_replaced_during_lock"
+        if kind == "lock"
+        else "lock_incident_replaced_during_open"
+    )
+    descriptor = opener(path)
+    # The lock case uses the real kernel backend; the incident case needs only
+    # its open descriptor, as in _append_incident.
+    with os.fdopen(descriptor, "w", encoding="utf-8") as opened:
+        if kind == "lock":
+            assert file_lock._try_acquire_kernel_lock(opened)
+        try:
+            before = os.fstat(descriptor)
+            check(path, descriptor)
+            if os.name == "nt":
+                with pytest.raises(PermissionError) as denied:
+                    path.rename(detached)
+                assert denied.value.winerror == 32
+                assert not detached.exists()
+                after = path.stat()
+                assert (after.st_dev, after.st_ino) == (before.st_dev, before.st_ino)
+                check(path, descriptor)
+            else:
+                path.rename(detached)
+                path.write_text("replacement\n", encoding="utf-8")
+                assert detached.stat().st_ino == before.st_ino
+                assert path.stat().st_ino != before.st_ino
+                with pytest.raises(OSError, match=error_code):
+                    check(path, descriptor)
+        finally:
+            if kind == "lock":
+                file_lock._release_kernel_lock(opened)
+    # Windows must release its handle as well as rejecting replacement while open.
+    path.rename(tmp_path / f"released.{kind}")
 
 
 def test_cross_runtime_lock_publishes_the_typescript_owner_file(tmp_path: Path) -> None:
