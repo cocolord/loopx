@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from .control_plane.runtime.runtime_projection_route import resolve_goal_source_runtime_route
+from .control_plane.runtime.runtime_projection_route import (
+    resolve_goal_source_runtime_route,
+)
 from .extensions.lark.goal_channel import (
     default_goal_channel_binding_path,
     default_goal_channel_target_path,
@@ -22,7 +25,11 @@ from .extensions.lark.goal_topic_connections import (
     list_lark_connections,
     list_lark_group_chats,
 )
-from .extensions.lark.presentation.kanban import CommandRunner, default_subprocess_runner
+from .extensions.lark.goal_topic_batch import connect_lark_goal_topics
+from .extensions.lark.presentation.kanban import (
+    CommandRunner,
+    default_subprocess_runner,
+)
 from .history import load_registry
 from .paths import resolve_runtime_root
 from .registry import registry_goals
@@ -31,6 +38,42 @@ from .repository_identity import normalize_repository_identity
 
 def _compact_text(value: Any, *, limit: int = 600) -> str:
     return " ".join(str(value or "").split())[:limit].strip()
+
+
+def _parse_lark_agent_bindings(
+    body: Mapping[str, Any],
+) -> dict[str, str] | None:
+    raw_bindings = body.get("agent_bindings")
+    if raw_bindings is None:
+        return None
+    if body.get("agent_id") or body.get("app_ref"):
+        raise ValueError("agent_bindings cannot be combined with agent_id or app_ref")
+    if not isinstance(raw_bindings, list):
+        raise ValueError("agent_bindings must be a list")
+    bindings: dict[str, str] = {}
+    for item in raw_bindings:
+        if not isinstance(item, Mapping) or set(item) != {"agent_id", "app_ref"}:
+            raise ValueError("each agent binding must contain agent_id and app_ref")
+        agent_id = _compact_text(item.get("agent_id"), limit=160)
+        app_ref = _compact_text(item.get("app_ref"), limit=100)
+        if not agent_id or not app_ref:
+            raise ValueError("each agent binding requires agent_id and app_ref")
+        if agent_id in bindings:
+            raise ValueError("each Agent may appear only once in a batch")
+        bindings[agent_id] = app_ref
+    return bindings
+
+
+def _connection_packet_has_committed_binding(packet: Mapping[str, Any]) -> bool:
+    """Return whether an executed connection packet committed any binding."""
+
+    if packet.get("ok") is True:
+        return True
+    details = packet.get("details")
+    if not isinstance(details, Mapping):
+        return False
+    completed = details.get("completed_agent_ids")
+    return isinstance(completed, list) and bool(completed)
 
 
 def _default_git_runner(args: list[str]) -> dict[str, Any]:
@@ -73,7 +116,11 @@ def build_goal_repository_contexts(
             ["git", "-C", str(project), "branch", "--show-current"]
         )
         branch = _compact_text(branch_result.get("stdout"), limit=160)
-        label = identity.split("/", 1)[1] if identity.startswith("git:") and "/" in identity else goal_id
+        label = (
+            identity.split("/", 1)[1]
+            if identity.startswith("git:") and "/" in identity
+            else goal_id
+        )
         rows.append(
             {
                 "goal_id": goal_id,
@@ -223,7 +270,9 @@ class LarkChatRequestMixin:
                 )
                 source_registry_path = Path(str(route["source_registry"]))
                 if source_registry_path.parent.name == ".loopx":
-                    paths[goal_id] = default_goal_channel_binding_path(source_registry_path)
+                    paths[goal_id] = default_goal_channel_binding_path(
+                        source_registry_path
+                    )
             except (OSError, ValueError):
                 continue
         return paths
@@ -274,7 +323,11 @@ class LarkChatRequestMixin:
         try:
             snapshot = self._lark_setup_manager().snapshot(setup_id)
         except KeyError:
-            self._send_error("Lark App setup was not found", status=404, error_code="lark_app_setup_not_found")
+            self._send_error(
+                "Lark App setup was not found",
+                status=404,
+                error_code="lark_app_setup_not_found",
+            )
             return
         self._send_json({"ok": True, **snapshot})
 
@@ -282,7 +335,11 @@ class LarkChatRequestMixin:
         try:
             snapshot = self._lark_setup_manager().cancel(setup_id)
         except KeyError:
-            self._send_error("Lark App setup was not found", status=404, error_code="lark_app_setup_not_found")
+            self._send_error(
+                "Lark App setup was not found",
+                status=404,
+                error_code="lark_app_setup_not_found",
+            )
             return
         self._send_json({"ok": True, **snapshot})
 
@@ -294,7 +351,9 @@ class LarkChatRequestMixin:
         app_ref = _compact_text(query.get("app_ref", [""])[0], limit=100)
         keyword = _compact_text(query.get("query", [""])[0], limit=120)
         if not app_ref:
-            self._send_error("app_ref is required", status=400, error_code="lark_app_required")
+            self._send_error(
+                "app_ref is required", status=400, error_code="lark_app_required"
+            )
             return
         try:
             chats = list_lark_group_chats(
@@ -338,7 +397,8 @@ class LarkChatRequestMixin:
                     cli_bin=cli_bin,
                     runtime_health=(
                         self.server.lark_goal_topic_runtime.health_snapshot()
-                        if getattr(self.server, "lark_goal_topic_runtime", None) is not None
+                        if getattr(self.server, "lark_goal_topic_runtime", None)
+                        is not None
                         else None
                     ),
                 ),
@@ -353,6 +413,7 @@ class LarkChatRequestMixin:
             body = self._read_json()
             allowed = {
                 "agent_id",
+                "agent_bindings",
                 "app_ref",
                 "capture_scope",
                 "chat_id",
@@ -369,47 +430,81 @@ class LarkChatRequestMixin:
             app_ref = _compact_text(body.get("app_ref"), limit=100)
             chat_id = _compact_text(body.get("chat_id"), limit=160)
             chat_name = _compact_text(body.get("chat_name"), limit=120)
-            incoming_mode = _compact_text(body.get("incoming_mode"), limit=40) or "mentions"
+            incoming_mode = (
+                _compact_text(body.get("incoming_mode"), limit=40) or "mentions"
+            )
             agent_id = _compact_text(body.get("agent_id"), limit=160) or None
             capture_scope = _compact_text(body.get("capture_scope"), limit=40) or None
-            ingress_mode = _compact_text(body.get("ingress_mode"), limit=40) or "async_inbox"
-            reply_mode = _compact_text(body.get("reply_mode"), limit=40) or "topic_reply"
-            if not goal_id or not app_ref or not chat_id or not chat_name:
-                raise ValueError("goal_id, app_ref, chat_id, and chat_name are required")
+            ingress_mode = (
+                _compact_text(body.get("ingress_mode"), limit=40) or "async_inbox"
+            )
+            reply_mode = (
+                _compact_text(body.get("reply_mode"), limit=40) or "topic_reply"
+            )
+            app_refs_by_agent = _parse_lark_agent_bindings(body)
+            if (
+                not goal_id
+                or not chat_id
+                or not chat_name
+                or (app_refs_by_agent is None and not app_ref)
+                or (app_refs_by_agent is not None and not app_refs_by_agent)
+            ):
+                raise ValueError(
+                    "goal_id, one or more App bindings, chat_id, and chat_name are required"
+                )
             registry, binding_path = self._goal_channel_context(goal_id)
             session_id: str | None = None
+            session_ids_by_agent: dict[str, str] = {}
             if ingress_mode in {"live_steering", "session_queue"}:
-                if not agent_id:
-                    raise ValueError(f"{ingress_mode} requires a registered agent_id")
-                session = self.server.chat_store.latest_session(
-                    goal_id=goal_id,
-                    agent_id=agent_id,
-                    channel_id=f"goal.{goal_id}",
+                session_agent_ids = (
+                    list(app_refs_by_agent) if app_refs_by_agent is not None else [agent_id]
                 )
-                if session is None:
-                    raise ValueError(
-                        f"{ingress_mode} requires an existing working session for this Goal and Agent"
+                if not all(session_agent_ids):
+                    raise ValueError(f"{ingress_mode} requires a registered agent_id")
+                for session_agent_id in session_agent_ids:
+                    session = self.server.chat_store.latest_session(
+                        goal_id=goal_id,
+                        agent_id=session_agent_id,
+                        channel_id=f"goal.{goal_id}",
                     )
-                session_id = str(session["session_id"])
-            packet = connect_lark_goal_topic(
-                registry=registry,
-                goal_id=goal_id,
-                target_path=self._goal_channel_target_path(),
-                binding_path=binding_path,
-                app_ref=app_ref,
-                chat_id=chat_id,
-                chat_name=chat_name,
-                incoming_mode=incoming_mode,
-                agent_id=agent_id,
-                session_id=session_id,
-                capture_scope=capture_scope,
-                ingress_mode=ingress_mode,
-                reply_mode=reply_mode,
-                registry_path=binding_path.parent / "registry.json",
-                execute=body.get("execute") is True,
-                runner=self._lark_runner(),
-                cli_bin=cli_bin,
-            )
+                    if session is None:
+                        raise ValueError(
+                            f"{ingress_mode} requires an existing working session for this Goal and Agent"
+                        )
+                    session_ids_by_agent[str(session_agent_id)] = str(
+                        session["session_id"]
+                    )
+                if agent_id:
+                    session_id = session_ids_by_agent[agent_id]
+            common = {
+                "registry": registry,
+                "goal_id": goal_id,
+                "target_path": self._goal_channel_target_path(),
+                "binding_path": binding_path,
+                "chat_id": chat_id,
+                "chat_name": chat_name,
+                "incoming_mode": incoming_mode,
+                "capture_scope": capture_scope,
+                "ingress_mode": ingress_mode,
+                "reply_mode": reply_mode,
+                "registry_path": binding_path.parent / "registry.json",
+                "execute": body.get("execute") is True,
+                "runner": self._lark_runner(),
+                "cli_bin": cli_bin,
+            }
+            if app_refs_by_agent is not None:
+                packet = connect_lark_goal_topics(
+                    **common,
+                    app_refs_by_agent=app_refs_by_agent,
+                    session_ids_by_agent=session_ids_by_agent,
+                )
+            else:
+                packet = connect_lark_goal_topic(
+                    **common,
+                    app_ref=app_ref,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                )
         except ValueError as exc:
             self._send_error(str(exc), status=400, error_code="invalid_lark_connection")
             return
@@ -422,21 +517,36 @@ class LarkChatRequestMixin:
             return
         if not packet.get("ok"):
             packet["error"] = _compact_text(
-                packet.get("public_summary") or packet.get("blocker") or "Lark connection failed"
+                packet.get("public_summary")
+                or packet.get("blocker")
+                or "Lark connection failed"
             )
-        elif body.get("execute") is True:
+        if (
+            body.get("execute") is True
+            and _connection_packet_has_committed_binding(packet)
+        ):
             self._refresh_lark_goal_topic_runtime()
         self._send_json(packet, status=200 if packet.get("ok") else 400)
 
     def _lark_disconnect(self) -> None:
         query = parse_qs(urlparse(self.path).query)
         goal_id = _compact_text(query.get("goal_id", [""])[0], limit=160)
-        if not goal_id:
-            self._send_error("goal_id is required", status=400, error_code="goal_required")
+        connection_id = _compact_text(query.get("connection_id", [""])[0], limit=160)
+        if not goal_id or not connection_id:
+            self._send_error(
+                "goal_id and connection_id are required",
+                status=400,
+                error_code="connection_required",
+            )
             return
         try:
             _registry, binding_path = self._goal_channel_context(goal_id)
-            packet = disconnect_lark_goal_topic(binding_path=binding_path, goal_id=goal_id)
+            packet = disconnect_lark_goal_topic(
+                binding_path=binding_path,
+                goal_id=goal_id,
+                connection_id=connection_id,
+                registry_path=binding_path.parent / "registry.json",
+            )
         except (OSError, ValueError) as exc:
             self._send_error(str(exc), status=400, error_code="invalid_lark_connection")
             return

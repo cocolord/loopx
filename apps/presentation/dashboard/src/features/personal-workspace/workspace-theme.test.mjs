@@ -39,7 +39,8 @@ assert.match(styles, /personal-select-option[\s\S]*min-height: 32px[\s\S]*font-s
 assert.ok(styles.includes('.personal-goal-tabs button[aria-current="page"]::after'), "Goal views use a restrained active underline");
 assert.match(styles, /personal-message.is-user[\s\S]*background: #f2f2f2/, "LoopX Chat uses a neutral owner message");
 assert.match(styles, /personal-task-kanban { gap: 0; border-block: 1px solid #ebebeb/, "LoopX Tasks uses continuous lane dividers");
-assert.match(styles, /personal-task-card > button > strong { font-size: 13px; font-weight: 600; line-height: 18px/, "LoopX task cards keep compact typography");
+assert.match(styles, /personal-task-card > button > strong { font-size: 14px; font-weight: 500; line-height: 20px/, "LoopX task titles use the Body M scale in every lane");
+assert.match(styles, /personal-task-lane-scroll > button, \.personal-task-card { flex: 0 0 auto;/, "Task cards do not shrink below their content height");
 assert.match(styles, /personal-files-list { border-radius: 12px/, "LoopX Files uses the standard card radius");
 assert.match(styles, /personal-icon-button {[^}]*flex: 0 0 36px;[^}]*min-width: 36px;[^}]*min-height: 36px;/, "Header icon buttons keep a stable square footprint");
 assert.match(styles, /personal-live-indicator {[^}]*flex: 0 0 auto;[^}]*white-space: nowrap;/, "Live status stays on one line when the header narrows");
@@ -49,7 +50,7 @@ assert.match(styles, /personal-channel-title h1 { font-size: 20px/, "LoopX stand
 assert.match(select, /aria-haspopup="listbox"/, "Workspace select exposes combobox semantics");
 assert.match(select, /event.key === "ArrowDown"/, "Workspace select supports arrow-key navigation");
 assert.match(select, /event.key === "Escape"/, "Workspace select supports keyboard dismissal");
-assert.doesNotMatch(header, /<select/, "The primary Agent selector is not browser-native");
+assert.doesNotMatch(header, /<select/, "The chat runtime selector is not browser-native");
 assert.doesNotMatch(statusSource, /<select/, "The primary control-plane selector is not browser-native");
 assert.match(header, /<WorkspaceSelect/, "The Agent selector uses the shared menu");
 assert.match(header, /prefixLabel={t\("header.chatRuntime"\)}/, "The chat runtime remains visibly distinct from work-Agent lanes");

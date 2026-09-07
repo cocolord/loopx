@@ -82,6 +82,7 @@ impl ServiceKind {
 enum Probe {
     Matching,
     Unavailable,
+    Unresponsive,
     Foreign,
     Stale,
 }
@@ -152,7 +153,7 @@ impl ServiceSet {
                     // service (KeepAlive + throttle) has time to restart on the
                     // current release; unknown (Foreign) processes keep the
                     // hard error.
-                    terminate_stale_listener(kind, &executable, kind.port())?;
+                    terminate_verified_listener(kind, &executable, kind.port())?;
                     self.healed = true;
                     if Instant::now() >= stale_deadline {
                         return Err(ServiceError(format!(
@@ -163,11 +164,52 @@ impl ServiceSet {
                     }
                     thread::sleep(Duration::from_millis(200));
                 }
+                Probe::Unresponsive => {
+                    // A bound socket is not HTTP readiness. Give slow startup
+                    // a full grace period, then replace only a verified LoopX
+                    // listener; unknown processes still fail closed.
+                    if Instant::now() < stale_deadline {
+                        thread::sleep(Duration::from_millis(100));
+                        continue;
+                    }
+                    terminate_verified_listener(kind, &executable, kind.port())?;
+                    self.healed = true;
+                    break;
+                }
                 Probe::Unavailable => break,
             }
         }
 
+        if request_platform_managed_start(kind) {
+            let deadline = Instant::now() + STARTUP_TIMEOUT;
+            while Instant::now() < deadline {
+                match probe(kind, expected_runtime_identity.as_ref()) {
+                    Probe::Matching => return Ok(()),
+                    Probe::Foreign => {
+                        return Err(ServiceError(format!(
+                            "LoopX {} startup reached an unexpected service on port {}",
+                            kind.label(),
+                            kind.port()
+                        )));
+                    }
+                    Probe::Stale => {
+                        terminate_verified_listener(kind, &executable, kind.port())?;
+                        self.healed = true;
+                        request_platform_managed_start(kind);
+                    }
+                    Probe::Unavailable | Probe::Unresponsive => {}
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            return Err(ServiceError(format!(
+                "system-managed LoopX {} did not become ready on port {}",
+                kind.label(),
+                kind.port()
+            )));
+        }
+
         let mut command = Command::new(&executable);
+        configure_runtime_environment(&mut command);
         command
             .args(kind.command_args())
             .stdin(Stdio::null())
@@ -193,11 +235,13 @@ impl ServiceSet {
                     )));
                 }
                 Probe::Stale => {
-                    terminate_stale_listener(kind, &executable, kind.port())?;
+                    terminate_verified_listener(kind, &executable, kind.port())?;
                     self.healed = true;
                     thread::sleep(Duration::from_millis(200));
                 }
-                Probe::Unavailable => thread::sleep(Duration::from_millis(100)),
+                Probe::Unavailable | Probe::Unresponsive => {
+                    thread::sleep(Duration::from_millis(100))
+                }
             }
         }
         Err(ServiceError(format!(
@@ -213,6 +257,51 @@ impl ServiceSet {
         }
         self.owned.clear();
     }
+}
+
+#[cfg(target_os = "macos")]
+fn request_platform_managed_start(kind: ServiceKind) -> bool {
+    let label = platform_managed_service_label(kind);
+    let uid = match Command::new("id").arg("-u").output() {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        }
+        _ => return false,
+    };
+    if uid.is_empty() {
+        return false;
+    }
+    let target = format!("gui/{uid}/{label}");
+    let loaded = Command::new("launchctl")
+        .args(["print", target.as_str()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if !loaded {
+        return false;
+    }
+    // Keep one service owner. A loaded KeepAlive LaunchAgent may be inside its
+    // throttle interval after stale-runtime replacement; ask launchd to wake
+    // it and wait instead of racing it with a Desktop-owned child process.
+    let _ = Command::new("launchctl")
+        .args(["kickstart", target.as_str()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    true
+}
+
+fn platform_managed_service_label(kind: ServiceKind) -> &'static str {
+    match kind {
+        ServiceKind::Status => "com.loopx.status",
+        ServiceKind::Chat => "com.loopx.chat",
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn request_platform_managed_start(_kind: ServiceKind) -> bool {
+    false
 }
 
 impl Drop for ServiceSet {
@@ -244,7 +333,7 @@ const DYNAMIC_MODULE_LAUNCH_MARKER: &str = r#"runpy.run_module(module, run_name=
 const RELEASE_ARGV_ZERO_MARKER: &str =
     r#"sys.argv[0] = os.path.join(release_root, "scripts", "loopx")"#;
 
-fn terminate_stale_listener(
+fn terminate_verified_listener(
     kind: ServiceKind,
     loopx_executable: &str,
     port: u16,
@@ -445,7 +534,7 @@ fn paths_refer_to_same_file(candidate: &str, expected: &str) -> bool {
             .is_some_and(|(candidate, expected)| candidate == expected)
 }
 
-fn loopx_executable() -> String {
+pub(crate) fn loopx_executable() -> String {
     if let Ok(configured) = env::var("LOOPX_BIN") {
         if !configured.trim().is_empty() {
             return resolve_executable_path(&configured, env::var_os("PATH").as_deref())
@@ -467,6 +556,43 @@ fn loopx_executable() -> String {
         .or_else(|| resolve_executable_path("loopx", env::var_os("PATH").as_deref()))
         .map(|candidate| candidate.to_string_lossy().into_owned())
         .unwrap_or_else(|| "loopx".to_string())
+}
+
+// Finder/launchd do not load a user's interactive shell profile. Use the same
+// bounded tool search for installation and owned services, without sourcing
+// arbitrary shell startup files or changing the parent process environment.
+pub(crate) fn configure_runtime_environment(command: &mut Command) {
+    command.env(
+        "PATH",
+        runtime_search_path(env::var_os("HOME"), env::var_os("PATH")),
+    );
+}
+
+fn runtime_search_path(
+    home: Option<std::ffi::OsString>,
+    inherited: Option<std::ffi::OsString>,
+) -> std::ffi::OsString {
+    let mut paths = Vec::new();
+    if let Some(home) = home {
+        paths.push(PathBuf::from(home).join(".local/bin"));
+    }
+    if cfg!(target_os = "macos") {
+        paths.extend([
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/usr/local/bin"),
+        ]);
+    }
+    for path in inherited
+        .as_deref()
+        .map(env::split_paths)
+        .into_iter()
+        .flatten()
+    {
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    env::join_paths(paths).unwrap_or_else(|_| inherited.unwrap_or_default())
 }
 
 fn resolve_executable_path(executable: &str, search_path: Option<&OsStr>) -> Option<PathBuf> {
@@ -508,7 +634,7 @@ fn runtime_identity_from_manifest(manifest: &serde_json::Value) -> Option<serde_
     }))
 }
 
-fn runtime_identity_for_executable(executable: &str) -> Option<serde_json::Value> {
+pub(crate) fn runtime_identity_for_executable(executable: &str) -> Option<serde_json::Value> {
     runtime_identity_for_executable_with_path(executable, env::var_os("PATH").as_deref())
 }
 
@@ -546,15 +672,17 @@ fn probe_on_port(
         port
     );
     if stream.write_all(request.as_bytes()).is_err() {
-        return Probe::Foreign;
+        return Probe::Unresponsive;
     }
     let mut response = String::new();
     if stream
         .take(MAX_PROBE_RESPONSE_BYTES + 1)
         .read_to_string(&mut response)
         .is_err()
-        || response.len() as u64 > MAX_PROBE_RESPONSE_BYTES
     {
+        return Probe::Unresponsive;
+    }
+    if response.len() as u64 > MAX_PROBE_RESPONSE_BYTES {
         return Probe::Foreign;
     }
     classify_response(kind, &response, expected_runtime_identity)

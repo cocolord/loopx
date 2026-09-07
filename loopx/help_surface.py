@@ -91,6 +91,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "command": "loopx evidence-log --goal-id <goal-id> --agent-id <agent-id> --thin",
                 "purpose": "Read the current agent's thin public-safe ledger before replan or handoff.",
             },
+            {
+                "command": "loopx machine-config --help",
+                "purpose": "Inspect typed machine policy, preview changes, and apply an exact plan revision.",
+            },
             {"command": "loopx todo --help", "purpose": "Show todo lifecycle commands."},
             {
                 "command": "loopx task-lease --help",
@@ -166,7 +170,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
             },
             {
                 "command": "loopx resolve-agent-thread",
-                "purpose": "Read one exact host thread binding across the current project without mutating authority.",
+                "purpose": (
+                    "Read one exact host thread binding from an opaque id or copied "
+                    "Codex task deep link without mutating authority."
+                ),
             },
             {
                 "command": "loopx unbind-agent-thread",
@@ -288,6 +295,7 @@ COMMAND_GROUPS: list[dict[str, object]] = [
 MANPAGE_COMMAND_HELP_ONLY = frozenset(
     {
         "archive-runtime",
+        "authority-shadow",
         "backup-state",
         "capability",
         "chat-endpoint",
@@ -316,6 +324,8 @@ MANPAGE_COMMAND_HELP_ONLY = frozenset(
         "global-summary",
         "global-todos",
         "goal-alignment",
+        "amendment-proposal",
+        "goal-amendment-proposal",
         "handoff-mode",
         "heartbeat-prequota",
         "import-doc-registry-authority",
@@ -328,6 +338,7 @@ MANPAGE_COMMAND_HELP_ONLY = frozenset(
         "promotion-gate",
         "read-only-map",
         "refresh-state",
+        "reliability-diagnostics",
         "register-authority-source",
         "registry-boundary",
         "reward",
@@ -392,12 +403,10 @@ def render_concise_help(program: str = "loopx") -> str:
     program = _program_name(program)
     return "\n".join(
         [
-            "LoopX keeps long-running agent work moving by preserving goals, todos, gates, quota,",
-            "and evidence between agent turns.",
+            "LoopX keeps long-running agent work moving with durable state and evidence.",
             "",
             "Usage:",
             f"  {program} [global options] <command> [command options]",
-            f"  {program} <command> --help",
             "",
             "Start here:",
             "  /loopx                         Ask the agent to inspect LoopX state.",
@@ -433,7 +442,6 @@ def render_concise_help(program: str = "loopx") -> str:
             "  loopx commands                 Show grouped command reference.",
             "  loopx <command> --help         Show flags for one command.",
             "  man loopx                      Open the installed manual page.",
-            "",
         ]
     )
 

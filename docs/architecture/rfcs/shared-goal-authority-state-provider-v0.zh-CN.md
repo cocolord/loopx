@@ -3,7 +3,7 @@
 - 状态：Draft，正在接受 maintainer review
 - 最初提案方：NoKV Lab
 - 扩展修订方：LoopX maintainer
-- 日期：2026-08-05；修订于 2026-09-02
+- 日期：2026-08-05；修订于 2026-09-05
 - 范围：一个 provider-neutral 的 LoopX 权威合同，支持内置 file、可选 NoKV
   与可选 PostgreSQL provider profile，用来补充
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
@@ -13,11 +13,44 @@
   验证只接受这份 SDK 合同与本 checkout 的 helper；它仍是候选证据，不是合并门槛
   或 authority promotion
 - PostgreSQL 基线：TypeScript Stage 2B candidate 已实现 store contract、
-  transaction-local tenant context 与 forced row-level security，且已通过真实
-  PostgreSQL 16 transaction matrix；shared authority service、runtime caller、
-  principal authentication/tenant authorization 与 authority promotion 均尚未交付
+  transaction-local tenant context、forced row-level security 与有界 canonical
+  commit admission，且已通过真实 PostgreSQL 16 transaction matrix；shared
+  authority service、runtime caller、principal authentication/tenant authorization、
+  实测 capacity/retention profile 与 authority promotion 均尚未交付
 - 语言说明：[英文版](./shared-goal-authority-state-provider-v0.md)与本中文版互为
   语义镜像；两者不一致属于缺陷
+
+## 当前实现检查点
+
+machine-owned coordination 投影现已有一份由 Python 与 TypeScript 共享的、随包
+发布且 provider-neutral 的 record contract。file、NoKV 与 PostgreSQL 候选读取同一
+份 canonical Todo read shape；provider-bound 投影遇到未知字段会拒绝，而不是静默
+丢失。删除已声明字段必须提供显式兼容性证据并获得 maintainer 批准，即便该字段已经
+存储但尚未进入决策读取路径。
+
+新增原生 domain 选项将 Markdown 位置 metadata 分离，但保留归档语义。附录 C 的
+Todo domain/projection 决策记录兼容边界与下一步 file-first 资格化计划；现有 v0
+capture 与已持久化 head 不会被静默迁移。
+
+这不晋升任何 provider，也不会把整份 active-state Markdown 变成生成文件。默认本地
+模式下 Markdown 仍是 canonical；未来显式晋升 shared authority 后，也只有 typed
+contract 覆盖的 section 才成为确定性的兼容投影，自由的人类叙事仍在 coordination
+head 之外。
+
+## 文档地图与维护约定
+
+本文将稳定决策与交付证据分开维护：
+
+- 第 0-10 节定义问题、authority contract、provider 边界、迁移规则与验收条件。
+- 第 11.1 节是规范性交付计划；第 11.2 节是非规范性的执行台账，只记录某个日期的
+  `main` 已证明什么，不以进展记录静默修改合同；第 11.3 节列出剩余验证与晋升工作。
+- 第 12 节记录尚未解决的 owner 决策。实现不得把“拟议答案”当作已经批准。
+- 附录 A/B 保留证据与决策历史；附录 C 承载第 12 节提出的 Stage 2C 详细合同。实现
+  变化更新台账；架构变化修改规范正文，并显式记录决策。
+
+RFC maturity 与 delivery maturity 相互独立：实验已合入不代表 RFC 已 accepted，带日期
+的状态段也不能覆盖规范性不变量。执行台账过长、影响 review 时，可整体迁移到配套的
+`*-execution.md`，但不得丢失证据链接。
 
 ---
 
@@ -715,6 +748,113 @@ receipt-per-object 替代方案被全面支配：每笔迁移多付一次对象�
 在 owner 接受本修正案（§12 Q5）之前，`retain_all_v0` 继续生效，Stage 3 动词原样
 运行其上。
 
+### 7.2 十天 Goal：本地存储资格化目标（提案）
+
+受支持的 goal 必须能**至少持续十个自然日**，跨进程重启、主机休眠、迟到回执和
+二进制升级继续执行，不依赖人工截断历史或因存储问题重建 goal。十天是最低资格化
+周期，不是 receipt 过期时间或 goal 寿命上限。本修订设定产品目标，不宣称当前任何
+provider 已通过；经评审切换前，已交付规则仍是 `retain_all_v0`。
+
+#### 工作负载与成本模型
+
+只规定时长不足以定义容量。首轮本地资格化采用以下**提议负载**，不是实测用量或承诺：
+
+| Profile | 每个 goal 的负载 | 资格化周期 |
+| --- | --- | --- |
+| 最低连续性 | 三个持续持有 lease 的 Todo，TTL 600 s、每 300 s renew：其他写入之外每天 864 次 renew | 10 天；8,640 次 renew 加生命周期／回执写入 |
+| 本地设计目标 | 八个注册 agent；四个并发 writer 操作不同 Todo，另加同 Todo 竞争；最多 1,000 个活跃 Todo/lease/gate record；每天 10,000 次已提交 transaction，含 renew、receipt 和 capture | 10 天共 100,000 次 commit；另跑 30 天／300,000 次余量验证 |
+| Payload 与积压维度 | live projection 分别为 8 KiB、64 KiB、1 MiB；每次新增 event/receipt payload 至多 4 KiB；读写比 5:1；每秒 10 次 commit、持续 60 s 的突发；projection consumer 落后 24 h | 分别验证各维度及组合本地目标；retry/conflict 与 commit 分开计数 |
+
+每个 fixture 声明活跃／归档记录、序列化大小、命令比例、索引大小和 capture 放大倍数；
+一个模型 Turn 可能产生多次 commit。验证历史增长时固定 live state，之后单独增加
+live state。不能把所有已完成 Todo 或 receipt 的无界列表藏在所谓固定的 live projection。
+
+当前 `FileAuthorityStore` 每笔保留 P 字节 projection，N 笔约产生 P*N 最终历史字节，
+累计文档发布量约 P*N*(N+1)/2，尚未计 head、event、receipt 和 envelope。普通读取还会
+解码、验证完整链。P=15 KiB 时，仅 renew 的例子在第 10 天累计发布约 **534 GiB**，
+第 30 天约 **4.69 TiB**。旧文中的 380 MiB 只算了第 30 天的 N*P，并非保留历次
+projection 后的累计重写。这是 payload 解析估算，不是 SSD 物理写入或实测延迟；
+若每个 projection 自身还包含不断增长的 receipt index，成本可能更高。
+
+#### 本地优先方向与兼容边界
+
+在既有 TypeScript `AuthorityStore` owner 后资格化**嵌入式事务存储，首选候选为
+SQLite**。本地 goal 不应依赖 PostgreSQL 服务。file-v0 保留作 conformance/import
+基线，通用十天 goal 晋升不能依靠其全历史重写。SQLite 是待验证耐久性、依赖／打包、
+Windows/macOS/Linux 和受支持 Node 版本后的设计偏好，不是已交付 provider id 或默认
+切换。分段文件日志作为比较候选；PostgreSQL 继续走独立的共享服务路线。
+
+只替换数据库不够。完整切片必须：
+
+- 原子发布 current state、operation/digest 唯一性、原始 receipt、有序 cursor，以及
+  projection outbox entry。operation lookup 与 cursor 分页走索引；保留 ambiguous
+  commit、CAS、lineage、domain fencing 语义，存储层不决策 Todo policy。
+- live head 不随总历史增长。使用周期性校验 checkpoint 加 committed state delta 或
+  immutable state block；原始 receipt 移出 hot head。replay tail 与 index/root metadata
+  都要有界。head 保存全部封存段 pointer 仍然无界，扫描段链也不等于索引查询。
+- 保留 `scanCommitted` 逻辑合同：它目前每笔返回完整 projection。通过 checkpoint/delta
+  有界分页重建精确版本，或显式升版并迁移每个 consumer；不能静默删除历史 projection。
+  尚未证明现有 event 足以重建，因此 canonical state delta 需要独立等价验证。
+- authority 的 in-head receipt index 与 provider storage 一起显式升版迁移。checkpoint、
+  restart 和后续无关 commit 后，request-digest 冲突检测与原始 receipt 字段仍逐字节等价。
+  cache 不能成为正确性的唯一来源。
+
+这是包含真实 CLI caller 和 consumer readback 的一个本地持久化切片，不是零散 helper
+迁移或第二个语义 kernel。它覆盖 capture outbox、status/quota 所需归档 Todo/history 分页；
+其他存储和原始 artifact 单独计量，不宣称随本切片一起解决。
+
+#### 提议验收预算
+
+在声明配置的本地 SSD 主机上，报告 OS/filesystem、CPU/RAM、Node/database 版本、耐久
+配置、样本数、p50/p95/p99、lock wait、RSS、database/WAL/archive 大小与逻辑写入字节。
+冷 CLI 启动与 warm store service time 分开；不得关闭 fsync/checkpoint 安全性换成绩。
+
+64 KiB live state 下，对比 10,000 与 100,000 次历史 commit：
+
+- warm head load 和索引原始 receipt read 的 p95 <= 50 ms；durable commit p95 <= 100 ms。
+  固定 live state 与负载时，历史增长的 p95 比值 <= 2。
+- warm scan 100 笔 p95 <= 250 ms；cold open 加首次权威读取 <= 2 s；有界 crash recovery
+  <= 30 s。全量 archive integrity audit 可线性增长，但普通启动不能依赖它。
+- 相对匹配的 10,000 次基线，完整 CLI mutation 的存储成本增量 p95 <= 200 ms。
+  同时报告完整 status/quota 延迟；不得将历史扫描藏进 compatibility consumer，也不能
+  用进程启动摊销掩盖成本。
+- 固定 live state/delta 大小时，累计逻辑写入、保留字节、恢复工作须有明确上界。
+  从 10,000 到 100,000 笔累计写入增长 <= 15 倍，不能呈平方重写的约 100 倍；纳入
+  checkpoint、index、WAL、compaction 计量。稳定态 RSS 不得随历史交易数增长。
+  1 MiB 与 300,000 次余量维度单独报告；失败应缩小支持范围，不能藏在平均值里。
+
+以上是提议工程预算，不是当前实测。在启用前依据首轮匹配基线评审，不得放松正确性、
+静默改变负载或宣称未资格化的连续运行周期。
+
+#### 保留、恢复与交付门禁
+
+十天执行不授权第十一天删历史。初始策略在 goal 全生命周期保留 operation identity、
+digest 和原始 receipt，至少覆盖第 10／30 天重放第 1 天操作。只有保留的 checkpoint/log/
+index 能重建全部承诺历史时，物理 compaction 才能删除冗余编码。cold archive 必须可寻址
+且可验证；证明不可用时 fail closed，不能当作新操作。后续 expiry 必须有版本化 retention
+合同及窗口外响应；TTL 或 tombstone 都不能授权重复 effect。
+
+checkpoint/segment 发布需支持崩溃恢复并耐久切换 manifest/root。仅在替代数据耐久且每个
+注册 consumer 的持久 cursor 已推进或显式选择 full-resync 后回收旧字节；保护落后的
+projection outbox、export 和 backup。设置 byte/lag 准入预算，在磁盘耗尽前暴露 maintenance/
+backpressure，并为恢复预留空间；ENOSPC 或提交中断不能抹除证明或算作成功写入。
+总审计存储可以随有用历史线性增长；有界的是热路径和维护批次。
+
+主机休眠或重启不能保留已过期 lease；恢复时必须重读 authority，并经正常 epoch fence
+重新获取权限。连续性是同一个耐久 goal 安全恢复，不是进程或 lease 永远存活。
+
+资格化有两个独立出口：加速的 100,000/300,000 次测试证明容量，真实 **>=10 天**合成
+Goal soak 证明自然时间连续性。覆盖第 1 天历史 retry、同 id 同／异 digest、并发 CAS、
+每日 reopen、休眠、lease expiry、24 h consumer lag、append/checkpoint/index 发布前后
+crash、disk-full、backup/restore lineage，以及一次受支持 upgrade/rollback。与独立参考
+对比 final state、receipt、cursor scan；不接受丢失已确认 commit 或重复 effect。只用
+一次性 goal，不碰活跃用户状态。压缩时钟不证明自然时间耐久性；发布本 RFC 不启动 soak
+或 monitor。
+
+代码 PR 可在 soak 证据待补时合入，但 promotion 继续 hold。两个出口、显式 import/
+fencing/export 演练与 maintainer review 都通过才可晋升。发布紧凑可复现证据，不发布
+原始私有日志。
+
 ## 8. 默认本地模式不变，共享模式必须显式迁移
 
 ### 默认本地模式
@@ -812,6 +952,8 @@ gate/dependency ref、claim/lease field 与按 privacy class 标注的 opaque po
 
 ## 11. 分阶段交付
 
+### 11.1 规范性交付计划
+
 交付计划由一条共享基础线和两条 provider-specific 线组成。下列 workstream 是职责
 边界，不是额外的 authority grant：
 
@@ -849,13 +991,15 @@ Stage 3/4 qualification 必须保持以下 ownership 与 proof 边界：
 3. **Stage 2A/2B——并行实现 provider。** NoKV owner 验证 NoKV adapter 与存储
    包络；PostgreSQL owner 实现通用 service/provider。两者复用同一套 LoopX
    transition 与 receipt 语义。
-4. **Stage 2C——晋升本地 canonical file aggregate。** 先在不读取其决策结果的前提下，
-   把现有 Markdown/task-lease writer shadow 到 `FileAuthorityStore`；验证 parity、
-   crash recovery、migration 与一键 rollback。随后通过一个单独评审的 promotion，
-   让 file aggregate 成为本地 coordination authority，并 fence legacy writer；
-   只有晋升后 Markdown 与 task-lease 文件才退为 projection。仅证明 projection
-   结构或 head digest 相等仍然不够；promotion 还必须在精确的 qualified revision
-   上证明 provider 完整复现 Todo 消费方可见语义。
+4. **Stage 2C——资格化并晋升第一个 canonical profile。** 先在不读取其决策结果的
+   前提下，把现有 Markdown/task-lease writer shadow 到 `FileAuthorityStore`；验证
+   parity、crash recovery、migration 与一键 rollback。随后通过单独评审的 promotion，
+   让该 profile 成为本地 coordination authority，并 fence legacy writer；只有晋升后
+   Markdown 与 task-lease 文件才退为 projection。state machine、完整 field manifest、
+   receipt 与 acceptance row 保持 provider-neutral，使 NoKV 与 PostgreSQL 可以复用
+   同一条 qualification 路线。仅证明 projection 结构或 head digest 相等仍然不够；
+   promotion 还必须在精确 qualified revision 上证明完整的 consumer-visible Todo 与
+   lease 语义。
 5. **Stage 3——远端单向 shadow parity。** 晋升后的本地 `FileAuthorityStore` 仍是
    唯一 authority；将已提交观察投影到 NoKV 或 PostgreSQL 候选。Provider parity
    只对比 Todo/claim、lease fence、
@@ -870,6 +1014,22 @@ Stage 3/4 qualification 必须保持以下 ownership 与 proof 边界：
 7. **Stage 5——切换唯一 authority source。** 只有经过评审的晋升，才能让 shared
    LoopX service 成为唯一 writer。本地 `.loopx` 退为 cache、offline projection 与
    诊断材料。绝不长期维持 dual-write 或 dual-master。
+
+### 11.2 当前实现与证据台账（非规范性）
+
+下面带日期的条目保留已交付边界、实验与评审结论。它们是分阶段计划的证据，不是
+额外规范。后来的条目只有在点明相关合同、精确实现边界与验证证据时，才可取代更早的
+状态判断。
+
+| 台账条目 | 记录内容 |
+| --- | --- |
+| Stage 2C observation foundation | 默认关闭的提交后 capture 及其 crash window |
+| 实施前置 / Stage 1 Part 2 | provider-neutral decision 抽取与剩余 Python/TypeScript ownership 边界 |
+| Stage 2B PostgreSQL candidate | PostgreSQL store/RLS conformance，不代表 runtime promotion |
+| Stage 2C runtime shadow | parity、read-candidate、bootstrap、rollback、cutover kernel 与 writer fence |
+| Stage 2 slice | reference aggregate/provider 实现与初步 NoKV 证据 |
+| Stage 3 slice | 可恢复 lifecycle、retention 结论与 live provider 限制 |
+| Stage-ladder evidence | 可执行 stage claim、环境 gate 与 pending row |
 
 #### Stage 2C 观察基础：本地提交后 capture
 
@@ -901,7 +1061,7 @@ provider，也没有完成 Stage 2C 后半段的本地 canonical promotion。若
 seed 会刷新完整当前投影，但这里不宣称已有 durable shadow outbox 或与主写 transaction
 关联的 receipt。这套 plumbing 不是 parity evidence，不能单独支持 Stage 2C promotion。
 
-### 实施前置条件：先让本地文件模式经过同一协调合同
+#### 实施前置条件：先让本地文件模式经过同一协调合同
 
 在接入 live NoKV 或其他远端 provider 之前，runtime 应先把当前 todo/lease 写路径中的
 领域判断抽成 provider-neutral coordination core，并让一个 file-backed provider 通过
@@ -980,6 +1140,21 @@ conformance suite，覆盖 projection-plus-receipt 原子提交、CAS contention
 replay、operation fencing、有序 cursor scan、返回值隔离，以及 malformed JSON 在写前
 被拒绝。
 
+已晋升的 `hard_lease` authority 也通过既有 Todo claim caller contract 提供一条可选的
+ownership transaction。Caller 传入 task-lease idempotency key 和可选 expected version
+后，TypeScript owner 从 canonical head 读取 Todo 及其 required write scopes，复用 typed
+lease-acquire decision，并在一次 provider CAS 中共同提交 lease、claim 与 receipt。省略
+这些字段会保持既有 claim 行为；未晋升 Goal 则拒绝 atomic-only 参数，不尝试 legacy 写入。
+File、NoKV 与真实 PostgreSQL conformance 都覆盖了竞争 owner：只能有一个完整的
+claim-plus-lease tuple 获胜，失败方不会得到 receipt，获胜方按精确 operation identity
+重放。这是既有合同的一次内聚晋升，不是第二套 `claim_work` 抽象。
+
+PostgreSQL adapter 还会在打开连接之前执行一项 provider-local 资源门禁：canonical commit
+envelope 超过配置的 `max_commit_bytes` 时，写入以 typed
+`store_capacity_exhausted` 被拒绝。默认值为 16 MiB，部署可以调低。它只是单笔原子操作的
+准入上限，不是实测 throughput 证据，也不是 retention/partitioning 设计；这些晋升 hold
+仍然开放。
+
 真实 PostgreSQL qualification 从这里开始，而不是等到 shadow 或 canary。一个真实
 PostgreSQL 16 实例已通过共享 conformance matrix、同一 head 的并发 CAS、不同 tenant
 复用相同 goal 与 operation id、transaction rollback 后不暴露 head 或 receipt、已提交
@@ -993,10 +1168,11 @@ row，跨 context 写入失败，runtime role 也不能修改行政 metadata。F
 保持不变，Agent 也不能获得注入的 pool。Service trust boundary 内的数据库
 runtime-role/RLS 行为现已实现并完成资格化。Service API authentication、
 principal-to-tenant authorization、production runtime caller、restore
-incarnation rotation、pool exhaustion/cancellation/failover、单向 shadow parity、TEST
-ONLY canary 与 authority-source promotion 仍是显式 hold。下一个 PostgreSQL 切片必须
-资格化 authenticated service/deployment 与 failure boundary，不能把 database RLS 当成
-仍缺失的 API authorization layer。
+incarnation rotation、pool exhaustion/cancellation/failover、retention/partitioning/实测
+capacity、单向 shadow parity、TEST ONLY canary 与 authority-source promotion 仍是显式
+hold。下一个 PostgreSQL 切片必须资格化 authenticated service/deployment 与 failure
+boundary，不能把 database RLS 或单笔 commit 准入上限当成仍缺失的 service 与 capacity
+层。
 
 File-backed provider 合同与 executor 属于 Stage 2；其第一个切片已通过 #3529
 合入 `main`，证据记录在下方的 Stage 2 状态小节。该切片证明 aggregate 与 provider
@@ -1336,7 +1512,9 @@ Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1`
 度量）以 pending 行声明，而非宣称已完成。本小节记录的是上述阶段的可执行证据；
 它不晋升任何 provider，也不完成 Stage 2C promotion。
 
-### P0：合同与 deterministic proof
+### 11.3 剩余验证与晋升计划
+
+#### P0：合同与 deterministic proof
 
 - 本 ownership matrix 与显式 shared-mode boundary；
 - 确定性的 `loopx_command_v0` normalization 与 request digest；
@@ -1347,7 +1525,7 @@ Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1`
 - 在所声明证据边界内的 A/B/A、identity mismatch、crash window、eligibility、
   privacy 与 no-GC 检查。
 
-### 后续 runtime promotion 与需 review 的切片
+#### 后续 runtime promotion 与需 review 的切片
 
 - §6.2 所述由 LoopX 持有的 TypeScript transaction/store boundary 与 file-provider
   conformance；
@@ -1364,6 +1542,23 @@ Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1`
 - distributed quota reservation/accounting；
 - provider promotion、authentication、service recovery、HA 与 multi-tenancy；
 - `retain_all_v0` 之后的 receipt retention 或 segmentation。
+
+#### TypeScript 优先的减负顺序
+
+如果一项前置 TypeScript 工作能消除下一阶段 shared authority 在 provider 压力下还要
+迁移的重复权威，就应优先做，但顺序必须保持收敛：
+
+1. 先刻画 Python 路径对 caller 可观察的行为与非法 transition；
+2. 每次只把一个已交付的 ownership transaction 移入既有 TypeScript boundary，先做
+   atomic claim-plus-lease，再做 completion-plus-successor，最后收敛剩余 lease
+   lifecycle decision；
+3. 改变 provider selection 之前，让该精确 transaction 同时通过 file、NoKV 与真实隔离
+   PostgreSQL server 的 qualification；
+4. 最后才推进 binding、migration、canary 与 production promotion。
+
+这不是 broad framework rewrite 的许可。只有下一阶段 RFC 会直接消费、能够移除重复
+decision authority，并且 caller-visible parity 与 rollback 能在同一有界切片内完成 review
+的前置重构，才进入这条顺序。
 
 ## 12. 还需要 Owner 决定什么
 
@@ -1394,6 +1589,71 @@ Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1`
    布，记录 provider 种类、store identity 或 lineage，以及显式的 TEST ONLY canary
    标记；没有该标记的 Goal 不得被 shared-authority guard 准入，runtime 从该记录而
    非 argv 解析 provider。*
+8. promotion 提交哪种 head 形状，aggregate 拥有哪些字段？`main` 已将
+   `loopx_todo_canonical_read_record_v0` 定义为带版本的完整 Todo read-record manifest，
+   TypeScript projection 也会拒绝通过 upsert omission 丢掉既有字段。*拟议答案：晋升
+   head 保存完整、规范化的 Todo 与 lease record，并打平到 provider 无关的 readback
+   形状。任何已合法进入 canonical record 的字段都继续保留，包括 `updated_at`，以及
+   routing、capability、decision、dependency、resume、monitor、completion、
+   note/evidence 与 archival 字段。遗漏字段不等于删除；mutation 必须按 schema 规则
+   显式 clear。新字段必须先进入带版本 manifest，未进入则 qualification/promotion
+   fail closed。“完整”不等于复制 raw Markdown、host-local path、credential、整个
+   registry，或其他 ledger 持有的数据。*
+
+   *后续任何字段删减都是受治理的 schema change，即使该字段已经存储但暂未发现 runtime
+   reader。对应 PR 必须提供字段 inventory、producer/reader/writer 与静态引用调研、
+   历史和外部兼容性结论、migration/rollback，以及行为等价证明；maintainer 必须在 RFC
+   decision log 或 PR review 中对点名字段显式批准。没有发现 consumer 不等于批准删除。*
+9. v0 promotion 是否只覆盖 `hard_lease` goal？*拟议答案：是。`legacy` 或
+   `soft_claim` goal 先按附录 B 的静止规则切换模式；promotion 从不隐式改变模式。*
+10. provider-first read flip 后，Markdown 与 lease 文件成为投影，kernel 禁止回退。
+    哪些数据进入 head，兼容视图如何渲染？*拟议答案：canonical Todo/lease manifest
+    中的每个字段都持久化在 head，包括 monitor、dependency、resume、decision、
+    completion、text、note、evidence reference，以及 manifest 已准入的 feedback 字段。
+    事务绑定的 projection outbox 只负责渲染 Markdown 与 lease-file 兼容视图，不是
+    遗漏 authority 字段的第二持久化路径。reader 用 projection watermark 对比 head
+    revision，落后则回放
+    outbox。渲染延迟可以让视图暂时陈旧，但不得改变决策。*
+11. 什么声明一个 goal 已晋升，谁可以写这条声明？已合并的 TypeScript-owned file
+    fence 是第一个本地实现，绑定 fence id、源版本与已资格化的 shadow revision；当前
+    Todo 与 task-lease writer 在各自 mutation lock 内检查它。*拟议答案：定义一份
+    provider-neutral authority binding，包含 provider profile、store identity 与
+    lineage、schema manifest、`promoted_at`、promotion operation id、源 digest 和可选
+    `rolled_back_from`。只有 promotion orchestrator 与 rollback operation 可以修改。
+    file profile 用持久本地 fence 和 registry discovery copy 实现；NoKV 与 PostgreSQL
+    必须在各自通过资格验证的 store contract 中实现相同的逻辑 fence、CAS/transaction
+    precondition 与 readback receipt。provider-specific path 或 table name 不属于
+    authority protocol。`configure-goal` 拒绝编辑 binding，bootstrap 拒绝已晋升 goal。
+    无法验证 active binding 的端点 fail closed，不得写 legacy projection。*
+12. 哪些 retention、fast-path 与 capacity 规则是 promotion 前置？已保留 transaction
+    能否把 projection 替换为 digest？*拟议答案：file、NoKV、PostgreSQL 共用逻辑合同：
+    在声明的 retention version 下，最新完整 head、ordered cursor、原始 operation
+    receipt、segment 或 row-chain integrity、确定性 scan 与 recovery readback 始终可用。
+    只有在完整 canonical head 仍可读取，且 replay、audit、parity、migration 所需字段
+    全部可重建，并由 conformance matrix 证明等价时，旧 transaction 的重复 projection
+    才可替换为 digest。物理策略按 provider 实现：第 7.2 节优先嵌入式事务本地存储，
+    分段文件作为比较候选；NoKV 使用经过验证的 document/segment 策略；PostgreSQL
+    使用 append row 和经评审的 index/partition。最低十天资格门也由第 7.2 节维护，
+    先前 file-v0 证明不足以满足。每个 profile 都声明实测上限，并以 `store_capacity_exhausted` fail
+    closed；单一 file size 常量不是跨 provider 合同。Host renewal 仍必须是 authority
+    transaction，因为它的频率决定所有 profile 的 retention envelope。*
+13. Python 参考执行器（`executor.py`、`file_provider.py`、`head.py`、
+    `goal_state_shadow.py`）如何处置？*拟议答案：在 kernel 的 mutation 路径接到
+    CLI 之前保持 coverage-only，先把它们的场景电池移植为 TypeScript 测试，再在
+    promotion PR 中删除；两种本地 aggregate 格式不能同时为准。file profile 的
+    `qualification_holds` 翻为 `[]` 与 `stage` 字面量的改变只在该 PR 内发生。*
+14. `main` 上现在有两条针对同一批写者的默认关闭 shadow lineage：#3818 的观察捕获
+    （`coordination.authority_shadow`，`authority-shadow/file/<goal>`，投影 v0）与
+    runtime shadow（`coordination.runtime_shadow`，`authority-shadow/file-v0`，
+    投影 v0，带 `inspect`、`qualify`、`bootstrap`、`rollback`、`read-candidate`）。
+    两者都在主写提交之后重新采样源，因此都带着 #3818 评审点名的并发写者混入与
+    commit 到 dispatch 之间的丢失窗口。哪条是 Stage 2C 的 lineage，什么来关闭这两
+    个窗口？*拟议答案：runtime shadow 是 lineage，因为 parity 报告、bootstrap、隔离
+    式 rollback、读形状与 promotion kernel 已经绑定在它上面。parity 半段的事务绑
+    定 outbox（写者在自己已持有的锁内写 prepared entry，主写返回后写 committed
+    标记，有界 drain 以 `operation_id = entry id` 提交）成为喂给
+    `coordination.runtime_shadow.commit` 的持久捕获；该捕获接线后 #3818 的观察路径
+    退役。RFC 不得保留两种 shadow 记录格式。*
 
 ---
 
@@ -1506,3 +1766,187 @@ shadow 读取决策，上述 migration、rollback、parity、read flip 与 legac
 characterization 阶段的负向用例在原清单上补充：软认领盖掉活租约、完成栅栏在
 矛盾态失效、授权检查先于租约栅栏、尚未设防的认领变更入口、租约获取读取投影
 与状态文件锁之间的窗口。
+
+
+## 附录 C：Stage 2C promotion 设计（提案，2026-09-04）
+
+本附录将第 12 节问题 8 到 14 收敛为 provider-neutral promotion contract，并分开逻辑
+authority 语义与各 provider 的物理 retention 策略。本文档不实现以下内容；未关闭的门禁
+仍是任何真实 promotion 的前置。
+
+### 决策摘要
+
+1. Stage 2C 晋升的是一份 canonical coordination head，不是某种文件格式。file、NoKV、
+   PostgreSQL 实现同一套 `AuthorityStore` 语义。
+2. Canonical Todo 与 lease state 默认完整。不得按“当前已知 consumer 使用的字段”缩减。
+3. 后续任何字段删除都需要字段级兼容性调研、migration/rollback 证据与 maintainer
+   显式批准。
+4. read flip 后 Markdown 与 lease 文件是渲染投影，绝不补充缺失的 decision state。
+5. retention 的逻辑合同一致，物理实现按 provider 区分；分段或规范化历史不得改变
+   head/readback 语义。
+
+### `main` 已交付（2026-09-03）
+
+- 默认关闭的 runtime shadow：每次已提交的 Todo 或 task-lease mutation 对应一笔
+  `AuthorityStore` 事务，以该 mutation 的 rollout event id 与 `updated_at` 为键，带
+  receipt 重放、内容漂移拒绝、ambiguous commit 调和与回读。
+- `loopx coordination-shadow inspect | qualify | read-candidate | bootstrap |
+  rollback`：带双 digest 的单点 parity（`missing | matched | drifted`）、基于覆盖
+  的持续 parity 报告、provider-first 读形状（仍 `decision_read_from_shadow=false`）、
+  从 legacy 投影引导空 shadow、以及按 revision 围栏的晋升前 lineage 隔离式 rollback。
+- cutover kernel：从 mutation 到投影、事件与 receipt 的纯 reducer；要求 shadow 在
+  一个精确 revision 与 digest 上已资格化、并带独立持久化且绑定该 revision 的 legacy
+  writer fence 的 `coordination.local_authority.promote`；永不回退到 Markdown 的
+  provider-first `mutate` 与 `todo_read`。
+- fence 集成：每个 Python Todo mutation 与每个 native task-lease
+  acquire/renew/transfer/release 都在自己的锁内检查持久 fence；fence 不存在时零运行时
+  调用；fence 存在但不可读或无效时 fail closed。
+- 完整 Todo read model：`loopx_todo_canonical_read_record_v0` 发布带版本字段 manifest；
+  TypeScript projection 拒绝 replacement 丢弃既有记录中已经存在的字段。
+
+### 规范性 promotion contract
+
+promotion state machine 与 provider kind 无关：
+
+1. 从经过评审的 goal-level authority binding 解析已资格化的 `AuthorityStore` profile
+   与精确 store lineage。
+2. 在 legacy Todo 与 lease lock 内，验证同一个 source revision、projection digest、
+   field-manifest version 与 provider cursor 上的持续 parity。
+3. engage 该 provider profile 的持久 writer fence，再以 compare-and-set 或 transaction
+   precondition 提交完整 canonical head 与 promotion receipt。file marker、NoKV document
+   identity、PostgreSQL row/table layout 都只是实现细节。
+4. 允许 provider-first 决策前，回读 binding、head、receipt、cursor、manifest 与 digest；
+   任一不一致都 fail closed。
+5. 通过 transaction-bound outbox 渲染兼容投影。陈旧投影从 head 修复，绝不用于填补
+   canonical field。
+
+canonical head 保留 normalized Todo 与 lease record 中每个已经合法存在的字段；field
+manifest 属于 qualification 与 parity 合同。upsert 要么提交完整 replacement，要么使用
+clear operation 显式的 typed patch。未知新增字段在 manifest 升版前 fail closed。删除
+提案必须逐字段枚举 producer、reader、writer、persisted fixture、静态引用、历史版本与
+已知外部 consumer；写清 migration、downgrade、rollback 与 semantic-equivalence 论证；
+并获得 maintainer 显式批准。code search 没有发现当前 reader，不构成删除理由。
+
+完整性边界不包含 raw Markdown formatting、credential、host-local path、整个 registry、
+raw evidence body，也不包含 quota、run history、settlement、inbox、scheduler 或其他
+ledger 拥有的 state；这里只保存受各自合同治理的 reference。
+
+共同 retention contract 保留最新完整 head、ordered cursor、原始 operation receipt、
+integrity chain、确定性 scan 与 recovery readback。物理 profile 可以不同：
+
+- **file：**create-only sealed history segment 加有界 head document；
+- **NoKV：**经过资格验证、绑定 lineage 的 document/segment conditional publication
+  与 recovery readback；
+- **PostgreSQL：**事务追加的 history/receipt row 加 current head，并配套经过评审的
+  index、partition、RLS 与 tenant context。
+
+所有 profile 暴露相同逻辑结果与 field manifest。每个 profile 发布实测容量限制，并在
+无法保持合同的写入发生前返回 typed `store_capacity_exhausted`。
+
+### 晋升前仍缺
+
+- provider-first CLI 路由与持锁的 promotion orchestrator（kernel 自己声明的下一切
+  片）：取 Todo 与 lease 两把 legacy 锁，要求 `qualify` 在当前 revision 与 digest 上
+  为 `qualified`，engage fence，执行 `promote`，渲染投影，写入问题 11 的声明；源
+  digest 已变时拒绝重跑，除非显式丢弃被放弃的 store。
+- 完成事务捕获资格验证（问题 14）：Todo add、update、complete、supersede、archive，
+  以及 native lease acquire、renew、transfer、release、auto-acquire、fence-close，现已在
+  主写前后生成 prepared/committed outbox entry。有界 drain 把完整、带版本的 record
+  提交到既有 `coordination.runtime_shadow` file-v0 lineage，不再创建第二套 local-shadow
+  candidate。晋升前仍需补持续 mixed-writer parity、event-only Todo 覆盖和所选 provider
+  profile 的 recovery/capacity 证据。
+- 补齐兼容投影 outbox 与 file、NoKV、PostgreSQL 的 conformance row。首个
+  provider-first 切片已把 committed authority journal 复用为 native Todo create、
+  claim 和窄 update 的持久 intent，再以幂等 replay 把 native active/archive record
+  渲染到机器所有的 Markdown region。其余 native Todo mutation、lease-file 投影、
+  backlog/status 回读和 provider-neutral authority binding 仍需落实同一合同。三个
+  provider 不必同时晋升，但每个 profile 都必须先通过该合同才具备资格。
+- 首个晋升 profile 的 retention、fast path 与实测 capacity；参考执行器的删除与
+  status flip（问题 13）。
+- 晋升后的 rollback：已交付的 rollback 隔离的是晋升前 lineage。首次权威写
+  （`authority_revision > 0`）之后的返回路径是问题 3 要求的经评审的 fenced export：
+  静止、空 projection outbox、把 head 导出到 Markdown 协调字段与 lease 终态记录、
+  `equal` 校验、去水印与 fence、退役 lineage；永不自动，永不在活跃 lease 期间。
+
+### 增长是晋升前置
+
+最低支持周期是十个自然日。负载、修正后的全历史成本模型、本地存储方向和资格化预算
+统一由[第 7.2 节](#72-十天-goal本地存储资格化目标提案)维护。file-v0 仍是有界
+conformance/bootstrap profile；bootstrap 成功或短时微实验都不证明长程容量。本地首次
+晋升必须具备已资格化的历史有界热路径和自然时间 soak，不等待 PostgreSQL service 就绪。
+
+### Todo domain / projection 决策（2026-09-05）
+
+长期分层依据字段语义，而不是它最早从哪里解析。`TodoDomainRecord` 持有 identity、
+role、status、text、task semantics，以及 **`archive_state: active | archive`**。
+归档独立于完成：handoff gate 与 succession-tracked completion 检查会排除已归档
+记录。`deferred` 是 status，不是 archive state。renderer 不得通过移动标题来制造
+或改变这一决策。
+
+`TodoProjectionMetadata` 持有 `source_section` 和可选 `index`；Markdown adapter
+渲染原生记录时生成这些字段。导入的 section 名称可保留为 compatibility provenance，
+但不得成为 provider-origin creation 的必填输入。一个重要约束是：旧 `index` 还在
+consumer pipeline 中作为相同 priority 的排序依据。迁移必须通过显式 domain 排序
+规则或已资格化的 compatibility provenance 保持顺序；删除它并静默改为 identity
+排序不算 parity。全新原生 collection 先按 Todo id 确定顺序，再走既有 priority
+projection；展示 index 由 adapter 分配。
+
+当前实现检查点新增独立的 `loopx_todo_domain_read_record_v0` manifest 与
+`todo_domain_record_v0` item。现有 reducer、file-store mutation path 和 collection
+reader 可以验证不含 Markdown 字段的该形状。测试覆盖原生插入、归档、exact replay、
+reopen，以及拒绝 renderer metadata 和不完整 replacement。这证明 storage/read
+边界，不等于已经完成有授权检查的 CLI creation 或完整 lifecycle transaction。
+
+兼容性是显式的：`loopx_todo_canonical_read_record_v0` 及其 `todo_item_v0` 记录保持
+不变。已有 head、receipt、field manifest 与默认 Markdown capture 保留全部合法
+v0 字段。read、mutation 和 startup 不隐式转换。同一 manifest 混入 native/legacy
+记录会 fail closed。原生 head 降级到旧 binary 时因未知 manifest 而 fail closed；
+rollback 必须经过下述已评审 export，不能只安装旧 binary。schema upgrade 不得重写
+历史 operation receipt。
+
+本次分层的字段 inventory：`active_state_todo_parser.py` 产生 section/index metadata，
+并将 section membership 映射成 archival state；`todo_summary.py`、`handoff_gate.py`
+及 resume/continuation projection 消费 archival state；`todos/projection.py` 使用
+index 排序。现有 runtime-shadow fixture 和旧 TS insert fixture 保留 v0 provenance。
+原生 contract 是新增选项，不删除已持久化 v0 字段，也不声称未知 external consumer
+已经迁移。后续 v0 import 必须盘点这些 consumer，并在同一 revision 证明
+render/export/rollback 与 selection parity，再改变 binding 或 manifest。问题 8、10
+的完整性要求覆盖 domain fact 与保留的 compatibility provenance，但不要求原生
+caller 伪造 Markdown 地址。
+
+### 下一步交付与并行 provider 工作
+
+kernel 的近期顺序是：（1）真实 provider-first Todo lifecycle caller，并删除被替代
+的 Python decision；（2）显式 v0 import 加持续 consumer/capture/recovery 资格化；
+（3）具备 fenced export 和 cleanup 的已评审 promotion。每个切片必须证明端到端
+transaction，不能只做另一轮 schema identifier 统一。接受 native contract 不等于
+可以绕过任何 promotion hold。
+
+`claim` 的第一个 replacement-first 切片把默认 Markdown writer 与 promotion 后的
+provider transaction 接到同一个 TS decision；Python 默认路径只保留持锁提交和既有
+投影兼容职责。它关闭 claim policy 的双实现，但不把 Markdown 提升为 authority，
+也不替代剩余 create/update/complete/archive 的统一 transaction 与 projection outbox。
+
+随后的 `create` 切片让 promotion 后的 `todo add` 进入原生 provider transaction。
+旧 CLI 表面仍保留，但参数验证之后只跨一次 typed boundary；语义重复判断、actor/owner
+资格、CAS、replay receipt 与 projection outbox mutation 都由 TypeScript 持有。真实
+subprocess CLI 的 preview/apply 测试会先删除 Markdown state file，并证明它不会被重新
+创建。这消除了 promoted goal 上 create 的 Markdown 提交权威，但不宣称
+update/complete/archive 已可用于活跃 goal promote；这些命令要等各自 transaction
+类型进入同一 runtime boundary 前继续被 fence。
+
+file-v0 只用于有界 conformance 与 import 演练。第 7.2 节嵌入式存储切片与 provider-first
+Todo caller 同时推进，在长程本地资格化与晋升前汇合。PostgreSQL service/deployment
+继续并行，不成为本地晋升的依赖；NoKV 独立通过自己的 lineage/recovery 资格门禁。
+shared authority 持有 decision 与 receipt；provider 只持有 durable CAS/transaction，
+不再实现第二份 Todo 状态机。
+
+### 并行交付计划
+
+| Lane | 何时开始 | 范围与退出条件 | 依赖 |
+| --- | --- | --- | --- |
+| L. 长程本地持久化 | 现在，与 Todo caller 同期 | 第 7.2 节：嵌入式候选、有界 live head/receipt index、历史 scan 兼容、crash-safe checkpoint、真实 CLI readback、加速容量与 >=10 天 soak。 | 复用 TS authority owner；本地长程晋升必需，不依赖 P。 |
+| P. PostgreSQL provider plane | 现在，从当前 `main` 开始 | 保持既有 `AuthorityStore` 合同；完成 schema migration/install ownership、authenticated service 与 tenant authorization、restore-incarnation rotation、pool/cancellation/failover 行为，以及经评审的 index、partition、retention 与实测 capacity。真实 PostgreSQL conformance 始终是强制门禁。 | 不依赖 #3870，也不得叠在其分支上。仅完成本 lane 不产生 runtime caller 或 promotion 声明。 |
+| C. Canonical transaction capture | 实现中，基于 #3870 | transaction-bound outbox 已指向唯一 `coordination.runtime_shadow` lineage，并保留完整带版本的 Todo/lease record；继续完成 sustained mixed-writer parity、explicit-clear/omission 与 event-only Todo recovery 证据。 | 可与 P 并行；但 C 与选定 provider profile 都完成后，才能进入 parity 或 promotion 集成。 |
+| I. Binding 与资格集成 | C 与选定 profile 的资格化完成后 | 绑定一个精确 provider lineage、field manifest、source revision、digest 与 cursor；资格化显式 v0 import、排序/归档/consumer parity 与 recovery/capacity；缺字段时不得查询 legacy state 补齐。 | 长程本地集成需要 L，不等待 P；PostgreSQL 仅在自己的 P hold 全通过后汇合。 |
+| F. Promotion 与清理 | I 完成且 maintainer 显式批准后 | 完成 provider-first CLI routing、持锁 promotion orchestrator、兼容投影 outbox、晋升后 fenced export/rollback；随后删除重复 reference aggregate，并翻转经评审的 stage/hold 声明。 | 每个 profile 必须通过 C、I 与自身 provider 资格化；长程本地晋升还需 L，PostgreSQL 还需 P。 |

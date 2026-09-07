@@ -9,8 +9,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ..coordination.coordination_state_contract_generated import (
+    LOCAL_AUTHORITY_SHADOW_BINDING_SCHEMA,
+    TASK_LEASE_ACQUIRE_REQUEST_SCHEMA,
+    TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA,
+)
+
 from ...history import load_registry
 from ...paths import resolve_runtime_root
+from ..coordination.runtime_shadow import resolve_coordination_runtime_shadow_config
 from ..goals.active_state_event_projection import (
     state_event_log_candidates as _state_event_log_candidates,
 )
@@ -19,8 +26,8 @@ from ..todos.contract import normalize_todo_id
 from ..todos.handoff_mode import HANDOFF_MODE_LEGACY
 from .local_lease_record import TASK_LEASE_SCHEMA_VERSION, TaskLeaseError
 
-TASK_LEASE_ACQUIRE_NATIVE_SCHEMA_VERSION = "loopx_task_lease_acquire_native_v0"
-TASK_LEASE_LIFECYCLE_NATIVE_SCHEMA_VERSION = "loopx_task_lease_lifecycle_native_v0"
+TASK_LEASE_ACQUIRE_NATIVE_SCHEMA_VERSION = TASK_LEASE_ACQUIRE_REQUEST_SCHEMA
+TASK_LEASE_LIFECYCLE_NATIVE_SCHEMA_VERSION = TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA
 TASK_LEASE_AUTHORITY_SNAPSHOT_ATTEMPTS = 3
 
 
@@ -344,6 +351,16 @@ def _finalize_native_acquire_result(
         result["handoff_mode"] = authority.get("handoff_mode") or HANDOFF_MODE_LEGACY
         result.pop("settlement", None)
     if result.get("ok") is True and result.get("acquired") is True:
+        from ..coordination.runtime_shadow_writer_adapter import (
+            settle_lease_runtime_shadow_capture,
+        )
+
+        result = settle_lease_runtime_shadow_capture(
+            result,
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+        )
         result = _attach_local_authority_shadow(
             result,
             registry_path=registry_path,
@@ -390,6 +407,13 @@ def execute_native_task_lease_acquire(
             "expected_version": expected_version,
             "authority": authority,
         }
+        registry = load_registry(registry_path)
+        goal = _registry_goal(registry, str(goal_id))
+        if resolve_coordination_runtime_shadow_config(goal).enabled:
+            request["runtime_shadow"] = {
+                "schema_version": LOCAL_AUTHORITY_SHADOW_BINDING_SCHEMA,
+                "provider": "file_v0",
+            }
         payload = _require_native_acquire_shape(
             effect_runtime_result("task_lease.acquire.native", request, timeout=15.0)
         )
@@ -630,6 +654,14 @@ def execute_native_task_lease_lifecycle(
             # CLI argument or persisted authority fact.
             "current_time": _now.isoformat() if _now is not None else None,
         }
+        if registry_path is not None:
+            registry = load_registry(registry_path)
+            goal = _registry_goal(registry, str(goal_id))
+            if resolve_coordination_runtime_shadow_config(goal).enabled:
+                request["runtime_shadow"] = {
+                    "schema_version": LOCAL_AUTHORITY_SHADOW_BINDING_SCHEMA,
+                    "provider": "file_v0",
+                }
         compacted_todo = _compact_lifecycle_todo(todo, todo_id=str(todo_id))
         if compacted_todo is not None:
             request["todo"] = compacted_todo
@@ -660,6 +692,17 @@ def execute_native_task_lease_lifecycle(
             result["handoff_mode"] = authority["handoff_mode"]
         if _legacy_provider_projection:
             result.pop("settlement", None)
+        if "coordination_runtime_shadow_capture" in result:
+            from ..coordination.runtime_shadow_writer_adapter import (
+                settle_lease_runtime_shadow_capture,
+            )
+
+            result = settle_lease_runtime_shadow_capture(
+                result,
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=str(goal_id),
+            )
         committed_mutation = (
             normalized_operation == "renew" and result.get("renewed") is True
         ) or (

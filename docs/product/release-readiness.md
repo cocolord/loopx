@@ -17,6 +17,9 @@ loopx workflow-skills --install
 loopx doctor
 ```
 
+Restart the agent host after this first install so the newly delivered
+workflow skills become active.
+
 PyPI owns normal release acquisition and dependency resolution. `loopx update
 apply` uses that same owning environment and then refreshes LoopX host material
 and readbacks; it does not switch channels.
@@ -414,7 +417,7 @@ path, and canary route rather than as a user-facing release baseline.
   Lark delivery are also hardened without making them first-run requirements
   ([#2200](https://github.com/huangruiteng/loopx/pull/2200)). No persisted-state
   migration is required; advanced capabilities remain explicitly activated.
-- `v0.2.7` on 2026-07-17: control-plane convergence and exact-release-evidence
+- `v0.2.7` on 2026-07-18: control-plane convergence and exact-release-evidence
   release at the matching `v0.2.7` tag. Scheduler, quota, and todo decisions
   share one agent/runtime/capability/ACK scope; monitors converge independently
   without resetting one another; blocking user gates use one typed response
@@ -438,7 +441,7 @@ path, and canary route rather than as a user-facing release baseline.
   `v0.2.11` tag. `loopx periodic-report inspect-profile --preset weekly`
   exposes the built-in provider-neutral preset; it creates no schedule, invokes
   no external sink, and grants no external-write authority.
-- `v0.2.12` on 2026-07-23: heartbeat receipt and review-quality release at the
+- `v0.2.12` on 2026-07-24: heartbeat receipt and review-quality release at the
   matching `v0.2.12` tag. One quota receipt is persisted per heartbeat turn,
   monitor/replan routing stays fresh, `loopx pr-review` gains a code-volume and
   simplification lens, and adaptive multi-turn live-worker lifecycle phases
@@ -454,7 +457,7 @@ path, and canary route rather than as a user-facing release baseline.
   provider-neutral decision context, governed material lifecycle workflows,
   managed-project delivery, and Ark Managed Agent host support while ordering
   quota rules and making recoverable Turn stages explicit.
-- `v0.4.0` on 2026-08-01: onboarding and turn-authority release at the matching
+- `v0.4.0` on 2026-08-02: onboarding and turn-authority release at the matching
   `v0.4.0` tag. Goal startup projects capability-owned admission routes,
   replan acknowledgements require canonical agent-visible evidence, the default
   `quota should-run` JSON stays inside a bounded model-facing budget, and the
@@ -464,12 +467,12 @@ path, and canary route rather than as a user-facing release baseline.
   across turns, Goal hosts wake on the earliest material frontier transition,
   grouped Issue Fix PR monitors materialize explicitly, and default-off Agent
   Turn Recall ships with agent/goal/project/Todo/authority scoping.
-- `v0.4.2` on 2026-08-06: host and workflow surface release at the matching
+- `v0.4.2` on 2026-08-07: host and workflow surface release at the matching
   `v0.4.2` tag. Pi and TraeX become first-class host paths, adaptive child
   admission enforces domain/capability/repository/write-scope readiness,
   provider-neutral PR queue observation and PR program workflows ship, and
   Issue Fix pins work to an approved base snapshot.
-- `v0.4.3` on 2026-08-08: effect-interpreter evolution release at the matching
+- `v0.4.3` on 2026-08-09: effect-interpreter evolution release at the matching
   `v0.4.3` tag. A second real `EffectTurn` interpreter consumes turn results,
   data-encoded execution and an ordered effect program shape land, the runtime
   plan is replacement-first, and a unified bilingual Dev Book adds an
@@ -478,7 +481,7 @@ path, and canary route rather than as a user-facing release baseline.
   matching `v0.4.4` tag. Hot control-plane modules are bounded,
   `EffectTurn`/`EffectProgram` are consumed by real runtime paths, and the M6
   RFC is marked Complete with audit evidence.
-- `v0.4.5` on 2026-08-12: security-hardening and control-plane release at the
+- `v0.4.5` on 2026-08-13: security-hardening and control-plane release at the
   matching `v0.4.5` tag. LoopX fixes five privately reported security
   advisories, adds caller-approved completion validation, ships a
   durable-smoke review gate, and continues replan/evidence/settlement
@@ -531,6 +534,14 @@ path, and canary route rather than as a user-facing release baseline.
   advances staged file, PostgreSQL, and NoKV shared-authority providers;
   completes the periodic-report lifecycle; makes the DSH plugin one-step ready; and adds
   public-safe benchmark study projection without granting upload authority.
+- `v1.0.0` on 2026-09-06 20:44 +08:00: the Workspace milestone release at the
+  matching `v1.0.0` tag (merge `d6e8387e`). The desktop companion gains signed
+  in-app updates with a paired runtime and a recovery path for interrupted
+  installs (#3994); Todo claim and update authority finishes its
+  claim-neutral correction through the TypeScript transaction (#4005, with
+  promoted claim retry identity from #3987); multi-agent Goal Channels ship
+  with per-agent connection resolution (#3969); and reward-memory recall
+  guides outbound messages behind a digest-bound review loop (#3968).
 
 When a new public release is promoted, add it here only after the matching tag,
 release note, stable ref, update path, and focused release canary agree.
@@ -666,19 +677,21 @@ python3 -m pytest tests/test_smoke_suite.py \
   --junitxml smoke-suite.xml
 ```
 
-The required Python test workflow keeps `tests/**`, `canary/**`,
-`control_plane/**`, `domain_packs/**`, and `presentation/**` Ruff-clean. It also
-enforces an initial 19.6% package coverage floor.
-The floor is intentionally a regression guard, not a claim that 19.6% is
-sufficient; raise it as durable behavior moves from subprocess smokes into
-focused tests. An architecture test also prevents new control-plane dependencies
-on presentation, CLI, capability, or benchmark-adapter layers while preserving
-one explicit quota-Markdown migration debt edge. Existing source-wide lint debt
-is characterized separately. Strict mypy checking covers twelve characterized
-kernel and runtime contracts and should expand only as each next boundary
-becomes clean;
-expand the protected namespace list only after a bounded cleanup, rather than
-mass-fixing unrelated code merely to make a broad gate green.
+The required [Python test workflow](../../.github/workflows/python-tests.yml)
+owns the Ruff namespace selection and package coverage floor. The floor is a
+regression guard, not a claim of sufficient coverage; raise it as durable
+behavior moves from subprocess smokes into focused tests.
+
+[Architecture tests](../../tests/architecture/test_control_plane_import_boundaries.py)
+reject outward control-plane dependencies and forbidden status dependencies
+without migration exceptions, and protect presentation ownership of quota
+Markdown. See the [dependency policy](../architecture.md#current-dependency-budget)
+for the boundary rationale. Existing source-wide lint debt is characterized
+separately. Strict mypy scope is the `[tool.mypy].files` list in
+[`pyproject.toml`](../../pyproject.toml); use `python -m mypy` to check that exact
+scope. Expand each protected namespace only after a bounded cleanup rather
+than duplicating changing file counts or mass-fixing unrelated code to make a
+broad gate green.
 
 If the source checkout has optional frontend dependencies installed, dashboard
 readiness can be included in the same canary. If a release snapshot omits the

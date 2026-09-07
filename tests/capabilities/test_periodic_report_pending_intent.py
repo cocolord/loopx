@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -13,6 +15,16 @@ from loopx.capabilities.periodic_report.pending_intent import (
     pending_periodic_report_intents,
     periodic_report_pending_intent_interaction_hook,
 )
+from loopx.capabilities.periodic_report.request_action import (
+    PeriodicReportRequestAdapter,
+    PeriodicReportRequestPorts,
+    SOURCE_BINDING_RECEIPT_SCHEMA,
+    SOURCE_SETTLEMENT_RECEIPT_SCHEMA,
+    SOURCE_SETTLEMENT_TERMINAL_STATUS,
+    periodic_report_request_intents,
+    record_periodic_report_request,
+    settle_periodic_report_request,
+)
 from loopx.capabilities.periodic_report.incremental import (
     build_periodic_report_publication_candidate,
     commit_periodic_report_publication_cursor,
@@ -21,7 +33,7 @@ from loopx.capabilities.periodic_report.incremental import (
 from loopx.capabilities.periodic_report.project_progress_snapshot import (
     build_project_progress_snapshot,
 )
-from loopx.todos import add_goal_todo, complete_goal_todo
+from loopx.todos import add_goal_todo
 from loopx.status import collect_status, parse_active_state_todos
 from loopx.quota import build_quota_should_run
 from loopx.control_plane.capability_hooks import dispatch_interaction_projection_hooks
@@ -39,9 +51,10 @@ def test_delivery_binding_ref_is_valid_when_generation_digest_starts_with_digit(
 ):
     assert (
         _periodic_report_delivery_binding_ref(
-            "report_generation_53429b77872cbe1130a3e2f3"
+            "report_generation_53429b77872cbe1130a3e2f3",
+            {"effective_revision": "sha256:" + "a" * 64},
         )
-        == "periodic-report:g53429b77872cbe11"
+        == "periodic-report:g53429b77872cbe11-aaaaaaaaaaaaa"
     )
 
 
@@ -116,6 +129,14 @@ status: active
                         "coordination": {
                             "agent_model": "peer_v1",
                             "registered_agents": [AGENT_ID],
+                        },
+                        "control_plane": {
+                            "periodic_report": {
+                                "enabled": True,
+                                "profile_preset": "weekly-progress",
+                                "route_ref": "report-route",
+                                "timezone": "Asia/Shanghai",
+                            }
                         },
                     }
                 ],
@@ -246,38 +267,6 @@ def _write_editorial_response(first: dict[str, object]) -> None:
     response_path.write_text(json.dumps(response, ensure_ascii=False), encoding="utf-8")
 
 
-def _reject_approval(
-    *, state_path: Path, approval_todo_id: str, updated_at: str
-) -> None:
-    updated_lines: list[str] = []
-    for line in state_path.read_text(encoding="utf-8").splitlines():
-        if approval_todo_id in line and "loopx:todo" in line:
-            line = line.replace("status=open", "status=done")
-            line = line.replace(
-                " -->",
-                f" decision_outcome=reject completed_at={updated_at} "
-                f"updated_at={updated_at} -->",
-            )
-        updated_lines.append(line)
-    state_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
-
-
-def _append_cancelled_approval(
-    *, state_path: Path, approval_scope: str, updated_at: str
-) -> None:
-    state = state_path.read_text(encoding="utf-8")
-    cancellation = (
-        "\n- [x] Cancel the superseded report payload.\n"
-        "  <!-- loopx:todo todo_id=todo_cancelled status=done "
-        "task_class=user_gate action_kind=cancel_periodic_report_payload "
-        f"decision_scope={approval_scope} decision_outcome=cancel "
-        f"bound_agent={AGENT_ID} blocks_agent={AGENT_ID} "
-        f"completed_at={updated_at} updated_at={updated_at} -->\n"
-    )
-    state = state.replace("\n## Agent Todo\n", cancellation + "\n## Agent Todo\n")
-    state_path.write_text(state, encoding="utf-8")
-
-
 def test_pending_intent_projects_a_ts_validated_governed_action(tmp_path: Path) -> None:
     registry, runtime = _fixture(tmp_path)
 
@@ -295,7 +284,7 @@ def test_pending_intent_projects_a_ts_validated_governed_action(tmp_path: Path) 
     projection = dispatch["projections"]["pending_capability_intent"]
     assert projection["state"] == "pending"
     assert projection["generation_authorized"] is True
-    assert projection["external_delivery_authorized"] is False
+    assert projection["external_delivery_authorized"] is True
     assert projection["agent_read_required"] is True
     assert "consume-pending" in projection["command"]
 
@@ -341,7 +330,43 @@ def test_pending_intent_projects_a_ts_validated_governed_action(tmp_path: Path) 
     assert gated["interaction_contract"]["agent_channel"]["must_attempt"] is True
 
 
-def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
+def test_disabling_subscription_revokes_pending_automatic_delivery(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    payload = json.loads(registry.read_text(encoding="utf-8"))
+    payload["goals"][0]["control_plane"]["periodic_report"] = {
+        "enabled": False,
+        "timezone": "Asia/Shanghai",
+    }
+    registry.write_text(json.dumps(payload), encoding="utf-8")
+
+    dispatch = dispatch_interaction_projection_hooks(
+        [
+            periodic_report_pending_intent_interaction_hook(
+                registry_path=registry,
+                runtime_root=runtime,
+                goal_id=GOAL_ID,
+                agent_id=AGENT_ID,
+            )
+        ]
+    )
+    consumed = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+
+    assert "pending_capability_intent" not in dispatch["projections"]
+    assert consumed["status"] == "subscription_disabled"
+    assert "deliver_periodic_report_goal_channel" not in (
+        registry.parent / "ACTIVE_GOAL_STATE.md"
+    ).read_text(encoding="utf-8")
+
+
+def test_consumption_queues_authorized_delivery_and_exact_replay_does_not_duplicate(
     tmp_path: Path,
 ) -> None:
     registry, runtime = _fixture(tmp_path)
@@ -376,7 +401,16 @@ def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
         execute=True,
     )
 
-    assert first["status"] == "approval_pending"
+    assert first["status"] == "delivery_ready"
+    assert first["external_delivery_authorized"] is True
+    assert first["delivery_authority"] == {
+        "schema_version": "periodic_report_delivery_authority_v0",
+        "kind": "enabled_periodic_report_subscription",
+        "goal_id": GOAL_ID,
+        "source": "goal_override",
+        "effective_revision": first["delivery_authority"]["effective_revision"],
+        "route_ref": "report-route",
+    }
     assert first["external_writes_performed"] is False
     assert first["content_checks"] == {
         "schema_version": "periodic_report_content_checks_v0",
@@ -408,47 +442,17 @@ def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
         == []
     )
     state = (registry.parent / "ACTIVE_GOAL_STATE.md").read_text(encoding="utf-8")
-    assert state.count("approve_periodic_report_payload") == 1
-    assert "批准前不得发布妙搭或发送群消息" in state
+    assert "approve_periodic_report_payload" not in state
     parsed = parse_active_state_todos(state)
     delivery = next(
         item
         for item in parsed["agent_todos"]["items"]
         if item.get("todo_id") == first["delivery_todo_id"]
     )
-    gate = next(
-        item
-        for item in parsed["user_todos"]["items"]
-        if item.get("todo_id") == first["approval_todo_id"]
-    )
-    assert delivery["status"] == "blocked"
+    assert delivery["status"] == "open"
     assert delivery["action_kind"] == "deliver_periodic_report_goal_channel"
     assert delivery["capability_binding_ref"].startswith("periodic-report:g")
-    assert delivery["required_decision_scopes"][0]["scope_key"].startswith(
-        "periodic_report_"
-    )
-    assert gate["unblocks_todo_id"] == delivery["todo_id"]
-
-    completion = complete_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        todo_id=str(first["approval_todo_id"]),
-        role="user",
-        agent_id=AGENT_ID,
-        decision_outcome="approve",
-        evidence="owner approved the exact frozen report payload",
-    )
-    assert completion["unblock_resume"]["state"] == "resumed"
-    approved = parse_active_state_todos(
-        (registry.parent / "ACTIVE_GOAL_STATE.md").read_text(encoding="utf-8")
-    )
-    delivery_after = next(
-        item
-        for item in approved["agent_todos"]["items"]
-        if item.get("todo_id") == first["delivery_todo_id"]
-    )
-    assert delivery_after["status"] == "open"
-    assert delivery_after.get("required_decision_scopes", []) == []
+    assert delivery.get("required_decision_scopes", []) == []
     status = collect_status(
         registry_path=registry,
         runtime_root_override=str(runtime),
@@ -462,8 +466,462 @@ def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
         agent_id=AGENT_ID,
         available_capabilities=["network", "lark_bot_message_write"],
     )
-    assert quota["selected_todo"]["todo_id"] == delivery_after["todo_id"], quota
+    assert quota["selected_todo"]["todo_id"] == delivery["todo_id"], quota
     assert quota["user_todo_summary"]["open_count"] == 0
+
+
+def test_agent_typed_request_is_replay_safe_and_settlement_only_retry_deduplicates(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    sidecars = runtime / "goals" / GOAL_ID / "post_writeback_hooks"
+    for path in sidecars.iterdir():
+        path.unlink()
+    source_ref = "om_discussion_is_semantically_selected_by_agent"
+    observed_at = "2026-08-30T09:00:00Z"
+    source_identity = {
+        "provider": "fixture",
+        "goal_id": GOAL_ID,
+        "agent_id": AGENT_ID,
+        "source_ref": source_ref,
+        "observed_at": observed_at,
+        "requester_kind": "user",
+        "addressing_source": "provider_mention",
+        "binding_revision": "sha256:" + "b" * 64,
+    }
+    source_digest = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                source_identity,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+    bind_calls: list[str] = []
+
+    def bind_source(**kwargs: object) -> dict[str, object]:
+        bind_calls.append(str(kwargs["source_ref"]))
+        return {
+            "schema_version": SOURCE_BINDING_RECEIPT_SCHEMA,
+            **source_identity,
+            "source_digest": source_digest,
+            "raw_content_returned": False,
+            "external_writes_performed": False,
+        }
+
+    settlement_calls: list[bool] = []
+    other_settlement_calls: list[bool] = []
+
+    def settle_source(**kwargs: object) -> dict[str, object]:
+        receipts = list(
+            (runtime / "goals" / GOAL_ID / "periodic_reports").glob("*/receipt.json")
+        )
+        assert len(receipts) == 1
+        assert json.loads(receipts[0].read_text(encoding="utf-8"))["status"] == (
+            "delivery_ready"
+        )
+        settlement_calls.append(bool(kwargs["execute"]))
+        settled = len(settlement_calls) > 1
+        return {
+            "ok": settled,
+            "schema_version": SOURCE_SETTLEMENT_RECEIPT_SCHEMA,
+            "status": "settled" if settled else "failed",
+            "write_performed": False,
+            "raw_content_returned": False,
+            "external_writes_performed": False,
+        }
+
+    def settle_other(**kwargs: object) -> dict[str, object]:
+        other_settlement_calls.append(bool(kwargs["execute"]))
+        raise AssertionError("non-owner adapter must not receive settlement")
+
+    owner_adapter = PeriodicReportRequestAdapter(
+        adapter_id="fixture-periodic-report-source",
+        bind_source=bind_source,
+        settle_source=settle_source,
+    )
+    other_adapter = PeriodicReportRequestAdapter(
+        adapter_id="different-periodic-report-source",
+        bind_source=lambda **_kwargs: {},
+        settle_source=settle_other,
+    )
+    ports_forward = PeriodicReportRequestPorts(
+        adapters={
+            owner_adapter.adapter_id: owner_adapter,
+            other_adapter.adapter_id: other_adapter,
+        }
+    )
+    ports_reverse = PeriodicReportRequestPorts(
+        adapters={
+            other_adapter.adapter_id: other_adapter,
+            owner_adapter.adapter_id: owner_adapter,
+        }
+    )
+
+    accepted = record_periodic_report_request(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        source_ref=source_ref,
+        request_ports=ports_forward,
+        source_adapter_id=owner_adapter.adapter_id,
+        execute=True,
+    )
+    replay = record_periodic_report_request(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        source_ref=source_ref,
+        request_ports=ports_reverse,
+        source_adapter_id=None,
+        execute=True,
+    )
+
+    assert accepted["status"] == "accepted"
+    assert replay["status"] == "already_requested"
+    assert bind_calls == [source_ref]
+    intents = periodic_report_request_intents(
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+    assert len(intents) == 1
+    assert source_ref not in json.dumps(intents[0], ensure_ascii=False)
+    mismatch = settle_periodic_report_request(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        intent=intents[0],
+        request_ports=PeriodicReportRequestPorts(
+            adapters={other_adapter.adapter_id: other_adapter}
+        ),
+        execute=True,
+    )
+    assert mismatch["status"] == "adapter_unavailable"
+    assert other_settlement_calls == []
+    assert (
+        len(
+            periodic_report_request_intents(
+                runtime_root=runtime,
+                goal_id=GOAL_ID,
+                agent_id=AGENT_ID,
+            )
+        )
+        == 1
+    )
+
+    editorial_required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    assert editorial_required["status"] == "editorial_required"
+    _write_editorial_response(editorial_required)
+
+    first = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+        provider_request_ports=ports_reverse,
+    )
+    retry = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+        provider_request_ports=ports_forward,
+    )
+
+    assert first["status"] == "delivery_ready"
+    assert first["source_settlement"]["status"] == "failed"
+    assert retry["settlement_only_retry"] is True
+    assert retry["source_settlement"]["status"] == "settled"
+    assert settlement_calls == [True, True]
+    assert other_settlement_calls == []
+    durable = next(
+        (runtime / "goals" / GOAL_ID / "periodic_reports").glob("*/receipt.json")
+    )
+    persisted = json.loads(durable.read_text(encoding="utf-8"))
+    assert persisted["source_settlement"]["status"] == "settled"
+    assert persisted["settlement_only_retry"] is True
+    state = (registry.parent / "ACTIVE_GOAL_STATE.md").read_text(encoding="utf-8")
+    assert state.count("action_kind=deliver_periodic_report_goal_channel") == 1
+    assert (
+        periodic_report_request_intents(
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+        )
+        == []
+    )
+
+
+def test_typed_request_namespaces_equal_source_refs_by_adapter_under_concurrency(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    source_ref = "provider-local-message-id"
+    bind_calls: list[str] = []
+    settlement_calls: list[str] = []
+
+    def build_adapter(adapter_id: str) -> PeriodicReportRequestAdapter:
+        source_identity = {
+            "provider": adapter_id,
+            "goal_id": GOAL_ID,
+            "agent_id": AGENT_ID,
+            "source_ref": source_ref,
+            "observed_at": "2026-08-30T09:00:00Z",
+            "requester_kind": "user",
+            "addressing_source": "provider_mention",
+            "binding_revision": "sha256:" + adapter_id[-1] * 64,
+        }
+        source_digest = "sha256:" + hashlib.sha256(
+            json.dumps(
+                source_identity,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
+        def bind_source(**_kwargs: object) -> dict[str, object]:
+            bind_calls.append(adapter_id)
+            return {
+                "schema_version": SOURCE_BINDING_RECEIPT_SCHEMA,
+                **source_identity,
+                "source_digest": source_digest,
+                "raw_content_returned": False,
+                "external_writes_performed": False,
+            }
+
+        def settle_source(**kwargs: object) -> dict[str, object]:
+            source_receipt = kwargs["source_receipt"]
+            assert isinstance(source_receipt, dict)
+            assert source_receipt["provider"] == adapter_id
+            settlement_calls.append(adapter_id)
+            return {
+                "ok": True,
+                "schema_version": SOURCE_SETTLEMENT_RECEIPT_SCHEMA,
+                "status": "settled",
+                "write_performed": False,
+                "raw_content_returned": False,
+                "external_writes_performed": False,
+            }
+
+        return PeriodicReportRequestAdapter(
+            adapter_id=adapter_id,
+            bind_source=bind_source,
+            settle_source=settle_source,
+        )
+
+    adapter_a = build_adapter("provider-adapter-a")
+    adapter_b = build_adapter("provider-adapter-b")
+    ports_forward = PeriodicReportRequestPorts(
+        adapters={adapter_a.adapter_id: adapter_a, adapter_b.adapter_id: adapter_b}
+    )
+    ports_reverse = PeriodicReportRequestPorts(
+        adapters={adapter_b.adapter_id: adapter_b, adapter_a.adapter_id: adapter_a}
+    )
+
+    def record(
+        adapter: PeriodicReportRequestAdapter,
+        ports: PeriodicReportRequestPorts,
+    ) -> dict[str, object]:
+        return record_periodic_report_request(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            source_ref=source_ref,
+            request_ports=ports,
+            source_adapter_id=adapter.adapter_id,
+            execute=True,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_a = executor.submit(record, adapter_a, ports_forward)
+        future_b = executor.submit(record, adapter_b, ports_reverse)
+        accepted_a = future_a.result()
+        accepted_b = future_b.result()
+
+    assert accepted_a["status"] == accepted_b["status"] == "accepted"
+    assert accepted_a["request_id"] != accepted_b["request_id"]
+    assert sorted(bind_calls) == [adapter_a.adapter_id, adapter_b.adapter_id]
+    assert record(adapter_a, ports_reverse)["status"] == "already_requested"
+    assert (
+        record_periodic_report_request(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            source_ref=source_ref,
+            request_ports=None,
+            source_adapter_id=adapter_b.adapter_id,
+            execute=True,
+        )["status"]
+        == "already_requested"
+    )
+    with pytest.raises(ValueError, match="source adapter is ambiguous"):
+        record_periodic_report_request(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            source_ref=source_ref,
+            request_ports=ports_forward,
+            source_adapter_id=None,
+            execute=True,
+        )
+
+    intents = periodic_report_request_intents(
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+    assert {intent["source_receipt_id"] for intent in intents} == {
+        accepted_a["request_id"],
+        accepted_b["request_id"],
+    }
+    for intent in reversed(intents):
+        settlement = settle_periodic_report_request(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            intent=intent,
+            request_ports=ports_reverse,
+            execute=True,
+        )
+        assert settlement["status"] == "settled"
+    assert sorted(settlement_calls) == [adapter_a.adapter_id, adapter_b.adapter_id]
+
+    journal_path = (
+        runtime
+        / "goals"
+        / GOAL_ID
+        / "periodic_report_requests"
+        / f"{accepted_a['request_id']}.json"
+    )
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal["adapter_id"] = adapter_b.adapter_id
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+    with pytest.raises(ValueError, match="journal identity drifted"):
+        record(adapter_a, ports_forward)
+    journal["adapter_id"] = adapter_a.adapter_id
+    journal["source_receipt"]["source_ref"] = "different-source"
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+    with pytest.raises(ValueError, match="journal identity drifted"):
+        record(adapter_a, ports_forward)
+
+
+def test_terminal_source_settlement_is_durable_and_not_retried(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    source_ref = "om_terminal_source"
+    source_identity = {
+        "provider": "fixture",
+        "goal_id": GOAL_ID,
+        "agent_id": AGENT_ID,
+        "source_ref": source_ref,
+        "observed_at": "2026-08-30T09:00:00Z",
+        "requester_kind": "user",
+        "addressing_source": "provider_mention",
+        "binding_revision": "sha256:" + "d" * 64,
+    }
+    source_digest = "sha256:" + hashlib.sha256(
+        json.dumps(
+            source_identity,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    settlement_calls: list[bool] = []
+
+    def bind_source(**_kwargs: object) -> dict[str, object]:
+        return {
+            "schema_version": SOURCE_BINDING_RECEIPT_SCHEMA,
+            **source_identity,
+            "source_digest": source_digest,
+            "raw_content_returned": False,
+            "external_writes_performed": False,
+        }
+
+    def settle_source(**kwargs: object) -> dict[str, object]:
+        settlement_calls.append(bool(kwargs["execute"]))
+        return {
+            "ok": False,
+            "schema_version": SOURCE_SETTLEMENT_RECEIPT_SCHEMA,
+            "status": SOURCE_SETTLEMENT_TERMINAL_STATUS,
+            "failure_code": "source_receipt_drift",
+            "write_performed": False,
+            "raw_content_returned": False,
+            "external_writes_performed": False,
+        }
+
+    adapter = PeriodicReportRequestAdapter(
+        adapter_id="fixture-periodic-report-source",
+        bind_source=bind_source,
+        settle_source=settle_source,
+    )
+    ports = PeriodicReportRequestPorts(adapters={adapter.adapter_id: adapter})
+    accepted = record_periodic_report_request(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        source_ref=source_ref,
+        request_ports=ports,
+        source_adapter_id=None,
+        execute=True,
+    )
+    intents = periodic_report_request_intents(
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+
+    settlement = settle_periodic_report_request(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        intent=intents[0],
+        request_ports=ports,
+        execute=True,
+    )
+
+    assert settlement["status"] == SOURCE_SETTLEMENT_TERMINAL_STATUS
+    assert settlement["failure_code"] == "source_receipt_drift"
+    assert settlement["write_performed"] is True
+    request_path = (
+        runtime
+        / "goals"
+        / GOAL_ID
+        / "periodic_report_requests"
+        / f"{accepted['request_id']}.json"
+    )
+    journal = json.loads(request_path.read_text(encoding="utf-8"))
+    assert journal["status"] == "settlement_failed"
+    assert journal["settlement"]["failure_code"] == "source_receipt_drift"
+    assert periodic_report_request_intents(
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    ) == []
+    assert settlement_calls == [True]
 
 
 def test_report_artifacts_leave_no_temp_residue(tmp_path: Path) -> None:
@@ -485,7 +943,7 @@ def test_report_artifacts_leave_no_temp_residue(tmp_path: Path) -> None:
         execute=True,
     )
 
-    assert first["status"] == "approval_pending"
+    assert first["status"] == "delivery_ready"
     artifact_dir = Path(first["artifacts"]["markdown_path"]).parent
     names = sorted(item.name for item in artifact_dir.iterdir())
     for expected in (
@@ -591,9 +1049,7 @@ def test_report_html_not_left_behind_when_rename_is_interrupted(
         )
 
     assert list(runtime.rglob("report.html")) == []
-    assert not [
-        item for item in runtime.rglob("*") if item.name.endswith(".tmp")
-    ]
+    assert not [item for item in runtime.rglob("*") if item.name.endswith(".tmp")]
 
 
 def test_atomic_write_temp_file_stays_in_directory_and_never_collides_with_target(
@@ -904,7 +1360,9 @@ def test_consumption_rejects_snapshot_outcome_after_stage_completion(
         )
 
 
-def test_consumption_recovers_when_gate_precedes_receipt_write(tmp_path: Path) -> None:
+def test_consumption_recovers_when_delivery_todo_precedes_receipt_write(
+    tmp_path: Path,
+) -> None:
     registry, runtime = _fixture(tmp_path)
 
     required = consume_pending_periodic_report_intent(
@@ -933,137 +1391,11 @@ def test_consumption_recovers_when_gate_precedes_receipt_write(tmp_path: Path) -
         execute=True,
     )
 
-    assert recovered["status"] == "approval_pending"
+    assert recovered["status"] == "delivery_ready"
     assert recovered["generation_receipt"] == first["generation_receipt"]
     state = (registry.parent / "ACTIVE_GOAL_STATE.md").read_text(encoding="utf-8")
-    assert state.count("approve_periodic_report_payload") == 1
-
-
-def test_rejected_approval_reopens_the_intent_in_a_fresh_attempt(
-    tmp_path: Path,
-) -> None:
-    registry, runtime = _fixture(tmp_path)
-    required = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-    _write_editorial_response(required)
-    first = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-    state_path = registry.parent / "ACTIVE_GOAL_STATE.md"
-    _reject_approval(
-        state_path=state_path,
-        approval_todo_id=str(first["approval_todo_id"]),
-        updated_at="2026-08-30T10:00:00Z",
-    )
-
-    reopened = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-
-    assert reopened["status"] == "editorial_required"
-    assert reopened["editorial_request_path"] != required["editorial_request_path"]
-    assert "retry-" in reopened["editorial_request_path"]
-    assert not Path(reopened["editorial_response_path"]).exists()
-    _write_editorial_response(reopened)
-    second = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-    assert second["status"] == "approval_pending"
-    assert second["approval_todo_id"] != first["approval_todo_id"]
-    assert (
-        state_path.read_text(encoding="utf-8").count("approve_periodic_report_payload")
-        == 2
-    )
-    assert (
-        pending_periodic_report_intents(
-            registry_path=registry,
-            runtime_root=runtime,
-            goal_id=GOAL_ID,
-            agent_id=AGENT_ID,
-        )
-        == []
-    )
-
-    _reject_approval(
-        state_path=state_path,
-        approval_todo_id=str(second["approval_todo_id"]),
-        updated_at="2026-08-30T11:00:00Z",
-    )
-    reopened_again = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-    assert reopened_again["status"] == "editorial_required"
-    assert reopened_again["editorial_request_path"] not in {
-        required["editorial_request_path"],
-        reopened["editorial_request_path"],
-    }
-    assert "retry-" in reopened_again["editorial_request_path"]
-
-
-def test_later_cancel_reopens_an_already_approved_generation(
-    tmp_path: Path,
-) -> None:
-    registry, runtime = _fixture(tmp_path)
-    required = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-    _write_editorial_response(required)
-    first = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-    state_path = registry.parent / "ACTIVE_GOAL_STATE.md"
-    state = state_path.read_text(encoding="utf-8").replace(
-        "status=open task_class=user_gate action_kind=approve_periodic_report_payload",
-        "status=done task_class=user_gate action_kind=approve_periodic_report_payload "
-        "decision_outcome=approve completed_at=2026-08-30T10:00:00Z",
-    )
-    state_path.write_text(state, encoding="utf-8")
-    _append_cancelled_approval(
-        state_path=state_path,
-        approval_scope=str(first["approval_scope"]),
-        updated_at="2026-08-30T10:05:00Z",
-    )
-
-    reopened = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-
-    assert reopened["status"] == "editorial_required"
-    assert reopened["editorial_request_path"] != required["editorial_request_path"]
-    assert "retry-" in reopened["editorial_request_path"]
+    assert state.count("deliver_periodic_report_goal_channel") == 1
+    assert "approve_periodic_report_payload" not in state
 
 
 def test_consumption_rejects_english_or_flat_editorial_response(

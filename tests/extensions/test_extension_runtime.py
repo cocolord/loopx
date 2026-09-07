@@ -23,6 +23,7 @@ from loopx.capabilities.semantic_preference.cli import (
 )
 from loopx.capabilities.semantic_preference.contract import provider_doctor, recall
 from loopx.cli import main
+from loopx.extensions.hook_adapters import discover_extension_hook_adapters
 from loopx.extensions.manifest import load_extension_manifest
 from loopx.extensions.openviking_semantic_preference.provider import (
     register_openviking_provider_arguments,
@@ -46,6 +47,7 @@ from loopx.extensions.runtime import (
     resolve_extension_activation,
     resolve_extension_binding,
     resolve_extension_runtime_binding,
+    resolve_optional_capability_binding,
     rollback_extension,
     run_standalone_extension,
 )
@@ -196,6 +198,91 @@ def test_presentation_surface_manifest_is_normalized(tmp_path: Path) -> None:
             "empty_state_detail": "Publish a validated projection.",
         }
     ]
+
+
+def test_capability_action_hook_adapter_manifest_is_normalized(tmp_path: Path) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest_path = _standalone_manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+        permission="semantic_preference.read",
+    )
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8")
+        + """
+
+[[hook_adapters]]
+id = "sample-report-source"
+capability_id = "sample-report"
+target_hook_id = "sample_report.request"
+phase = "capability_action"
+factory = "sample_extension.hooks:build_adapter"
+required_permissions = ["semantic_preference.read"]
+ports = ["sample_report.request.bind_source", "sample_report.request.settle_source"]
+""",
+        encoding="utf-8",
+    )
+
+    manifest = load_extension_manifest(manifest_path)
+
+    assert manifest["hook_adapters"] == [
+        {
+            "id": "sample-report-source",
+            "capability_id": "sample-report",
+            "target_hook_id": "sample_report.request",
+            "phase": "capability_action",
+            "factory": "sample_extension.hooks:build_adapter",
+            "required_permissions": ["semantic_preference.read"],
+            "ports": [
+                "sample_report.request.bind_source",
+                "sample_report.request.settle_source",
+            ],
+        }
+    ]
+
+
+def test_capability_action_factory_failure_is_content_free_and_kernel_independent(
+    tmp_path: Path,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest_path = _standalone_manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+        permission="semantic_preference.read",
+    )
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8")
+        + """
+
+[[hook_adapters]]
+id = "sample-report-source"
+capability_id = "sample-report"
+target_hook_id = "sample_report.request"
+phase = "capability_action"
+factory = "missing_extension.hooks:build_adapter"
+required_permissions = ["semantic_preference.read"]
+ports = ["sample_report.request.bind_source"]
+""",
+        encoding="utf-8",
+    )
+    state_file = tmp_path / "runtime" / "extensions" / "state.json"
+    install_extension(manifest_path, state_file=state_file, execute=True)
+
+    discovery = discover_extension_hook_adapters(
+        state_file=state_file,
+        phase="capability_action",
+        capability_id="sample-report",
+        target_hook_id="sample_report.request",
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+        goal_id="sample-goal",
+        agent_id="sample-agent",
+    )
+
+    assert discovery.ports == ()
+    assert len(discovery.failures) == 1
+    assert discovery.failures[0].adapter_id == "sample-report-source"
+    assert discovery.failures[0].error_code == "extension_hook_adapter_unavailable"
 
 
 @pytest.mark.parametrize(
@@ -682,6 +769,37 @@ def test_capability_executor_reuses_bounded_json_runtime(tmp_path: Path) -> None
             binding,
             request={"payload": "x" * (MAX_EXTENSION_REQUEST_BYTES + 1)},
         )
+
+
+def test_capability_executor_preserves_fractional_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, float] = {}
+
+    def run_process(*_args: object, **kwargs: object) -> SimpleNamespace:
+        captured["timeout_seconds"] = float(kwargs["timeout_seconds"])
+        return SimpleNamespace(
+            failure_kind=None,
+            stdout=b'{"ok": true}',
+            returncode=0,
+        )
+
+    monkeypatch.setattr(
+        "loopx.extensions.runtime.run_capped_process",
+        run_process,
+    )
+
+    result = execute_extension_runtime_binding(
+        {
+            "schema_version": "loopx_extension_runtime_binding_v0",
+            "argv": ["provider"],
+            "timeout_seconds": 1.5,
+        },
+        request={"schema_version": "test_extension_request_v0"},
+    )
+
+    assert result == {"ok": True}
+    assert captured["timeout_seconds"] == 1.5
 
 
 def test_extension_run_rejects_capability_provider_bypass(tmp_path: Path) -> None:
@@ -1363,6 +1481,23 @@ def test_semantic_preference_resolves_enabled_extension(tmp_path: Path) -> None:
     )
     assert catalog_provider["active_revision"] == capability_binding["revision"]
     assert catalog_provider["ready"] is True
+    optional = resolve_optional_capability_binding(
+        state_file=state_file,
+        extension_id="test-semantic-extension",
+        capability_id="semantic-preference",
+        protocol="semantic_preference_provider_v0",
+        permission="semantic_preference.read",
+    )
+    assert optional.public_readiness() == {
+        "schema_version": "loopx_extension_provider_readiness_v0",
+        "status": "ready",
+        "extension_id": "test-semantic-extension",
+        "installed": True,
+        "enabled": True,
+        "doctor_verified": True,
+        "next_action": None,
+    }
+    assert optional.binding == capability_binding
     project = tmp_path / "project"
     project.mkdir()
     config = tmp_path / "semantic-preference.json"
@@ -1413,6 +1548,15 @@ def test_semantic_preference_resolves_enabled_extension(tmp_path: Path) -> None:
     )
     assert unavailable["status"] == "provider_unavailable"
     assert unavailable["failure_kind"] == "extension_binding_unavailable"
+    optional = resolve_optional_capability_binding(
+        state_file=state_file,
+        extension_id="test-semantic-extension",
+        capability_id="semantic-preference",
+        protocol="semantic_preference_provider_v0",
+        permission="semantic_preference.read",
+    )
+    assert optional.status == "extension_disabled"
+    assert optional.binding is None
 
     detail = build_capability_detail_packet(
         "semantic-preference",

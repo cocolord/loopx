@@ -27,7 +27,7 @@ assert.match(
 );
 assert.match(
   tasks,
-  /resizeObserverRef\.current = observer[\s\S]*\}, \[syncOverflow\]\);/,
+  /resizeObserverRef\.current = observer[\s\S]*\}, \[listView, syncOverflow\]\);/,
   "The lane ResizeObserver lifecycle stays stable across card renders",
 );
 assert.match(
@@ -86,6 +86,9 @@ function statusFixture() {
   const fixture = structuredClone(require(resolve(repoRoot, "examples/status.example.json")));
   const attention = fixture.attention_queue.items.find((item) => item.goal_id === "loopx-meta");
   assert.ok(attention, "Expected the public loopx-meta fixture");
+  const goal = fixture.run_history.goals.find((item) => item.id === "loopx-meta");
+  assert.ok(goal, "Expected the public loopx-meta run-history fixture");
+  goal.display_name = "Task board scroll fixture";
   attention.project_asset ??= {};
   attention.project_asset.owner ??= "codex-side-bypass";
   attention.project_asset.gate ??= "none";
@@ -139,7 +142,7 @@ async function main() {
     await page.route(`http://127.0.0.1:${port}/status.json**`, (route) => route.fulfill({ contentType: "application/json", json: fixture, status: 200 }));
     await page.route("**/api/**", (route) => route.fulfill({ contentType: "application/json", json: { ok: true }, status: 200 }));
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.locator(".personal-goal-link").filter({ hasText: /loopx-meta|LoopX/i }).first().click();
+    await page.locator(".personal-goal-link").filter({ hasText: "Task board scroll fixture" }).click();
 
     const lane = page.getByRole("region", { name: "待执行 / 进行中" });
     await lane.waitFor({ state: "visible" });

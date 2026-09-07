@@ -12,6 +12,7 @@ from loopx.capabilities.machine_configuration.store import (
     configure_machine_configuration,
 )
 from loopx.capabilities.periodic_report.machine_defaults import (
+    PeriodicReportSubscriptionConfigurationError,
     build_goal_periodic_report_delivery_identity,
     build_goal_periodic_report_delivery_plan,
     normalize_loopx_machine_defaults,
@@ -22,6 +23,7 @@ from loopx.capabilities.periodic_report.machine_store import (
     configure_periodic_report_machine_defaults,
 )
 from loopx.cli import main
+from loopx.configure_goal import configure_goal
 
 
 def _defaults(*, enabled: bool = True, route_ref: str = "loopx-concierge") -> dict:
@@ -115,9 +117,21 @@ def test_goal_override_beats_machine_default() -> None:
 def test_runtime_goal_subscription_does_not_fall_back_to_machine_defaults() -> None:
     goal = _goal("research")
     goal["control_plane"] = {"periodic_report": {"enabled": True}}
+    original_goal = json.loads(json.dumps(goal))
+    defaults = _defaults()
+    original_defaults = json.loads(json.dumps(defaults))
 
-    with pytest.raises(ValueError, match="profile_preset"):
-        resolve_goal_periodic_report_subscription(goal, _defaults())
+    with pytest.raises(
+        PeriodicReportSubscriptionConfigurationError,
+        match="profile_preset",
+    ) as caught:
+        resolve_goal_periodic_report_subscription(goal, defaults)
+
+    assert caught.value.goal_id == "research"
+    assert caught.value.configuration_source == "goal_override"
+    assert caught.value.invalid_fields == ("profile_preset", "route_ref")
+    assert goal == original_goal
+    assert defaults == original_defaults
 
 
 def test_unconfigured_goal_is_not_subscribed_at_runtime() -> None:
@@ -157,6 +171,53 @@ def test_existing_goal_follows_live_machine_default_without_mutation() -> None:
     assert first["source_revision"] != second["source_revision"]
     assert first["effective_revision"] != second["effective_revision"]
     assert goal == original
+
+
+def test_clearing_goal_override_restores_live_machine_default(tmp_path: Path) -> None:
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps({"goals": [_goal("research")]}),
+        encoding="utf-8",
+    )
+    explicit = {
+        "enabled": True,
+        "profile_preset": "goal-weekly",
+        "route_ref": "existing-goal-binding",
+        "timezone": "UTC",
+    }
+
+    configured = configure_goal(
+        registry_path=registry,
+        goal_id="research",
+        periodic_report_configuration=explicit,
+        execute=True,
+    )
+    configured_goal = json.loads(registry.read_text(encoding="utf-8"))["goals"][0]
+    overridden = resolve_goal_periodic_report_subscription(
+        configured_goal,
+        _defaults(route_ref="machine-manager-binding"),
+    )
+
+    assert configured["after"]["periodic_report"] == explicit
+    assert overridden["source"] == "goal_override"
+    assert overridden["route_ref"] == "existing-goal-binding"
+
+    cleared = configure_goal(
+        registry_path=registry,
+        goal_id="research",
+        clear_periodic_report_configuration=True,
+        execute=True,
+    )
+    cleared_goal = json.loads(registry.read_text(encoding="utf-8"))["goals"][0]
+    inherited = resolve_goal_periodic_report_subscription(
+        cleared_goal,
+        _defaults(route_ref="machine-manager-binding"),
+    )
+
+    assert cleared["after"]["periodic_report"] is None
+    assert "periodic_report" not in cleared_goal.get("control_plane", {})
+    assert inherited["source"] == "machine_default"
+    assert inherited["route_ref"] == "machine-manager-binding"
 
 
 def test_periodic_report_provenance_ignores_unowned_machine_namespaces() -> None:
@@ -440,3 +501,106 @@ def test_goal_delivery_plan_cli_fails_closed_on_invalid_machine_store(
     assert payload["ok"] is False
     assert payload["command"] == "plan-goal-delivery"
     assert "route_ref is required" in payload["error"]
+
+
+def test_goal_delivery_plan_cli_diagnoses_incomplete_explicit_override_read_only(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text('{"goals": []}', encoding="utf-8")
+    runtime_root = tmp_path / "runtime"
+    _apply_defaults(runtime_root, _defaults())
+    request_path = tmp_path / "request.json"
+    goal = _goal("research")
+    goal["control_plane"] = {
+        "periodic_report": {
+            "enabled": True,
+            "profile_preset": "weekly-progress",
+        }
+    }
+    request_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "periodic_report_goal_delivery_plan_request_v0",
+                "goal": goal,
+                "period_window": {
+                    "start_at": "2026-08-24T00:00:00+08:00",
+                    "end_at": "2026-08-31T00:00:00+08:00",
+                },
+                "reporting_agent_id": "agent-b",
+                "eligible_agent_ids": ["agent-b"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    store_path = runtime_root / "machine" / "configuration.json"
+    before = {
+        "registry": registry_path.read_bytes(),
+        "request": request_path.read_bytes(),
+        "machine_configuration": store_path.read_bytes(),
+    }
+
+    assert (
+        main(
+            [
+                "--registry",
+                str(registry_path),
+                "--runtime-root",
+                str(runtime_root),
+                "--format",
+                "json",
+                "periodic-report",
+                "plan-goal-delivery",
+                "--request-json",
+                str(request_path),
+            ]
+        )
+        == 1
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload == {
+        "ok": False,
+        "schema_version": "periodic_report_subscription_error_v0",
+        "command": "plan-goal-delivery",
+        "error_kind": "subscription_configuration_invalid",
+        "goal_id": "research",
+        "configuration_source": "goal_override",
+        "invalid_fields": ["route_ref"],
+        "error": "goal periodic_report.route_ref is required",
+        "remediation": (
+            "Provide a complete explicit periodic_report override, or clear the "
+            "override to restore live machine-default inheritance."
+        ),
+        "mutation_performed": False,
+    }
+    assert (
+        main(
+            [
+                "--registry",
+                str(registry_path),
+                "--runtime-root",
+                str(runtime_root),
+                "--format",
+                "markdown",
+                "periodic-report",
+                "plan-goal-delivery",
+                "--request-json",
+                str(request_path),
+            ]
+        )
+        == 1
+    )
+    assert capsys.readouterr().out == (
+        "# Periodic Report Configuration Error\n\n"
+        "- error: goal periodic_report.route_ref is required\n"
+        "- configuration_source: `goal_override`\n"
+        "- invalid_fields: `route_ref`\n"
+        "- mutation_performed: `False`\n\n"
+        "## Remediation\n\n"
+        "Provide a complete explicit periodic_report override, or clear the "
+        "override to restore live machine-default inheritance.\n\n"
+    )
+    assert registry_path.read_bytes() == before["registry"]
+    assert request_path.read_bytes() == before["request"]
+    assert store_path.read_bytes() == before["machine_configuration"]

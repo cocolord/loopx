@@ -72,6 +72,7 @@ def collect_status(
     available_capabilities: Any = None,
     include_public_boundary_scan: bool = True,
     recent_run_limit: int | None = None,
+    include_goal_subagent_configuration: bool = False,
     activation_state_filter: GoalActivationState | str | None = None,
 ) -> dict[str, Any]:
     display_limit = max(0, limit)
@@ -135,6 +136,9 @@ def collect_status(
         display_limit=display_limit,
         todo_index_limit=max(context.max_todo_index_items, display_limit),
         recent_run_limit=recent_run_limit,
+        include_goal_subagent_configuration=(
+            include_goal_subagent_configuration
+        ),
     )
     promotion_gate = context.build_promotion_gate(
         registry_path=registry_path,

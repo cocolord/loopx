@@ -467,3 +467,58 @@ def test_product_cli_runtime_root_override_keeps_one_candidate_lineage(
     assert not (registry_runtime / "goals" / goal_id / "task-leases").exists()
     assert store_path.is_relative_to(override_runtime)
     assert todo_id in state.read_text(encoding="utf-8")
+
+
+def test_product_cli_authority_shadow_status_and_drain_read_without_creating_lineage(
+    tmp_path: Path,
+) -> None:
+    goal_id = "shadow-cli-drain"
+    registry, _state, runtime_root = _workspace(tmp_path, goal_id=goal_id)
+
+    default_off = _cli(registry, runtime_root, "authority-shadow", "status", "--goal-id", goal_id)
+    assert default_off["ok"] is True
+    assert default_off["schema_version"] == "loopx_authority_shadow_cli_v0"
+    assert default_off["config"] == {"enabled": False, "mode": None, "status": "disabled"}  # type: ignore[index]
+    assert default_off["candidate"]["status"] == "missing"  # type: ignore[index]
+    assert default_off["store_bytes"] == 0
+    assert not (runtime_root / "authority-shadow").exists()
+    idle = _cli(registry, runtime_root, "authority-shadow", "drain", "--goal-id", goal_id)
+    assert idle["ok"] is True
+    assert idle["outcome"] == "nothing_pending"
+    assert idle["drained_count"] == 0
+    assert idle["config_enabled"] is False
+    assert not (runtime_root / "authority-shadow").exists()
+
+    _cli(
+        registry,
+        runtime_root,
+        "configure-goal",
+        "--goal-id",
+        goal_id,
+        "--local-authority-shadow-file",
+        "--execute",
+    )
+    observed = _add_todo(registry, runtime_root, goal_id=goal_id, text="Observed through the v0 path.")
+    assert observed["authority_shadow"]["outcome"] == "captured"  # type: ignore[index]
+
+    status = _cli(registry, runtime_root, "authority-shadow", "status", "--goal-id", goal_id)
+    assert status["ok"] is True
+    assert status["config"]["status"] == "enabled"  # type: ignore[index]
+    assert status["outbox"]["todos"]["committed_pending"] == 0  # type: ignore[index]
+    assert status["outbox"]["leases"]["prepared_only"] == 0  # type: ignore[index]
+    candidate = status["candidate"]
+    assert candidate["status"] == "loaded"  # type: ignore[index]
+    assert candidate["cursor"] == "1"  # type: ignore[index]
+    assert candidate["head_schema_version"] == "loopx_local_authority_shadow_projection_v0"  # type: ignore[index]
+    assert candidate["codec_agreement"] is True  # type: ignore[index]
+    assert candidate["partitions"] == {"todos": None, "leases": None}  # type: ignore[index]
+    assert status["store_bytes"] > 0
+    assert status["retention_pressure"] is False
+    assert str(runtime_root) not in json.dumps(status)
+
+    drained = _cli(registry, runtime_root, "authority-shadow", "drain", "--goal-id", goal_id)
+    assert drained["ok"] is True
+    assert drained["outcome"] == "nothing_pending"
+    assert drained["config_enabled"] is True
+    _store_path, store = _store_document(runtime_root, goal_id)
+    assert store["cursor"] == "1"

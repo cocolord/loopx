@@ -48,7 +48,7 @@ from ..control_plane.turn_driver import (
 from ..quota import spend_quota_slot
 from ..state_refresh import refresh_state_run
 from ..status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK, collect_status
-from ..todos import complete_goal_todo, resolve_todo_state_path, update_goal_todo
+from ..todos import resolve_todo_state_path
 from .lark_inbox import (
     build_lark_operator_inbox_urgency_projector,
     dispatch_goal_lark_turn_start_hooks,
@@ -61,6 +61,10 @@ from .turn_rendering import (
     render_loopx_turn_plan_markdown as _render_loopx_turn_plan_markdown,
 )
 from .turn_selection import turn_controller_advisory_primary
+from .turn_todo_writeback import (
+    write_turn_repair_update,
+    write_turn_validated_completion,
+)
 
 EXACT_SETTLEMENT_READBACK_NOT_FOUND = (
     "exact settlement readback unexpectedly returned not-found"
@@ -71,6 +75,8 @@ PrintPayload = Callable[
     None,
 ]
 FormatSelector = Callable[..., str]
+
+
 
 
 def handle_turn_command(
@@ -406,16 +412,14 @@ def handle_turn_command(
                         raise ValueError(
                             f"{result_kind} requires one selected todo for typed writeback"
                         )
-                    update_goal_todo(
+                    write_turn_repair_update(
                         registry_path=registry_path,
+                        runtime_root_arg=runtime_root_arg,
                         goal_id=args.goal_id,
                         todo_id=todo_id,
-                        role="agent",
                         note=str(result.get("summary") or result["classification"]),
                         evidence=f"LoopX Turn {result_kind}: {result['next_action']}",
                         agent_id=args.agent_id,
-                        project=state_project,
-                        dry_run=False,
                     )
                 refresh = refresh_state_run(
                     registry_path=registry_path,
@@ -494,11 +498,11 @@ def handle_turn_command(
                     raise ValueError(
                         "validated_completion requires one selected todo for lifecycle writeback"
                     )
-                completion = complete_goal_todo(
+                completion = write_turn_validated_completion(
                     registry_path=registry_path,
+                    runtime_root_arg=runtime_root_arg,
                     goal_id=args.goal_id,
                     todo_id=todo_id,
-                    role="agent",
                     completion_turn_key=settlement_identity.turn_instance_id,
                     evidence=(
                         "LoopX Turn validated completion: "
@@ -506,8 +510,6 @@ def handle_turn_command(
                     ),
                     note=str(result["next_action"]),
                     agent_id=args.agent_id,
-                    project=None,
-                    dry_run=False,
                 )
                 # Project the continuation the Todo lifecycle durably recorded,
                 # never a host-normalized continuation. Contradictory or

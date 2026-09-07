@@ -10,6 +10,7 @@ TODO_OPTION_FIELDS = (
     ("--text", "text"),
     ("--follow-up", "followups"),
     ("--todo-id", "todo_id"),
+    ("--claim-operation-id", "claim_operation_id"),
     ("--turn-instance-id", "turn_instance_id"),
     ("--completion-identity-key", "completion_identity_key"),
     ("--replan-obligation-id", "replan_obligation_id"),
@@ -77,6 +78,7 @@ TODO_OPTION_FIELDS = (
     ("--trigger", "suggestion_trigger"),
     ("--state-file", "state_file"),
     ("--execute", "execute"),
+    ("--provider-revision", "provider_revision"),
 )
 
 _TODO_UPDATE_MUTABLE_FIELDS = (
@@ -297,6 +299,18 @@ def validate_todo_list_options(args: argparse.Namespace) -> None:
     )
 
 
+def validate_todo_project_markdown_options(args: argparse.Namespace) -> None:
+    if not getattr(args, "provider_revision", None):
+        raise ValueError("todo project-markdown requires --provider-revision")
+    _validate_todo_option_subset(
+        args,
+        {"state_file", "execute", "provider_revision"},
+        "todo project-markdown only accepts --goal-id, --provider-revision, "
+        "--project, --state-file, --execute, and "
+        "--format; unsupported: ",
+    )
+
+
 def validate_todo_add_options(args: argparse.Namespace) -> None:
     for field, reject_when_present, message in _TODO_ADD_INITIAL_RULES:
         if bool(getattr(args, field)) is reject_when_present:
@@ -319,10 +333,19 @@ def validate_todo_claim_options(args: argparse.Namespace) -> None:
         )
     _validate_todo_option_subset(
         args,
-        {"role", "todo_id", "claimed_by", "agent_id", "state_file"},
+        {
+            "role", "todo_id", "claimed_by", "agent_id", "state_file",
+            "claim_operation_id", "task_lease_idempotency_key",
+            "task_lease_expected_version",
+        },
         "todo claim only accepts --todo-id, --claimed-by, --agent-id, optional --role, "
-        "--project, --state-file, and --dry-run; unsupported: ",
+        "--claim-operation-id, --task-lease-idempotency-key, "
+        "--task-lease-expected-version, --project, --state-file, and --dry-run; unsupported: ",
     )
+    if args.task_lease_expected_version is not None and not args.task_lease_idempotency_key:
+        raise ValueError(
+            "--task-lease-expected-version requires --task-lease-idempotency-key"
+        )
 
 
 def validate_todo_update_options(args: argparse.Namespace) -> None:
@@ -486,6 +509,8 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
         raise ValueError(
             "--turn-instance-id is supported only by todo complete settlement"
         )
+    if getattr(args, "claim_operation_id", None) is not None and args.todo_command != "claim":
+        raise ValueError("--claim-operation-id is supported only by todo claim")
     if (
         getattr(args, "completion_identity_key", None)
         and args.todo_command != "complete"
@@ -501,7 +526,7 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
             "--replan-obligation-id is supported only by todo add"
         )
     if (
-        args.todo_command not in {"complete", "supersede"}
+        args.todo_command not in {"claim", "complete", "supersede"}
         and (
             args.task_lease_idempotency_key
             or args.task_lease_expected_version is not None
@@ -509,7 +534,7 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
     ):
         raise ValueError(
             "--task-lease-idempotency-key and --task-lease-expected-version "
-            "are supported only by todo complete and todo supersede"
+            "are supported only by todo claim, todo complete, and todo supersede"
         )
     if args.capability_binding_ref and args.todo_command != "add":
         raise ValueError(

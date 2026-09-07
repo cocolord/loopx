@@ -428,7 +428,7 @@ def hold_task_lease_mutation_fence(
     def close(committed: bool, release_lease: bool) -> dict[str, Any] | None:
         return _execute_native_task_lease_lifecycle(
             runtime_root=runtime_root,
-            registry_path=None,
+            registry_path=registry_path,
             goal_id=normalized_goal_id,
             todo_id=normalized_todo_id,
             operation="fence_close",

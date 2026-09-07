@@ -176,9 +176,17 @@ test("post-writeback hook binds intent to the exact durable receipt", () => {
   );
 });
 
-test("post-writeback hook requires the complete settlement identity", () => {
+test("post-writeback hook accepts Todo-less identity but rejects an empty Todo id", () => {
+  const todoLess = postWritebackInput();
+  (todoLess.identity as Record<string, unknown>).todo_id = null;
+  const admitted = validatePostWritebackHookInput({
+    registration: postWritebackRegistration(),
+    hook_input: todoLess,
+  });
+  assert.equal((admitted.identity as Record<string, unknown>).todo_id, null);
+
   const incomplete = postWritebackInput();
-  (incomplete.identity as Record<string, unknown>).todo_id = null;
+  (incomplete.identity as Record<string, unknown>).todo_id = "";
   assert.throws(
     () => validatePostWritebackHookInput({
       registration: postWritebackRegistration(),
@@ -325,7 +333,7 @@ test("verified capability candidate projects separate preparation and delivery a
   );
 });
 
-test("pending capability intent projects local generation without delivery authority", () => {
+test("pending periodic report projects generation with configured standing delivery authority", () => {
   const result = validateInteractionProjectionHookInvocation({
     registration: {
       schema_version: CAPABILITY_HOOK_REGISTRATION_SCHEMA_VERSION,
@@ -355,10 +363,10 @@ test("pending capability intent projects local generation without delivery autho
         agent_id: "agent-example",
         state: "pending",
         action_kind: "consume_periodic_report_intent",
-        action_summary: "Generate the exact local report draft.",
+        action_summary: "Generate the exact report and queue configured delivery.",
         command: "loopx periodic-report consume-pending --goal-id goal-example --agent-id agent-example --execute",
         generation_authorized: true,
-        external_delivery_authorized: false,
+        external_delivery_authorized: true,
         agent_read_required: true,
       },
     },
@@ -366,7 +374,7 @@ test("pending capability intent projects local generation without delivery autho
   assert.equal(result.status, "projected");
   assert.equal(
     (result.projection as JsonObject).external_delivery_authorized,
-    false,
+    true,
   );
   assert.equal(
     (result.projection as JsonObject).agent_read_required,
