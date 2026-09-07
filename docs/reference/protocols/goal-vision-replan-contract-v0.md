@@ -420,6 +420,52 @@ It cannot suppress `vision_checkpoint_missing`, `vision_successor_required`, a
 resume condition that lacks exact projected evidence, or the dedicated repair
 for an advancement todo incorrectly gated by a standing continuous monitor.
 
+### Declared fallback admission before waiting
+
+`agent_vision.fallback_declarations` names bounded alternate directions with
+`declaration_id` and optional `target_todo_id` / `successor_todo_id` links. It
+does not grant permission to execute a linked Todo. Existing agent ownership,
+exclusions, capabilities, quota, and user gates still control execution.
+
+When the primary route is blocked, an unresolved declaration projects
+`vision_fallback_unresolved` in both `fallback_gaps` and `acceptance_gaps`.
+Without selectable advancement, this is an enforced replan obligation before
+quiet monitor or host defer. The TypeScript fallback-disposition reducer owns
+the decision; quota and replan writeback consume the same rule.
+
+The linked fallback needs a real selectable advancement Todo, an exact
+evaluated pending `resume_when` condition, or an explicit terminal vision/path
+disposition. A `todo_delta` entry such as `create:todo_alternate` is only a plan;
+it cannot stand in for the persisted Todo. A new blocker id, changed narrative,
+or generic replan ACK cannot hide a still-unresolved declaration. Repeated
+reads of the same unresolved frontier retain the same obligation identity.
+
+For example, source A may remain deferred while a runnable source B proceeds.
+If both linked paths have evaluated external waits, ordinary wait/resume
+remains valid. A standing monitor alone is not a runnable fallback. Peer-owned
+or executor-excluded work must not be selected as an alternative for this
+agent. Compact diagnostic counts do not prove an executable Todo exists.
+
+This changes the previous advisory-only fallback projection: declarations now
+require a disposition, and unmaterialized create/reopen plans no longer clear
+the gap. Lanes without structured declarations retain their existing behavior;
+prose cannot declare an alternative. Partial vision patches preserve existing
+declarations. Explicit `fallback_declarations: []` withdraws them through the
+normal vision writeback contract; any required semantic evidence still applies.
+The kernel does not discover business-specific alternatives or prove that all
+possible sources have been exhausted.
+
+Verify with `loopx quota should-run --goal-id <goal-id> --agent-id <agent-id>`:
+when execution guards permit work, an unresolved declared route with no selectable work exposes
+`autonomous_replan_required`, `execution_obligation.must_attempt_work=true`,
+and `scheduler_hint.action=run_now`. Managed Goal hosts must receive
+`goal_runtime_continuation.disposition=continue_now` rather than `defer`.
+
+声明的备用路径现在是等待前必须处理的义务。主路径失败后，备用路径必须落实为真实可执行
+Todo、具有已求值恢复条件的等待，或明确的终止处置。仅写 `create/reopen` 计划或更新
+blocker 不能解除义务。允许挂起 A 并继续 B；两条路径都在等待明确外部条件时，保留正常
+等待。未声明备用路径的 lane 保持原有行为；声明不授予任何额外执行权限。
+
 ## Replan Triggers
 
 A replan trigger is goal-level and should be evaluated before lane-local quiet
