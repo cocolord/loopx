@@ -81,8 +81,32 @@ only public progress; they must not disclose verifier output or hidden evaluatio
 The runner remains responsible for invoking the next agent segment, measuring the
 shared total budget, preserving containment, and collecting evidence.
 
-After preregistering the segment limit and public progress command, that runner may
-delegate the bounded segment lifecycle to LoopX without changing its existing
+### When to use the continuation runner
+
+Use `continuation-agent-phase` for repository tasks with independently countable
+public work units and a workspace that can resume across solver segments. The
+runner must define the units before launch and measure completed/total units
+without reading hidden tests or verifier-only output. Completion must be monotonic;
+a lower completed count stops continuation as a regression.
+
+For example, a repository benchmark could ask an agent to implement five independent
+parser modules, each with a public acceptance check. The outer runner supplies the
+container, shared workspace, hard timeout, and a progress command that runs those
+public checks and reports how many modules currently pass out of the frozen five.
+Each solver segment resumes the same workspace. The runner preregisters the total
+budget and segment limit; LoopX stops at 5/5, either limit, or a failed progress or
+execution contract. Passing these public checks only ends continuation; the runner
+still owns final verification and scoring.
+
+A single-shot patch task whose only progress signal comes from hidden tests does
+not fit this interface. Use `agent-phase`, or let the benchmark runner own any
+permitted continuation. In that case the runner supplies containment and the stop
+condition (solver exit or its fixed timeout); it supplies no public unit probe to
+LoopX and keeps hidden verification separate from solver prompts. Repeatedly
+starting that task does not create independent, resumable work units.
+
+After preregistering the segment limit and public progress command, a suitable
+runner may delegate the bounded segment lifecycle to LoopX without changing its existing
 `external_agent_request_v1` or `external_agent_result_v1` bridge:
 
 ```bash
