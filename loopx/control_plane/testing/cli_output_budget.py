@@ -592,6 +592,12 @@ CLI_OUTPUT_COMMAND_CLASSIFICATIONS: tuple[CliOutputCommandClassification, ...] =
         rationale="configuration discovery command invoked explicitly",
     ),
     CliOutputCommandClassification(
+        command_id="machine-config",
+        qualification="explicit_cold_path_exception",
+        surface_id=None,
+        rationale="explicit machine-policy inspection and revision-bound configuration, not a recurring decision payload",
+    ),
+    CliOutputCommandClassification(
         command_id="ready-score",
         qualification="explicit_cold_path_exception",
         surface_id=None,
@@ -674,6 +680,12 @@ CLI_OUTPUT_COMMAND_CLASSIFICATIONS: tuple[CliOutputCommandClassification, ...] =
         qualification="explicit_cold_path_exception",
         surface_id=None,
         rationale="explicit per-todo lease lifecycle command family",
+    ),
+    CliOutputCommandClassification(
+        command_id="coordination-shadow",
+        qualification="explicit_cold_path_exception",
+        surface_id=None,
+        rationale="explicit Stage 2C administrative inspection and bootstrap command family",
     ),
     CliOutputCommandClassification(
         command_id="quota",

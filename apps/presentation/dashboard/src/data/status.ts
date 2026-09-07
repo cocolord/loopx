@@ -65,11 +65,13 @@ export const todoItemSchema = z.object({
   todo_id: z.string().optional().nullable(),
   role: z.string().optional().nullable(),
   status: z.string().optional().nullable(),
+  resume_when: z.string().optional().nullable(),
   priority: z.string().optional().nullable(),
   title: z.string().optional().nullable(),
   archive_state: z.string().optional().nullable(),
   source_section: z.string().optional().nullable(),
   task_class: z.string().optional().nullable(),
+  task_domain: z.string().optional().nullable(),
   action_kind: z.string().optional().nullable(),
   claimed_by: z.string().optional().nullable(),
   required_capabilities: z.array(z.string()).optional(),
@@ -86,6 +88,7 @@ export const todoGroupSchema = z.object({
   done_count: z.number().optional().default(0),
   advancement_done_count: z.number().optional(),
   items: z.array(todoItemSchema).optional().default([]),
+  deferred_items: z.array(todoItemSchema).optional(),
 });
 
 export const todoIndexItemSchema = todoItemSchema.extend({
@@ -492,6 +495,10 @@ export const runGoalSchema = z.object({
   control_plane: controlPlaneSchema.optional().nullable(),
   spawn_policy: orchestrationPolicySchema.optional().nullable(),
   orchestration: orchestrationPolicySchema.optional().nullable(),
+  coordination: z.object({
+    agent_model: z.string().optional().nullable(),
+    registered_agents: z.array(z.string()).optional().default([]),
+  }).optional().nullable(),
   index_exists: z.boolean().optional().default(false),
   raw_index_records: z.number().optional().default(0),
   unique_runs: z.number().optional().default(0),
@@ -726,6 +733,17 @@ export const statusContractSchema = z.object({
   reload_hint: "scripts/macos-dashboard-launchagent.sh restart",
 });
 
+export const goalProjectionScopeSchema = z.object({
+  schema_version: z.literal("loopx_goal_projection_scope_v0"),
+  scope: z.enum(["all", "active", "stopped"]),
+  complete: z.boolean(),
+  projected_goal_count: z.number().int().nonnegative(),
+  registry_goal_count: z.number().int().nonnegative(),
+  // Stable fingerprint of the registry's goal activation partition. Two
+  // scoped snapshots are safe to merge only when their revisions match.
+  registry_revision: z.string().optional().nullable(),
+});
+
 export const localDashboardApiSchema = z.object({
   source: z.string().optional().default("serve-status"),
   status_url: z.string().optional().nullable(),
@@ -733,6 +751,8 @@ export const localDashboardApiSchema = z.object({
   review_material_url: z.string().optional().nullable(),
   presentation_surfaces_url: z.string().optional().nullable(),
   presentation_detail_url: z.string().optional().nullable(),
+  periodic_report_index_url: z.string().optional().nullable(),
+  periodic_report_detail_url: z.string().optional().nullable(),
   ssh_hosts_url: z.string().optional().nullable(),
   reward_dry_run_url: z.string().optional().nullable(),
   reward_append_url: z.string().optional().nullable(),
@@ -819,6 +839,108 @@ export const presentationSurfaceCollectionResponseSchema = z.object({
   presentation_surfaces: presentationSurfaceCollectionSchema,
 }).strict();
 
+export const periodicReportDetailRefSchema = z.object({
+  goal_id: z.string().min(1),
+  agent_id: z.string().min(1),
+  generation_id: z.string().min(1),
+  content_sha256: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+}).strict();
+
+export const periodicReportIndexItemSchema = z.object({
+  goal_id: z.string().min(1),
+  agent_id: z.string().min(1),
+  generation_id: z.string().min(1),
+  publication_id: z.string().min(1),
+  delivered_at: z.string().min(1),
+  predecessor_publication_id: z.string().min(1).nullable().optional(),
+  detail_ref: periodicReportDetailRefSchema,
+}).strict();
+
+const periodicReportIndexBaseSchema = z.object({
+  schema_version: z.literal("periodic_report_workspace_index_v0"),
+  count: z.number().int().nonnegative(),
+  items: z.array(periodicReportIndexItemSchema),
+});
+
+const periodicReportWindowedIndexSchema = periodicReportIndexBaseSchema.extend({
+  returned_count: z.number().int().nonnegative(),
+  total_count: z.number().int().nonnegative(),
+  limit: z.number().int().nonnegative(),
+  offset: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+}).strict();
+
+const periodicReportLegacyIndexSchema = periodicReportIndexBaseSchema.strict().transform((value) => ({
+  ...value,
+  returned_count: value.count,
+  total_count: value.count,
+  limit: value.count,
+  offset: 0,
+  truncated: false,
+}));
+
+export const periodicReportIndexResponseSchema = z.object({
+  ok: z.literal(true),
+  periodic_reports: z.union([
+    periodicReportWindowedIndexSchema,
+    periodicReportLegacyIndexSchema,
+  ]),
+}).strict();
+
+export const periodicReportProjectionSchema = z.object({
+  schema_version: z.literal("periodic_report_workspace_projection_v0"),
+  goal_id: z.string().min(1),
+  agent_id: z.string().min(1),
+  generation_id: z.string().min(1),
+  generated_at: z.string().min(1),
+  title: z.string().min(1),
+  summary: z.string().min(1),
+  content_sha256: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  period_window: z.object({
+    start_at: z.string().min(1),
+    end_at: z.string().min(1),
+  }).strict(),
+  interaction: z.object({
+    attention_kind: z.literal("progress"),
+    interaction: z.literal("inform"),
+    delivery: z.literal("surface"),
+    form: z.literal("milestone_report"),
+    writable: z.literal(false),
+  }).strict(),
+  delta: z.object({
+    added_count: z.number().int().nonnegative(),
+    changed_count: z.number().int().nonnegative(),
+    item_count: z.number().int().positive(),
+    items: z.array(z.object({
+      fact_id: z.string().min(1),
+      source_ref: z.string().min(1),
+      title: z.string().min(1),
+      summary: z.string().min(1),
+      status: z.string().min(1),
+      content_kind: z.string().min(1),
+      change_kind: z.enum(["added", "changed"]),
+      previous_status: z.string().min(1).optional(),
+    }).strict()),
+  }).strict(),
+  publication: z.object({
+    publication_id: z.string().min(1),
+    delivered_at: z.string().min(1),
+    predecessor_publication_id: z.string().min(1).nullable().optional(),
+    cursor_id: z.string().min(1),
+  }).strict(),
+  truth_contract: z.object({
+    published_cursor_is_source_of_truth: z.literal(true),
+    generation_receipt_is_delivery_receipt: z.literal(false),
+    projection_is_writable: z.literal(false),
+    browser_write_api: z.literal(false),
+  }).strict(),
+}).strict();
+
+export const periodicReportProjectionResponseSchema = z.object({
+  ok: z.literal(true),
+  projection: periodicReportProjectionSchema,
+}).strict();
+
 export const statusPayloadSchema = z.object({
   ok: z.boolean(),
   registry: z.string(),
@@ -826,6 +948,7 @@ export const statusPayloadSchema = z.object({
   goal_count: z.number(),
   run_count: z.number(),
   status_contract: statusContractSchema,
+  goal_projection: goalProjectionScopeSchema.optional().nullable().default(null),
   local_dashboard_api: localDashboardApiSchema,
   contract: z.object({
     ok: z.boolean(),
@@ -913,8 +1036,11 @@ export const rewardDryRunResponseSchema = z.object({
 });
 
 export type StatusPayload = z.infer<typeof statusPayloadSchema>;
+export type PeriodicReportDetailRef = z.infer<typeof periodicReportDetailRefSchema>;
+export type PeriodicReportProjection = z.infer<typeof periodicReportProjectionSchema>;
 export type GoalActivationState = "active" | "stopped";
 export type StatusContract = NonNullable<z.infer<typeof statusContractSchema>>;
+export type GoalProjectionScope = z.infer<typeof goalProjectionScopeSchema>;
 export type QueueItem = z.infer<typeof queueItemSchema>;
 export type HumanReward = z.infer<typeof humanRewardSchema>;
 export type OperatorGate = z.infer<typeof operatorGateSchema>;

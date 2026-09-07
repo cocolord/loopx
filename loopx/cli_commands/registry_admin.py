@@ -455,6 +455,7 @@ def handle_registry_admin_command(
                 quota_compute=args.quota_compute,
                 quota_window_hours=args.quota_window_hours,
                 execution_turn_granularity=args.execution_turn_granularity,
+                execution_replan_after_todos=args.execution_replan_after_todos,
                 self_repair_enabled=args.self_repair_enabled,
                 self_repair_health=args.self_repair_health,
                 self_repair_waiting_projection=args.self_repair_waiting_projection,
@@ -494,6 +495,12 @@ def handle_registry_admin_command(
                 write_scope=args.write_scope,
                 replace_write_scope=bool(args.replace_write_scope),
                 clear_write_scope=bool(args.clear_write_scope),
+                local_authority_shadow_file=bool(
+                    args.local_authority_shadow_file
+                ),
+                clear_local_authority_shadow=bool(
+                    args.clear_local_authority_shadow
+                ),
                 waiting_on=args.waiting_on,
                 clear_waiting_on=bool(args.clear_waiting_on),
                 boundary_authority_scopes=args.boundary_authority_scope,

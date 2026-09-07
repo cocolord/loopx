@@ -8,13 +8,24 @@ import {
 } from "../effect_runtime_errors.ts";
 import { atomicWriteJson, withFileMutationLock } from "../effect_runtime_io.ts";
 import {
+  checkLegacyCoordinationWriteAllowed,
+  legacyCoordinationLeaseLockPath,
+  LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
+} from "../coordination/legacy_writer_fence.ts";
+import {
   settlementIdentity,
   type JsonObject,
 } from "../effect_program.ts";
 import { requireJsonObject } from "../runtime_decode.ts";
+import {
+  beginLeaseOutboxEntry,
+  decodeLocalAuthorityShadowBinding,
+  type LocalAuthorityShadowBinding,
+} from "../coordination/local_authority_shadow_outbox.ts";
+import { TASK_LEASE_ACQUIRE_REQUEST_SCHEMA } from "../coordination/coordination_state_contract.generated.ts";
 
 export const TASK_LEASE_ACQUIRE_REQUEST_SCHEMA_VERSION =
-  "loopx_task_lease_acquire_native_v0";
+  TASK_LEASE_ACQUIRE_REQUEST_SCHEMA;
 export const TASK_LEASE_SCHEMA_VERSION = "task_lease_v0";
 
 const DEFAULT_TTL_SECONDS = 45 * 60;
@@ -69,6 +80,7 @@ interface AcquireRequest {
   ttl_seconds: number;
   expected_version: number | null;
   authority: AuthorityFacts;
+  runtime_shadow: LocalAuthorityShadowBinding | null;
 }
 
 export interface LeaseRecord extends JsonObject {
@@ -436,6 +448,7 @@ function decodeRequest(value: unknown): AcquireRequest {
     ttl_seconds: normalizeTtl(request.ttl_seconds),
     expected_version: optionalInteger(request.expected_version, "expected_version"),
     authority,
+    runtime_shadow: decodeLocalAuthorityShadowBinding(request.runtime_shadow),
   };
 }
 
@@ -560,12 +573,41 @@ export function leaseEpoch(lease: LeaseRecord | null): number {
 }
 
 export function parseLeaseTimestamp(value: string): Date | null {
-  let text = value.trim().replace(/z$/u, "Z");
-  if (!text) return null;
-  const hasTime = /[T ]\d{2}:\d{2}/u.test(text);
-  if (hasTime) text = text.replace(/([+-]\d{2})$/u, "$1:00");
-  const hasTimezone = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/u.test(text);
-  const parsed = new Date(hasTime && !hasTimezone ? `${text}Z` : text);
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|z|[+-]\d{2}(?::?\d{2})?)?)?$/u.exec(
+    value.trim(),
+  );
+  if (match === null) return null;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fraction, timezone] = match;
+  const [year, month, day, hour, minute, second, millisecond] = [
+    yearText,
+    monthText,
+    dayText,
+    hourText ?? "0",
+    minuteText ?? "0",
+    secondText ?? "0",
+    (fraction ?? "").slice(0, 3).padEnd(3, "0") || "0",
+  ].map(Number);
+  const endOfDay = hour === 24;
+  if (
+    endOfDay &&
+    (minute !== 0 || second !== 0 || (fraction !== undefined && /[1-9]/u.test(fraction)))
+  ) return null;
+  const calendarHour = endOfDay ? 0 : hour;
+  const calendar = new Date(0);
+  calendar.setUTCHours(calendarHour, minute, second, millisecond);
+  calendar.setUTCFullYear(year, month - 1, day);
+  if (
+    calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 ||
+    calendar.getUTCDate() !== day || calendar.getUTCHours() !== calendarHour ||
+    calendar.getUTCMinutes() !== minute || calendar.getUTCSeconds() !== second ||
+    calendar.getUTCMilliseconds() !== millisecond
+  ) return null;
+  if (hourText === undefined) return calendar;
+  let text = value.trim().replace(" ", "T").replace(/z$/u, "Z");
+  if (fraction !== undefined) text = text.replace(`.${fraction}`, `.${fraction.slice(0, 3)}`);
+  if (timezone === undefined) text += "Z";
+  else text = text.replace(/([+-]\d{2})$/u, "$1:00");
+  const parsed = new Date(text);
   return Number.isNaN(parsed.valueOf()) ? null : parsed;
 }
 
@@ -576,9 +618,22 @@ export function leaseIsActive(lease: LeaseRecord | null, at: Date): boolean {
   ) {
     return false;
   }
-  if (typeof lease.expires_at !== "string") return false;
+  if (typeof lease.expires_at !== "string") {
+    throw new TaskLeaseAcquireError(
+      "active lease expires_at must be a valid timestamp",
+      "corrupt_lease",
+      { expires_at: lease.expires_at ?? null },
+    );
+  }
   const expiresAt = parseLeaseTimestamp(lease.expires_at);
-  return expiresAt !== null && expiresAt.valueOf() > at.valueOf();
+  if (expiresAt === null) {
+    throw new TaskLeaseAcquireError(
+      "active lease expires_at must be a valid timestamp",
+      "corrupt_lease",
+      { expires_at: lease.expires_at },
+    );
+  }
+  return expiresAt.valueOf() > at.valueOf();
 }
 
 export function utcIsoformat(value: Date): string {
@@ -1331,8 +1386,29 @@ async function commitAcquire(
   };
   await dependencies.beforeWrite?.(lease);
   await revalidateAuthoritySources(request.authority.source_receipts);
+  const shadowCapture = request.runtime_shadow === null
+    ? null
+    : await beginLeaseOutboxEntry({
+      runtime_root: request.runtime_root,
+      goal_id: request.goal_id,
+      lease_directory: taskLeaseDirectory(request),
+      write_class: "task_lease_acquire",
+      operation_id: request.idempotency_key,
+      previous_lease: existing,
+      planned_lease: lease,
+    });
   await atomicWriteJson(leasePath, lease);
-  return successEnvelope(request, lease, leasePath, acquireEffectId(request), false);
+  await shadowCapture?.commit();
+  const response = successEnvelope(request, lease, leasePath, acquireEffectId(request), false);
+  if (shadowCapture !== null) {
+    response.coordination_runtime_shadow_capture = {
+      entry_id: shadowCapture.entry_id,
+      seq: shadowCapture.seq,
+      source_bytes_digest: shadowCapture.source_bytes_digest,
+      failure: shadowCapture.failure,
+    };
+  }
+  return response;
 }
 
 export async function executeTaskLeaseAcquire(
@@ -1355,8 +1431,24 @@ export async function executeTaskLeaseAcquire(
 
   try {
     return await withFileMutationLock(
-      taskLeaseLockPath(request),
-      () => commitAcquire(request, dependencies),
+      legacyCoordinationLeaseLockPath(request.runtime_root, request.goal_id),
+      () => withFileMutationLock(taskLeaseLockPath(request), async () => {
+        const writerGuard = await checkLegacyCoordinationWriteAllowed({
+          schema_version: LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
+          runtime_root: request.runtime_root,
+          goal_id: request.goal_id,
+        });
+        if (writerGuard.status !== "allowed") {
+          throw new TaskLeaseAcquireError(
+            writerGuard.status === "blocked"
+              ? "legacy task-lease writer is fenced; use the canonical file authority"
+              : String(writerGuard.reason ?? "legacy writer fence check failed"),
+            String(writerGuard.reason_code ?? "legacy_writer_fence_check_failed"),
+            writerGuard,
+          );
+        }
+        return await commitAcquire(request, dependencies);
+      }),
     );
   } catch (error) {
     if (error instanceof TaskLeaseAcquireError) {

@@ -45,6 +45,10 @@ def _load_exports() -> None:
         register_bootstrap_connect_command,
     )
     from .canary import handle_canary_command, register_canary_commands
+    from .coordination_shadow import (
+        handle_coordination_shadow_command,
+        register_coordination_shadow_command,
+    )
     from .capability import handle_capability_command, register_capability_commands
     from .extension import handle_extension_command, register_extension_commands
     from .doctor import handle_doctor_command, register_doctor_command
@@ -138,8 +142,13 @@ def _load_exports() -> None:
         handle_support_control_command,
         register_support_control_commands,
     )
+    from .authority_shadow import (
+        handle_authority_shadow_command,
+        register_authority_shadow_command,
+    )
     from .task_lease import handle_task_lease_command, register_task_lease_command
-    from .todo import handle_todo_command, register_todo_command
+    from .todo import handle_todo_command
+    from .todo_registration import register_todo_command
     from .version import handle_version_command, register_version_command
     from .worker_bridge import handle_worker_bridge_command, register_worker_bridge_commands
     from .workflow_skills import (
@@ -159,6 +168,7 @@ __all__ = [
     "handle_benchmark_external_agent_command",
     "handle_bootstrap_connect_command",
     "handle_canary_command",
+    "handle_coordination_shadow_command",
     "handle_capability_command",
     "handle_extension_command",
     "handle_check_command",
@@ -216,6 +226,7 @@ __all__ = [
     "handle_starter_visible_pilot_command",
     "handle_summary_all_command",
     "handle_support_control_command",
+    "handle_authority_shadow_command",
     "handle_task_lease_command",
     "handle_todo_command",
     "handle_version_command",
@@ -228,6 +239,7 @@ __all__ = [
     "register_benchmark_external_agent_commands",
     "register_bootstrap_connect_command",
     "register_canary_commands",
+    "register_coordination_shadow_command",
     "register_capability_commands",
     "register_extension_commands",
     "register_doctor_command",
@@ -262,6 +274,7 @@ __all__ = [
     "register_summary_all_command",
     "register_status_commands",
     "register_support_control_commands",
+    "register_authority_shadow_command",
     "register_task_lease_command",
     "register_todo_command",
     "register_version_command",

@@ -14,6 +14,7 @@ evidence, or recovery authority.
 | `lark-goal-channel` | Bind one verified Lark group and projection surface to one LoopX goal | [`goal_channel.py`](goal_channel.py), [`goal_channel_setup.py`](goal_channel_setup.py) |
 | `lark-explore-projection` | Project canonical Explore results into Lark tables, cards, and whiteboards | [`presentation/explore_results.py`](presentation/explore_results.py) |
 | `lark-periodic-report-announcement` | Deliver a periodic report through the current Goal Channel's verified project Bot while mentioning only recipients selected by its typed audience plan | [`periodic_report_delivery.py`](periodic_report_delivery.py) |
+| `lark-periodic-report-source` | Bind and settle one exact Agent-selected Goal Channel source for a typed report action without classifying message text | [`periodic_report_request.py`](periodic_report_request.py) |
 | `lark-miaoda-html-report` | Publish an already-rendered periodic report to an operator-selected existing Miaoda app | [`presentation/periodic_report.py`](presentation/periodic_report.py) |
 
 Mention-bearing text delivery is owned by the extension's shared outbound
@@ -53,6 +54,18 @@ created message back. It returns no profile, chat id, message body, or raw
 provider payload. Installation and the command itself grant no new Lark scope
 or external-write authority.
 
+When an Agent semantically interprets one inbox item as a report request, it
+passes that item's exact `message_id` to `loopx periodic-report request`.
+`periodic_report_request.py` validates only user authorship, provider-native
+addressing, the selected Goal/Agent binding, provider target, and inbox
+identity. It neither scans other inbox items nor inspects text for report
+keywords. Its bind/settle ports are discovered from `extension.toml`; source
+ACK happens only after the capability has persisted `delivery_ready` state.
+Transient ACK failures remain replayable. A missing source or binding/receipt
+identity drift is recorded as a terminal settlement failure and left un-ACKed;
+after correcting the configuration or retention issue, re-deliver the request
+as a new Lark message and invoke the typed action with its new `message_id`.
+
 The [event inbox guide](docs/lark-event-inbox.md) documents the complete
 collector, processing, reply, reaction, and acknowledgement lifecycle. The
 [Lark Kanban integration guide](../../../docs/integrations/lark-kanban-control-plane-adapter.md)
@@ -80,10 +93,15 @@ loopx lark-inbox history-catch-up \
   --execute
 ```
 
-Retries resume the exact private page token, and a completed window replays
-without another provider read. A caller may extend one completed history
+Retries resume the exact private page token. A completed window replays
+without another provider read only while its upper coverage bound is current;
+a later invocation opens one bounded forward window from the previous end, so
+new messages in an existing group or topic are not stranded behind an old
+`history_complete` state. A caller may also extend one completed history
 window to an earlier start once; the provider covers only the missing earlier
-window and rejects later source/config drift. The returned link-evidence packet
+window and rejects later source/config drift. Legacy v0 cursors migrate
+conservatively: they may replay already ingested messages, but never advance a
+coverage bound that could skip unseen history. The returned link-evidence packet
 contains URL plus message and route lineage for the owner-local Agent, but not
 the surrounding message body, sender, chat id, profile, cursor, or raw provider
 payload. Inbox and cursor directories are restricted to the owner, and their
@@ -103,6 +121,44 @@ member of the group, the application to be published, and
 `im:message:readonly` plus `im:chat:read`. Permission error `230027` is returned
 as typed `group_history_permission_required`; it never advances the inbox or
 cursor.
+
+### Dynamic collector route reconcile
+
+An already provisioned inbox can be enrolled into a v1 multi-chat collector
+without rewriting the complete owner-local collector file by hand. Preview the
+route first, then apply it explicitly:
+
+```bash
+loopx lark-inbox collector-route-reconcile \
+  --project . \
+  --config .loopx/config/lark-collector.json \
+  --route-key project-feedback \
+  --chat-id oc_<local-private-chat-id> \
+  --event-inbox-config .loopx/config/lark/project-feedback.json
+
+loopx lark-inbox collector-route-reconcile \
+  --project . \
+  --config .loopx/config/lark-collector.json \
+  --route-key project-feedback \
+  --chat-id oc_<local-private-chat-id> \
+  --event-inbox-config .loopx/config/lark/project-feedback.json \
+  --execute
+```
+
+The operation validates unique route, chat, inbox-config, and inbox-path
+bindings; serializes concurrent writers; writes through an atomic replacement;
+and reads the exact binding and config digest back. Repeating the same request
+is a zero-write `already_applied` result, while any binding drift fails closed.
+Receipts return the public-safe `route_key` but never the chat id, inbox config,
+local path, profile, or credentials.
+
+Config readback does not prove that a running collector has reloaded the new
+route. Every successful plan/apply receipt therefore keeps
+`runtime_reload_required=true`, `runtime_reload_performed=false`, and
+`runtime_readback_verified=false`. The deployment owner must restart or
+reinstall the collector and independently verify its runtime before treating
+the route as live. Removing routes remains a separate owner-authorized
+lifecycle operation; this additive command never deletes or rebinds one.
 
 ## Lifecycle
 
@@ -203,6 +259,14 @@ permission or silently enables an external write.
   `im:message.group_msg`、`im:message.group_msg.include_bot:read`、
   `im:message.p2p_msg:readonly`
 - 交互/文档 sink：`cardkit:card:read/write`、`docs:document.comment:read/create/delete`
+
+`im:chat.members:read` 是原生 @ 身份校验的核心权限，也适用于 @ 机器人。
+发送前使用 `im +chat-members-list --member-types user,bot --page-all` 查询
+精确成员身份；旧的 `chat.members get` 不能作为机器人不在群内的证据。
+默认权限清单不代表已有应用已获授权：旧应用仍需在开发者后台申请并完成审核，
+LoopX 不会自动授予权限，也不会在成员读取失败时绕过 @ 校验。
+若消息回读将机器人标为 `app_id`，仅接受当前群机器人列表中已验证且无歧义的
+`member_id` ↔ `app_id` 映射；名称相同不构成身份验证。
 
 拿到 App ID（`cli_xxx`）后，可在开发者后台一键批量申请：
 

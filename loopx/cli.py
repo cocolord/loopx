@@ -43,9 +43,16 @@ from .capabilities.periodic_report.cli import (
     handle_periodic_report_command,
     register_periodic_report_commands,
 )
+from .capabilities.machine_configuration.cli import (
+    handle_machine_configuration_command,
+    register_machine_configuration_commands,
+)
 from .capabilities.periodic_report.post_writeback_hook import (
     build_periodic_report_post_writeback_projection,
     periodic_report_post_writeback_hooks_for_goal,
+)
+from .control_plane.coordination.local_authority_shadow_adapter import (
+    effective_runtime_root,
 )
 from .capabilities.semantic_preference.cli import (
     handle_semantic_preference_command,
@@ -64,6 +71,7 @@ from .cli_commands import (
     handle_benchmark_command,
     handle_bootstrap_connect_command,
     handle_canary_command,
+    handle_coordination_shadow_command,
     handle_capability_command,
     handle_doctor_command,
     handle_dreaming_command,
@@ -92,6 +100,7 @@ from .cli_commands import (
     handle_support_control_command,
     handle_handoff_mode_command,
     handle_task_lease_command,
+    handle_authority_shadow_command,
     handle_version_command,
     handle_host_mode_plan_command,
     handle_worker_bridge_command,
@@ -100,6 +109,7 @@ from .cli_commands import (
     register_turn_commands,
     register_bootstrap_connect_command,
     register_canary_commands,
+    register_coordination_shadow_command,
     register_capability_commands,
     register_doctor_command,
     register_dreaming_commands,
@@ -131,6 +141,7 @@ from .cli_commands import (
     register_support_control_commands,
     register_handoff_mode_command,
     register_task_lease_command,
+    register_authority_shadow_command,
     register_todo_command,
     register_version_command,
     register_host_mode_plan_command,
@@ -140,6 +151,18 @@ from .cli_commands import (
 from .cli_commands.opencode2_goal_worker import (
     handle_opencode2_goal_worker_command,
     register_opencode2_goal_worker_command,
+)
+from .cli_commands.shared_goal_alignment import (
+    handle_shared_goal_alignment_command,
+    register_shared_goal_alignment_command,
+)
+from .cli_commands.goal_amendment_proposal import (
+    handle_goal_amendment_proposal_command,
+    register_goal_amendment_proposal_command,
+)
+from .cli_commands.reliability_diagnostics import (
+    handle_reliability_diagnostics_command,
+    register_reliability_diagnostics_commands,
 )
 from .cli_rollout import append_cli_rollout_event
 from .capabilities.project_skill_delivery.cli import (
@@ -239,6 +262,8 @@ def build_parser() -> LoopXArgumentParser:
 
     register_capability_commands(sub, add_subcommand_format)
 
+    register_reliability_diagnostics_commands(sub, add_subcommand_format)
+
     register_extension_commands(sub, add_subcommand_format)
 
     register_change_quality_commands(sub, add_subcommand_format)
@@ -268,6 +293,8 @@ def build_parser() -> LoopXArgumentParser:
         add_subcommand_format,
         provider_command_registrars=(register_lark_periodic_report_commands,),
     )
+
+    register_machine_configuration_commands(sub, add_subcommand_format)
 
     register_semantic_preference_commands(sub, add_subcommand_format)
 
@@ -308,8 +335,12 @@ def build_parser() -> LoopXArgumentParser:
     register_evidence_log_command(sub, add_subcommand_format)
     register_explore_commands(sub, add_subcommand_format)
     register_todo_command(sub, add_subcommand_format)
+    register_coordination_shadow_command(sub, add_subcommand_format)
     register_task_lease_command(sub, add_subcommand_format)
+    register_authority_shadow_command(sub, add_subcommand_format)
     register_handoff_mode_command(sub, add_subcommand_format)
+    register_shared_goal_alignment_command(sub, add_subcommand_format)
+    register_goal_amendment_proposal_command(sub, add_subcommand_format)
     register_quota_command(sub)
 
     return parser
@@ -421,6 +452,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     if capability_result is not None:
         return capability_result
+
+    reliability_diagnostics_result = handle_reliability_diagnostics_command(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=args.runtime_root,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if reliability_diagnostics_result is not None:
+        return reliability_diagnostics_result
 
     extension_result = handle_extension_command(
         args,
@@ -563,6 +604,13 @@ def main(argv: list[str] | None = None) -> int:
 
     decision_context_result = handle_decision_context_command(
         args,
+        runtime_root=(
+            effective_runtime_root(registry_path, args.runtime_root)
+            if args.command == "decision-context"
+            and args.decision_context_command
+            in {"recall-context", "prepare-evidence", "prepare-review"}
+            else None
+        ),
         output_format=output_format,
         print_payload=print_payload,
     )
@@ -603,6 +651,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     if periodic_report_result is not None:
         return periodic_report_result
+
+    machine_configuration_result = handle_machine_configuration_command(
+        args,
+        runtime_root_arg=args.runtime_root,
+        registry_path=registry_path,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if machine_configuration_result is not None:
+        return machine_configuration_result
 
     semantic_preference_result = handle_semantic_preference_command(
         args,
@@ -656,6 +714,10 @@ def main(argv: list[str] | None = None) -> int:
             periodic_report_post_writeback_hooks_for_goal(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
+                runtime_root=effective_runtime_root(
+                    registry_path,
+                    args.runtime_root,
+                ),
             )
             if args.command == "refresh-state"
             else ()
@@ -763,6 +825,16 @@ def main(argv: list[str] | None = None) -> int:
     if explore_result is not None:
         return explore_result
 
+    coordination_shadow_result = handle_coordination_shadow_command(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=args.runtime_root,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if coordination_shadow_result is not None:
+        return coordination_shadow_result
+
     task_lease_result = handle_task_lease_command(
         args,
         registry_path=registry_path,
@@ -773,14 +845,45 @@ def main(argv: list[str] | None = None) -> int:
     if task_lease_result is not None:
         return task_lease_result
 
+    authority_shadow_result = handle_authority_shadow_command(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=args.runtime_root,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if authority_shadow_result is not None:
+        return authority_shadow_result
+
     handoff_mode_result = handle_handoff_mode_command(
         args,
         registry_path=registry_path,
         output_format=output_format,
         print_payload=print_payload,
+        runtime_root_arg=args.runtime_root,
     )
     if handoff_mode_result is not None:
         return handoff_mode_result
+
+    shared_goal_alignment_result = handle_shared_goal_alignment_command(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=args.runtime_root,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if shared_goal_alignment_result is not None:
+        return shared_goal_alignment_result
+
+    goal_amendment_proposal_result = handle_goal_amendment_proposal_command(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=args.runtime_root,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if goal_amendment_proposal_result is not None:
+        return goal_amendment_proposal_result
 
     if args.command == "auto-research":
         try:

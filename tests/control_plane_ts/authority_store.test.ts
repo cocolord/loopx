@@ -65,6 +65,21 @@ test("provider profiles map one logical contract onto different backend primitiv
   );
   assert.equal(AUTHORITY_STORE_PROVIDER_PROFILES.postgresql.stage, "stage2b_candidate");
   assert.match(AUTHORITY_STORE_PROVIDER_PROFILES.postgresql.trust_boundary, /tenant_scoped/);
+  assert.ok(
+    AUTHORITY_STORE_PROVIDER_PROFILES.postgresql.qualification_holds.includes(
+      "service_api_authentication_and_tenant_authorization",
+    ),
+  );
+  assert.ok(
+    AUTHORITY_STORE_PROVIDER_PROFILES.postgresql.qualification_holds.includes(
+      "service_role_provisioning_and_audit_policy",
+    ),
+  );
+  assert.ok(
+    AUTHORITY_STORE_PROVIDER_PROFILES.postgresql.qualification_holds.includes(
+      "retention_partitioning_and_measured_capacity",
+    ),
+  );
   assert.notDeepEqual(
     AUTHORITY_STORE_PROVIDER_PROFILES.file,
     AUTHORITY_STORE_PROVIDER_PROFILES.nokv,

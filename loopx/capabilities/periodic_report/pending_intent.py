@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -36,7 +38,26 @@ from .post_writeback_hook import (
     PERIODIC_REPORT_TRIGGER_EVALUATION_INTENT,
     evaluate_periodic_report_trigger_evaluation_intent,
 )
+from .request_action import (
+    PeriodicReportRequestPorts,
+    periodic_report_request_intents,
+    request_entry_for_intent,
+    settle_periodic_report_request,
+)
 from .project_progress_snapshot import build_project_progress_snapshot
+from .incremental import (
+    build_periodic_report_publication_candidate,
+    write_periodic_report_publication_candidate,
+)
+from .machine_defaults import (
+    build_periodic_report_delivery_authority,
+    resolve_goal_periodic_report_subscription,
+)
+from .machine_store import read_periodic_report_machine_defaults
+from .workspace import (
+    build_periodic_report_workspace_projection,
+    write_periodic_report_workspace_projection,
+)
 
 
 PENDING_INTENT_SCHEMA = "pending_capability_intent_projection_v0"
@@ -77,11 +98,16 @@ def _intent_key(intent: Mapping[str, Any]) -> str:
     ).hexdigest()[:24]
 
 
-def _periodic_report_delivery_binding_ref(generation_id: object) -> str:
+def _periodic_report_delivery_binding_ref(
+    generation_id: object, authority: Mapping[str, Any]
+) -> str:
     digest_suffix = str(generation_id).split("_")[-1][:16]
+    authority_suffix = str(authority.get("effective_revision") or "").split(":")[-1][
+        :12
+    ]
     # Todo capability binding refs require the namespaced value to start with
     # a letter. Generation digests are hexadecimal and may start with a digit.
-    return f"periodic-report:g{digest_suffix}"
+    return f"periodic-report:g{digest_suffix}-a{authority_suffix}"
 
 
 def _attempt_dir(
@@ -215,10 +241,26 @@ def _load_consumption_receipt(
         not isinstance(receipt, Mapping)
         or receipt.get("schema_version") != CONSUMPTION_RECEIPT_SCHEMA
         or receipt.get("intent_digest") != intent_digest
-        or receipt.get("status") != "approval_pending"
+        or receipt.get("status") not in {"approval_pending", "delivery_ready"}
     ):
         return None
     return receipt
+
+
+def _active_delivery_subscription(
+    *, registry_path: Path, runtime_root: Path, goal_id: str
+) -> dict[str, Any] | None:
+    """Resolve the current standing delivery authority for one pending report."""
+
+    registry = read_json(registry_path)
+    goal = find_registry_goal(registry, goal_id)
+    if not isinstance(goal, Mapping):
+        return None
+    subscription = resolve_goal_periodic_report_subscription(
+        goal,
+        read_periodic_report_machine_defaults(runtime_root),
+    )
+    return dict(subscription) if subscription.get("enabled") is True else None
 
 
 def _next_attempt_revision(
@@ -318,24 +360,17 @@ def pending_periodic_report_intents(
 
     if not _IDENTITY_RE.fullmatch(goal_id) or not _IDENTITY_RE.fullmatch(agent_id):
         return []
-    sidecars = runtime_root / "goals" / goal_id / "post_writeback_hooks"
-    if not sidecars.is_dir():
-        return []
     pending: list[dict[str, Any]] = []
-    for path in sorted(sidecars.iterdir()):
-        if not path.is_file() or not _DISPATCH_RE.fullmatch(path.name):
-            continue
+    for intent in periodic_report_request_intents(
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        agent_id=agent_id,
+    ):
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            decision = evaluate_periodic_report_trigger_evaluation_intent(intent)
+        except ValueError:
             continue
-        intent = _valid_sidecar_intent(
-            value,
-            dispatch_id=path.stem,
-            goal_id=goal_id,
-            agent_id=agent_id,
-        )
-        if intent is None:
+        if decision.get("eligible") is not True:
             continue
         actionable, _revision = _next_attempt_revision(
             registry_path=registry_path,
@@ -344,10 +379,45 @@ def pending_periodic_report_intents(
             agent_id=agent_id,
             intent=intent,
         )
-        if not actionable:
-            continue
-        pending.append(intent)
-    return pending
+        receipt = _load_consumption_receipt(
+            _receipt_path(runtime_root, goal_id, intent),
+            intent_digest=_canonical_digest(intent),
+        )
+        if actionable or (
+            isinstance(receipt, Mapping) and receipt.get("status") == "delivery_ready"
+        ):
+            pending.append(intent)
+
+    sidecars = runtime_root / "goals" / goal_id / "post_writeback_hooks"
+    if sidecars.is_dir():
+        for path in sorted(sidecars.iterdir()):
+            if not path.is_file() or not _DISPATCH_RE.fullmatch(path.name):
+                continue
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            sidecar_intent = _valid_sidecar_intent(
+                value,
+                dispatch_id=path.stem,
+                goal_id=goal_id,
+                agent_id=agent_id,
+            )
+            if sidecar_intent is None:
+                continue
+            actionable, _revision = _next_attempt_revision(
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=goal_id,
+                agent_id=agent_id,
+                intent=sidecar_intent,
+            )
+            if actionable:
+                pending.append(sidecar_intent)
+    deduplicated: dict[str, dict[str, Any]] = {}
+    for intent in pending:
+        deduplicated.setdefault(str(intent.get("idempotency_key") or ""), intent)
+    return list(deduplicated.values())
 
 
 def periodic_report_pending_intent_interaction_hook(
@@ -356,6 +426,14 @@ def periodic_report_pending_intent_interaction_hook(
     normalized_agent_id = str(agent_id or "").strip()
 
     def produce() -> Mapping[str, Any]:
+        try:
+            subscription = _active_delivery_subscription(
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=goal_id,
+            )
+        except (OSError, TypeError, ValueError):
+            subscription = None
         intents = (
             pending_periodic_report_intents(
                 registry_path=registry_path,
@@ -363,7 +441,7 @@ def periodic_report_pending_intent_interaction_hook(
                 goal_id=goal_id,
                 agent_id=normalized_agent_id,
             )
-            if normalized_agent_id
+            if normalized_agent_id and subscription is not None
             else []
         )
         if not intents:
@@ -396,14 +474,15 @@ def periodic_report_pending_intent_interaction_hook(
                 "action_kind": "consume_periodic_report_intent",
                 "action_summary": (
                     "Prepare the typed report facts, author the required Chinese "
-                    "analysis narrative, then freeze one locally validated draft."
+                    "analysis narrative, freeze one validated draft, then queue its "
+                    "configured Goal Channel delivery."
                 ),
                 "command": (
                     "loopx periodic-report consume-pending "
                     f"--goal-id {goal_id} --agent-id {normalized_agent_id} --execute"
                 ),
                 "generation_authorized": True,
-                "external_delivery_authorized": False,
+                "external_delivery_authorized": True,
                 "agent_read_required": True,
             },
         }
@@ -412,19 +491,38 @@ def periodic_report_pending_intent_interaction_hook(
         hook_id=HOOK_ID,
         capability_id=CAPABILITY_ID,
         projection_slots=("pending_capability_intent",),
-        requested_read_scope=("post_writeback_intent_journal",),
+        requested_read_scope=(
+            "periodic_report_request_journal",
+            "post_writeback_intent_journal",
+        ),
         producer=produce,
     )
 
 
 def _progress_facts(
-    *, registry_path: Path, goal_id: str, agent_id: str, completed_at: str
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    goal_id: str,
+    agent_id: str,
+    completed_at: str,
+    available_capabilities: Any = None,
 ) -> list[dict[str, Any]]:
+    from ...control_plane.todos.todo_index import (
+        MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,
+    )
+    from ...rollout_event_log import load_rollout_events, rollout_event_log_path
+
     snapshot = build_project_progress_snapshot(
         registry_path=registry_path,
         goal_id=goal_id,
         agent_id=agent_id,
         completed_at=completed_at,
+        available_capabilities=available_capabilities,
+        rollout_events=load_rollout_events(
+            rollout_event_log_path(runtime_root, goal_id),
+            limit=MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,
+        ),
     )
     if not isinstance(snapshot, Mapping):
         raise ValueError("periodic-report has no public-safe progress items")
@@ -483,6 +581,30 @@ def _progress_facts_from_snapshot(
             "status": status,
             "source_ref": source_ref,
         }
+        change_kind = str(raw_item.get("change_kind") or "").strip()
+        if change_kind:
+            if change_kind not in {"added", "changed"}:
+                raise ValueError(
+                    "periodic-report progress snapshot change_kind is invalid"
+                )
+            fact["change_kind"] = change_kind
+        if change_kind == "changed":
+            previous_status = str(raw_item.get("previous_status") or "").strip()
+            previous_kind = str(raw_item.get("previous_content_kind") or "").strip()
+            previous_fingerprint = str(
+                raw_item.get("previous_fact_fingerprint") or ""
+            ).strip()
+            if not previous_status or not previous_kind or not previous_fingerprint:
+                raise ValueError(
+                    "periodic-report changed fact requires its previous state"
+                )
+            fact.update(
+                {
+                    "previous_status": previous_status,
+                    "previous_content_kind": previous_kind,
+                    "previous_fact_fingerprint": previous_fingerprint,
+                }
+            )
         if completed is not None:
             fact["completed_at"] = completed
         facts.append(fact)
@@ -513,6 +635,7 @@ def _build_editorial_request(
     agent_id: str,
     completed_at: str,
     facts: list[dict[str, Any]],
+    incremental_baseline: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     work_window = _actual_work_window(
         runtime_root=runtime_root,
@@ -520,6 +643,11 @@ def _build_editorial_request(
         agent_id=agent_id,
         facts=facts,
         completed_at=completed_at,
+        publication_boundary=(
+            str(incremental_baseline.get("covered_until") or "")
+            if isinstance(incremental_baseline, Mapping)
+            else None
+        ),
     )
     request: dict[str, Any] = {
         "schema_version": EDITORIAL_REQUEST_SCHEMA,
@@ -538,6 +666,8 @@ def _build_editorial_request(
                 "Separate current-version coverage from historical evidence.",
                 "Keep report-building work out of the analysis mainline.",
                 "Write audience-facing Chinese while preserving necessary technical terms.",
+                "Report only the supplied incremental facts; never restate facts absent from this request.",
+                "Render change_kind=changed as a concise transition from the supplied previous state to the current state.",
             ],
         },
         "completed_at": completed_at,
@@ -549,6 +679,8 @@ def _build_editorial_request(
             "external_writes_performed": False,
         },
     }
+    if isinstance(incremental_baseline, Mapping):
+        request["incremental_baseline"] = dict(incremental_baseline)
     request["request_digest"] = _canonical_digest(request)
     return request
 
@@ -560,9 +692,22 @@ def _actual_work_window(
     agent_id: str,
     facts: list[dict[str, Any]],
     completed_at: str,
+    publication_boundary: str | None = None,
 ) -> dict[str, str]:
     end = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
     observed: list[datetime] = []
+    boundary: datetime | None = None
+    if publication_boundary:
+        try:
+            boundary = datetime.fromisoformat(
+                publication_boundary.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise ValueError("periodic-report publication boundary is invalid") from exc
+        if boundary.tzinfo is None or boundary >= end:
+            raise ValueError("periodic-report publication boundary is invalid")
+        boundary = boundary.astimezone(end.tzinfo)
+        observed.append(boundary)
     run_index = runtime_root / "goals" / goal_id / "runs" / "index.jsonl"
     if run_index.is_file():
         try:
@@ -584,7 +729,7 @@ def _actual_work_window(
             if value.tzinfo is None or end.tzinfo is None:
                 continue
             value = value.astimezone(end.tzinfo)
-            if value <= end:
+            if value <= end and (boundary is None or value >= boundary):
                 observed.append(value)
     for fact in facts:
         raw = str(fact.get("completed_at") or fact.get("updated_at") or "").strip()
@@ -597,7 +742,7 @@ def _actual_work_window(
         if value.tzinfo is None or end.tzinfo is None:
             continue
         value = value.astimezone(end.tzinfo)
-        if value <= end:
+        if value <= end and (boundary is None or value >= boundary):
             observed.append(value)
     start = min(observed, default=end)
     # The document protocol requires a non-empty half-open window. A stage with
@@ -631,12 +776,15 @@ def _actual_work_window(
             f"{display_end:%Y-%m-%d %H:%M}"
             f"（{timezone_label}）"
         )
-    return {
+    window = {
         "start_at": document_start.isoformat(),
         "end_at": end.isoformat(),
         "period_label": period_label,
         "source": "agent_run_history_or_report_facts",
     }
+    if boundary is not None:
+        window["publication_boundary_applied"] = "true"
+    return window
 
 
 def _load_frozen_editorial_request(
@@ -809,6 +957,23 @@ def _load_editorial_response(
     }
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    temporary_path = Path(temporary)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
 def _build_authored_source(
     authored: Mapping[str, Any], *, completed_at: str
 ) -> dict[str, Any]:
@@ -829,6 +994,7 @@ def consume_pending_periodic_report_intent(
     goal_id: str,
     agent_id: str,
     execute: bool,
+    provider_request_ports: PeriodicReportRequestPorts | None = None,
 ) -> dict[str, Any]:
     intents = pending_periodic_report_intents(
         registry_path=registry_path,
@@ -843,12 +1009,97 @@ def consume_pending_periodic_report_intent(
             "status": "no_pending_intent",
             "external_writes_performed": False,
         }
+    subscription = _active_delivery_subscription(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+    )
+    if subscription is None:
+        return {
+            "ok": True,
+            "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
+            "status": "subscription_disabled",
+            "external_writes_performed": False,
+        }
     intent = intents[0]
     trigger = evaluate_periodic_report_trigger_evaluation_intent(intent)
     payload = intent["payload"]
-    stage = payload["stage_completion"]
-    completed_at = str(stage["completed_at"])
+    report_request = payload.get("report_request")
+    request_entry = (
+        request_entry_for_intent(
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            intent=intent,
+        )
+        if isinstance(report_request, Mapping)
+        else None
+    )
+    stage = payload.get("stage_completion")
+    completed_at = str(
+        report_request.get("requested_at")
+        if isinstance(report_request, Mapping)
+        else stage.get("completed_at")
+        if isinstance(stage, Mapping)
+        else ""
+    )
     project_progress = payload.get("project_progress")
+    fallback_capabilities = payload.get("available_capabilities")
+    if fallback_capabilities is None and isinstance(payload.get("turn"), Mapping):
+        fallback_capabilities = payload["turn"].get("available_capabilities")
+    actionable, rejection_revision = _next_attempt_revision(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        intent=intent,
+    )
+    if not actionable:
+        durable = _load_consumption_receipt(
+            _receipt_path(
+                runtime_root,
+                goal_id,
+                intent,
+                rejection_revision=rejection_revision,
+            ),
+            intent_digest=_canonical_digest(intent),
+        )
+        if (
+            request_entry is not None
+            and isinstance(durable, Mapping)
+            and durable.get("status") == "delivery_ready"
+        ):
+            settlement = settle_periodic_report_request(
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=goal_id,
+                agent_id=agent_id,
+                intent=intent,
+                request_ports=provider_request_ports,
+                execute=execute,
+            )
+            result = {
+                **dict(durable),
+                "source_settlement": settlement,
+                "settlement_only_retry": True,
+            }
+            if execute:
+                atomic_write_json(
+                    _receipt_path(
+                        runtime_root,
+                        goal_id,
+                        intent,
+                        rejection_revision=rejection_revision,
+                    ),
+                    result,
+                )
+            return result
+        return {
+            "ok": True,
+            "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
+            "status": "no_pending_intent",
+            "external_writes_performed": False,
+        }
     facts = (
         _progress_facts_from_snapshot(
             project_progress,
@@ -858,25 +1109,13 @@ def consume_pending_periodic_report_intent(
         if isinstance(project_progress, Mapping)
         else _progress_facts(
             registry_path=registry_path,
+            runtime_root=runtime_root,
             goal_id=goal_id,
             agent_id=agent_id,
             completed_at=completed_at,
+            available_capabilities=fallback_capabilities,
         )
     )
-    actionable, rejection_revision = _next_attempt_revision(
-        registry_path=registry_path,
-        runtime_root=runtime_root,
-        goal_id=goal_id,
-        agent_id=agent_id,
-        intent=intent,
-    )
-    if not actionable:
-        return {
-            "ok": True,
-            "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
-            "status": "no_pending_intent",
-            "external_writes_performed": False,
-        }
     request_path = _editorial_request_path(
         runtime_root,
         goal_id,
@@ -902,9 +1141,15 @@ def consume_pending_periodic_report_intent(
         agent_id=agent_id,
         completed_at=completed_at,
         facts=facts,
+        incremental_baseline=(
+            project_progress.get("incremental_baseline")
+            if isinstance(project_progress, Mapping)
+            and isinstance(project_progress.get("incremental_baseline"), Mapping)
+            else None
+        ),
     )
     if not response_path.is_file():
-        result = {
+        editorial_result = {
             "ok": True,
             "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
             "status": "editorial_required",
@@ -920,7 +1165,7 @@ def consume_pending_periodic_report_intent(
         if execute:
             request_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_json(request_path, editorial_request)
-        return result
+        return editorial_result
     authored = _load_editorial_response(
         request=editorial_request,
         response_path=response_path,
@@ -949,7 +1194,7 @@ def consume_pending_periodic_report_intent(
         document=document, artifacts=[markdown, html]
     )
     generation = bundle["generation_receipt"]
-    digest_suffix = str(generation["generation_id"]).split("_")[-1][:16]
+    delivery_authority = build_periodic_report_delivery_authority(subscription)
     result: dict[str, Any] = {
         "ok": True,
         "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
@@ -971,7 +1216,8 @@ def consume_pending_periodic_report_intent(
             "evidence_lineage_validated": True,
             "external_writes_performed": False,
         },
-        "approval_scope": f"direction:action:periodic_report_{digest_suffix}",
+        "external_delivery_authorized": True,
+        "delivery_authority": delivery_authority,
         "external_writes_performed": False,
     }
     if not execute:
@@ -988,62 +1234,72 @@ def consume_pending_periodic_report_intent(
     markdown_path = artifact_dir / "report.md"
     html_path = artifact_dir / "report.html"
     generation_bundle_path = artifact_dir / "generation-bundle.json"
-    markdown_path.write_text(str(markdown["content"]), encoding="utf-8")
-    html_path.write_text(str(html["content"]), encoding="utf-8")
+    publication_candidate_path = artifact_dir / "publication-candidate.json"
+    workspace_projection_path = artifact_dir / "workspace-projection.json"
+    _atomic_write_text(markdown_path, str(markdown["content"]))
+    _atomic_write_text(html_path, str(html["content"]))
     atomic_write_json(generation_bundle_path, bundle)
-    approval_scope = str(result["approval_scope"])
+    workspace_projection = build_periodic_report_workspace_projection(
+        goal_id=goal_id,
+        agent_id=agent_id,
+        generation_id=str(generation["generation_id"]),
+        document=document,
+        facts=facts,
+    )
+    write_periodic_report_workspace_projection(
+        path=workspace_projection_path,
+        projection=workspace_projection,
+    )
+    incremental_baseline = (
+        project_progress.get("incremental_baseline")
+        if isinstance(project_progress, Mapping)
+        and isinstance(project_progress.get("incremental_baseline"), Mapping)
+        else None
+    )
+    publication_candidate = build_periodic_report_publication_candidate(
+        goal_id=goal_id,
+        agent_id=agent_id,
+        generation_id=str(generation["generation_id"]),
+        trigger_receipt=trigger,
+        facts=facts,
+        baseline=incremental_baseline,
+        workspace_projection_sha256=str(workspace_projection["content_sha256"]),
+    )
+    write_periodic_report_publication_candidate(
+        path=publication_candidate_path,
+        candidate=publication_candidate,
+    )
     delivery = add_goal_todo(
         registry_path=registry_path,
         goal_id=goal_id,
         role="agent",
         text=(
-            "[P0] Deliver the approved periodic report as two independent Goal "
+            "[P0] Deliver the configured periodic report as two independent Goal "
             "Channel messages: the report entry and the Lark document entry for "
             f"{generation['generation_id']}."
         ),
-        status="blocked",
+        status="open",
         note=(
             "Use only the frozen generation consumption receipt and the current "
             "Goal Channel project_bot binding; do not fall back to a user or "
-            "default Bot identity."
+            "default Bot identity. The enabled periodic-report subscription is "
+            "the standing delivery authority."
         ),
         task_class="advancement_task",
         action_kind="deliver_periodic_report_goal_channel",
         task_domain="provider_delivery",
         capability_binding_ref=_periodic_report_delivery_binding_ref(
-            generation["generation_id"]
+            generation["generation_id"], delivery_authority
         ),
         required_write_scopes=["goal_channel/lark/messages"],
         required_capabilities=["network", "lark_bot_message_write"],
         target_capabilities=["periodic_report", "goal_channel"],
-        required_decision_scopes=[approval_scope],
         claimed_by=agent_id,
-        agent_id=agent_id,
-    )
-    gate = add_goal_todo(
-        registry_path=registry_path,
-        goal_id=goal_id,
-        role="user",
-        text=(
-            "[P0] 审阅并批准精确冻结的中文阶段分析周报 "
-            f"{generation['generation_id']}；批准前不得发布妙搭或发送群消息。"
-        ),
-        note=(
-            f"HTML digest {html['content_digest']}; Markdown digest "
-            f"{markdown['content_digest']}; approval grants only the exact frozen payload."
-        ),
-        task_class="user_gate",
-        action_kind="approve_periodic_report_payload",
-        decision_scope=approval_scope,
-        bound_agent=agent_id,
-        blocks_agent=agent_id,
-        unblocks_todo_id=str(delivery["todo_id"]),
         agent_id=agent_id,
     )
     durable = {
         **result,
-        "status": "approval_pending",
-        "approval_todo_id": gate.get("todo_id"),
+        "status": "delivery_ready",
         "delivery_todo_id": delivery.get("todo_id"),
         "artifacts": {
             "html_path": str(html_path),
@@ -1051,9 +1307,25 @@ def consume_pending_periodic_report_intent(
             "markdown_path": str(markdown_path),
             "markdown_digest": markdown["content_digest"],
             "generation_bundle_path": str(generation_bundle_path),
+            "publication_candidate_path": str(publication_candidate_path),
+            "workspace_projection_path": str(workspace_projection_path),
+            "workspace_projection_sha256": workspace_projection["content_sha256"],
         },
+        "incremental_baseline": publication_candidate.get("incremental_baseline"),
     }
     atomic_write_json(receipt_path, durable)
+    if request_entry is not None:
+        settlement = settle_periodic_report_request(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            intent=intent,
+            request_ports=provider_request_ports,
+            execute=True,
+        )
+        durable["source_settlement"] = settlement
+        atomic_write_json(receipt_path, durable)
     return durable
 
 

@@ -178,6 +178,25 @@ typed evidence groups before a verdict:
 
 - problem context and active caller;
 - architecture and ownership flow;
+- repository reuse for behavior-bearing changes: search base and exact-head
+  code, including unchanged siblings, by caller outcome/resource rather than
+  only new filenames. Record revisions, queries, paths and candidate callers;
+  compare scope/filters, ordering/paging, authority/sanitization and state/retry
+  ownership. Prefer the nearest existing owner; justify independent boundaries
+  with evidence, not green CI or conflict-free coexistence. For alternative
+  views of one resource, validate consumer switching and concurrent updates
+  where relevant. Repeat the comparison after base integration or head changes;
+- caller-observable semantic parity for every behavior-bearing change, whether
+  or not its title says refactor or migration. Inventory legacy caller branches,
+  then run the same synthetic fixture through the public entrypoint and affected
+  backend at an immutable baseline and the exact head. Record replayable
+  commands, revisions, fixture and observation fingerprints, exit status, full
+  diagnostics, persisted readback, authority/effect outcomes, and only the
+  normalization rules needed for documented nondeterminism. The sensitivity
+  case must make the real path fail on the historical defect or a deliberate
+  dropped-field/detail or stronger-precondition mutation, then pass at the fixed
+  head. New-rule provider conformance and prose-only claims do not establish
+  before/after compatibility;
 - exact changed-line classification across production, tests/fixtures, docs,
   generated output, and mechanical moves;
 - a 2-5 item exact-head symbol map for code-changing PRs, including caller,
@@ -194,9 +213,16 @@ typed evidence groups before a verdict:
   maintenance surface. Correctness, green CI, and resolution of earlier
   findings do not override a `disproportionate` or `not_yet_proven` blocker;
 - default-off isolation: for an opt-in change, trace every shared schema,
-  prompt, accepted-input, projection, scheduling, and effect surface, then run
-  a paired counterfactual proving that disabled behavior still matches the
-  pre-change contract;
+  prompt, accepted-input, projection, scheduling, and effect surface. Include
+  installed or automatically loaded skills, agent instructions, prompt
+  templates, help, schemas, install bundles, and provider setup guidance:
+  runtime `default=false` is insufficient when one of those baseline surfaces
+  already changes model or user behavior. Separate availability signals such
+  as installation, discovery, provider readiness, accepted input, and resolver
+  success from activation authority. For scoped capabilities, prove that the
+  intended scope and every required subject are enabled before projecting
+  capability-specific guidance or effects, then run a paired counterfactual
+  proving that disabled behavior still matches the pre-change contract;
 - authority semantics: make public protocol ids and symbols match the real
   actor lifecycle and authority, distinguishing ephemeral sub-agents from
   registered peers and durable multi-agent coordination.
@@ -213,6 +239,18 @@ required evidence ids, and an initially `unverified`
 hints, and green CI cannot upgrade evidence to `verified`. A stale-head verdict
 is prohibited. Missing evidence remains `unverified` with a reason instead of
 being replaced by confident prose.
+
+`repository_reuse` starts unverified in every applicable plan. Its conclusions
+are `reused`, `separation_justified`, `no_existing_candidate`,
+`unjustified_duplication`, or `not_yet_proven`. A negative search must name its
+scope and limitations; an empty candidate list is not proof of absence.
+Unjustified duplication or missing evidence requires a request-changes
+conclusion. Similar-looking code with distinct invariants or compatibility
+needs may legitimately remain separate. Ordinary docs retain their existing
+review path; smoke-only changes retain `durable_smoke_value` coverage review.
+This is a reviewer-executed contract projected by the packet, not an automatic
+repository search or a semantic validator of published prose. Tests establish
+packet applicability and verdict policy, not guaranteed model compliance.
 
 When `--state all` is used, the command must preserve both lifecycle groups.
 The `--limit` value is applied per group so a busy open queue cannot consume the

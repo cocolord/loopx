@@ -12,6 +12,7 @@ import type {
 } from "./authority_store.ts";
 import {
   AuthorityStoreProtocolError,
+  canonicalAuthorityBytes,
   canonicalAuthorityObject,
   canonicalAuthorityObjectList,
   normalizeAuthorityStoreCommit,
@@ -22,6 +23,7 @@ import {
 const POSTGRESQL_STORE_IDENTITY_PATTERN = /^postgresql:[0-9a-f]{32}$/;
 const POSTGRESQL_PROVIDER_REVISION_PATTERN = /^postgresql:([0-9a-f]{32}):([1-9]\d*)$/;
 const POSTGRESQL_SCHEMA_VERSION = "loopx_postgresql_authority_store_v0";
+export const DEFAULT_POSTGRESQL_MAX_COMMIT_BYTES = 16 * 1024 * 1024;
 
 /**
  * Structural subset of a server-owned PostgreSQL driver connection.
@@ -33,7 +35,8 @@ export interface PostgreSqlAuthorityConnection {
     rows: readonly unknown[];
     rowCount: number | null;
   }>;
-  release(error?: Error): void;
+  /** A supplied error marks unknown session state and must evict the connection. */
+  release(error?: Error): void | Promise<void>;
 }
 
 export interface PostgreSqlAuthorityDatabase {
@@ -43,6 +46,12 @@ export interface PostgreSqlAuthorityDatabase {
 export interface PostgreSqlAuthorityStoreOptions {
   tenant_id: string;
   goal_id: string;
+  /**
+   * Maximum canonical bytes admitted for one atomic commit. Deployments may
+   * lower this envelope; promotion still requires separately measured
+   * retention and sustained-capacity evidence.
+   */
+  max_commit_bytes?: number;
 }
 
 interface HeadRow extends JsonObject {
@@ -120,6 +129,43 @@ CREATE TABLE IF NOT EXISTS loopx_control_plane.authority_receipts (
     REFERENCES loopx_control_plane.authority_commits (tenant_id, goal_id, cursor)
     ON DELETE CASCADE
 );
+
+ALTER TABLE loopx_control_plane.authority_heads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE loopx_control_plane.authority_heads FORCE ROW LEVEL SECURITY;
+ALTER TABLE loopx_control_plane.authority_commits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE loopx_control_plane.authority_commits FORCE ROW LEVEL SECURITY;
+ALTER TABLE loopx_control_plane.authority_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE loopx_control_plane.authority_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE loopx_control_plane.authority_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE loopx_control_plane.authority_receipts FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS authority_heads_tenant_scope
+  ON loopx_control_plane.authority_heads;
+CREATE POLICY authority_heads_tenant_scope
+  ON loopx_control_plane.authority_heads
+  USING (tenant_id = current_setting('loopx.tenant_id', TRUE))
+  WITH CHECK (tenant_id = current_setting('loopx.tenant_id', TRUE));
+
+DROP POLICY IF EXISTS authority_commits_tenant_scope
+  ON loopx_control_plane.authority_commits;
+CREATE POLICY authority_commits_tenant_scope
+  ON loopx_control_plane.authority_commits
+  USING (tenant_id = current_setting('loopx.tenant_id', TRUE))
+  WITH CHECK (tenant_id = current_setting('loopx.tenant_id', TRUE));
+
+DROP POLICY IF EXISTS authority_events_tenant_scope
+  ON loopx_control_plane.authority_events;
+CREATE POLICY authority_events_tenant_scope
+  ON loopx_control_plane.authority_events
+  USING (tenant_id = current_setting('loopx.tenant_id', TRUE))
+  WITH CHECK (tenant_id = current_setting('loopx.tenant_id', TRUE));
+
+DROP POLICY IF EXISTS authority_receipts_tenant_scope
+  ON loopx_control_plane.authority_receipts;
+CREATE POLICY authority_receipts_tenant_scope
+  ON loopx_control_plane.authority_receipts
+  USING (tenant_id = current_setting('loopx.tenant_id', TRUE))
+  WITH CHECK (tenant_id = current_setting('loopx.tenant_id', TRUE));
 `;
 
 const SELECT_HEAD_SQL = `
@@ -231,6 +277,15 @@ function parseExpectedRevision(value: string | null): {
   return { store_identity: `postgresql:${match[1]!}`, revision: match[2]! };
 }
 
+function canonicalCommitEnvelopeBytes(commit: AuthorityStoreCommit): number {
+  return canonicalAuthorityBytes({
+    operation_id: commit.operation_id,
+    events: commit.events,
+    next_projection: commit.next_projection,
+    receipts: commit.receipts,
+  }).byteLength;
+}
+
 function readFailure(error: unknown): AuthorityStoreReadFailure {
   if (error instanceof AuthorityStoreProtocolError || error instanceof SyntaxError) {
     return {
@@ -246,12 +301,41 @@ function readFailure(error: unknown): AuthorityStoreReadFailure {
   };
 }
 
-async function rollback(connection: PostgreSqlAuthorityConnection): Promise<void> {
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error("PostgreSQL connection failed");
+}
+
+async function rollback(connection: PostgreSqlAuthorityConnection): Promise<Error | null> {
   try {
     await connection.query("ROLLBACK");
-  } catch {
+    return null;
+  } catch (error) {
     // A failed connection also causes PostgreSQL to discard an uncommitted
-    // transaction. No COMMIT was attempted at this point.
+    // transaction. The caller must evict that connection from its pool.
+    return asError(error);
+  }
+}
+
+async function beginTenantTransaction(
+  connection: PostgreSqlAuthorityConnection,
+  tenantId: string,
+  options: { readOnly: boolean },
+): Promise<void> {
+  await connection.query(options.readOnly ? "BEGIN READ ONLY" : "BEGIN");
+  try {
+    const context = oneRow(await connection.query(
+      "SELECT set_config('loopx.tenant_id', $1, TRUE) AS tenant_id",
+      [tenantId],
+    ), "PostgreSQL tenant context");
+    if (context?.tenant_id !== tenantId) {
+      throw new AuthorityStoreProtocolError(
+        "PostgreSQL transaction did not retain the requested tenant context",
+      );
+    }
+  } catch (error) {
+    const rollbackError = await rollback(connection);
+    if (rollbackError !== null) throw rollbackError;
+    throw error;
   }
 }
 
@@ -287,6 +371,7 @@ export async function installPostgreSqlAuthorityStoreSchema(
   }
   const connection = await database.connect();
   let commitStarted = false;
+  let releaseError: Error | undefined;
   try {
     await connection.query("BEGIN");
     await connection.query(POSTGRESQL_AUTHORITY_STORE_SCHEMA_SQL);
@@ -314,10 +399,14 @@ export async function installPostgreSqlAuthorityStoreSchema(
     commitStarted = true;
     await connection.query("COMMIT");
   } catch (error) {
-    if (!commitStarted) await rollback(connection);
+    if (commitStarted) {
+      releaseError = asError(error);
+    } else {
+      releaseError = (await rollback(connection)) ?? undefined;
+    }
     throw error;
   } finally {
-    connection.release();
+    await connection.release(releaseError);
   }
 }
 
@@ -326,6 +415,7 @@ export class PostgreSqlAuthorityStore implements AuthorityStore {
   readonly database: PostgreSqlAuthorityDatabase;
   readonly tenantId: string;
   readonly goalId: string;
+  readonly maxCommitBytes: number;
 
   constructor(
     database: PostgreSqlAuthorityDatabase,
@@ -334,49 +424,86 @@ export class PostgreSqlAuthorityStore implements AuthorityStore {
     this.database = database;
     this.tenantId = requireAuthorityStoreId(options.tenant_id, "tenant id");
     this.goalId = requireAuthorityStoreId(options.goal_id, "goal id");
+    this.maxCommitBytes = options.max_commit_bytes ?? DEFAULT_POSTGRESQL_MAX_COMMIT_BYTES;
+    if (!Number.isSafeInteger(this.maxCommitBytes) || this.maxCommitBytes < 1) {
+      throw new AuthorityStoreProtocolError(
+        "PostgreSQL max commit bytes must be a positive safe integer",
+      );
+    }
   }
 
   private async connect(): Promise<PostgreSqlAuthorityConnection> {
     return await this.database.connect();
   }
 
+  private async readInTenantTransaction<T>(
+    operation: (connection: PostgreSqlAuthorityConnection) => Promise<T>,
+  ): Promise<T> {
+    const connection = await this.connect();
+    let transactionOpen = false;
+    let releaseError: Error | undefined;
+    try {
+      await beginTenantTransaction(connection, this.tenantId, { readOnly: true });
+      transactionOpen = true;
+      const result = await operation(connection);
+      const rollbackError = await rollback(connection);
+      transactionOpen = false;
+      if (rollbackError !== null) {
+        releaseError = rollbackError;
+        throw rollbackError;
+      }
+      return result;
+    } catch (error) {
+      if (transactionOpen) {
+        releaseError = (await rollback(connection)) ?? undefined;
+      } else if (releaseError === undefined) {
+        // BEGIN or tenant-context setup may have failed after reaching the
+        // server. Do not return a session with unknown state to the pool.
+        releaseError = asError(error);
+      }
+      throw error;
+    } finally {
+      await connection.release(releaseError);
+    }
+  }
+
   async storeIdentity(): Promise<AuthorityStoreIdentityResult> {
     let connection: PostgreSqlAuthorityConnection | null = null;
+    let releaseError: Error | undefined;
     try {
       connection = await this.connect();
       return { status: "available", store_identity: await requireStoreIdentity(connection) };
     } catch (error) {
+      releaseError = asError(error);
       const failure = readFailure(error);
       return failure.status === "failed"
         ? { ...failure, reason_code: "store_identity_invalid" }
         : { ...failure, reason_code: "store_identity_unavailable" };
     } finally {
-      connection?.release();
+      await connection?.release(releaseError);
     }
   }
 
   async loadAuthority(): Promise<AuthorityStoreLoadResult> {
-    let connection: PostgreSqlAuthorityConnection | null = null;
     try {
-      connection = await this.connect();
-      const storeIdentity = await requireStoreIdentity(connection);
-      const value = oneRow(
-        await connection.query(SELECT_HEAD_SQL, [this.tenantId, this.goalId]),
-        "PostgreSQL authority head",
-      );
-      if (value === null) return { status: "missing" };
-      const head = decodeHeadRow(value);
-      if (head.head === null) return { status: "missing" };
-      return {
-        status: "loaded",
-        head: structuredClone(head.head),
-        provider_revision: providerRevisionToken(storeIdentity, head.provider_revision),
-        cursor: head.cursor,
-      };
+      return await this.readInTenantTransaction(async (connection) => {
+        const storeIdentity = await requireStoreIdentity(connection);
+        const value = oneRow(
+          await connection.query(SELECT_HEAD_SQL, [this.tenantId, this.goalId]),
+          "PostgreSQL authority head",
+        );
+        if (value === null) return { status: "missing" } as const;
+        const head = decodeHeadRow(value);
+        if (head.head === null) return { status: "missing" } as const;
+        return {
+          status: "loaded",
+          head: structuredClone(head.head),
+          provider_revision: providerRevisionToken(storeIdentity, head.provider_revision),
+          cursor: head.cursor,
+        } as const;
+      });
     } catch (error) {
       return readFailure(error);
-    } finally {
-      connection?.release();
     }
   }
 
@@ -393,6 +520,15 @@ export class PostgreSqlAuthorityStore implements AuthorityStore {
         reason: error instanceof Error ? error.message : "invalid commit request",
       };
     }
+    const commitBytes = canonicalCommitEnvelopeBytes(normalized);
+    if (commitBytes > this.maxCommitBytes) {
+      return {
+        status: "failed",
+        reason_code: "store_capacity_exhausted",
+        reason:
+          `PostgreSQL authority commit is ${commitBytes} canonical bytes; configured maximum is ${this.maxCommitBytes}`,
+      };
+    }
 
     let connection: PostgreSqlAuthorityConnection;
     try {
@@ -406,8 +542,9 @@ export class PostgreSqlAuthorityStore implements AuthorityStore {
     }
 
     let commitStarted = false;
+    let releaseError: Error | undefined;
     try {
-      await connection.query("BEGIN");
+      await beginTenantTransaction(connection, this.tenantId, { readOnly: false });
       const storeIdentity = await requireStoreIdentity(connection);
       await connection.query(
         `INSERT INTO loopx_control_plane.authority_heads
@@ -429,7 +566,7 @@ export class PostgreSqlAuthorityStore implements AuthorityStore {
         currentRevision !== (expectedRevision?.revision ?? null) ||
         (expectedRevision !== null && expectedRevision.store_identity !== storeIdentity)
       ) {
-        await rollback(connection);
+        releaseError = (await rollback(connection)) ?? undefined;
         return {
           status: "conflict",
           conflict_kind: "provider_revision_mismatch",
@@ -447,7 +584,7 @@ export class PostgreSqlAuthorityStore implements AuthorityStore {
         [this.tenantId, this.goalId, normalized.operation_id],
       ), "PostgreSQL operation identity");
       if (existing !== null) {
-        await rollback(connection);
+        releaseError = (await rollback(connection)) ?? undefined;
         return {
           status: "conflict",
           conflict_kind: "operation_id_exists",
@@ -517,13 +654,14 @@ export class PostgreSqlAuthorityStore implements AuthorityStore {
       };
     } catch (error) {
       if (commitStarted) {
+        releaseError = asError(error);
         return {
           status: "ambiguous",
           reason_code: "commit_outcome_unknown",
           reason: "PostgreSQL COMMIT outcome is unknown; reconcile by operation receipt",
         };
       }
-      await rollback(connection);
+      releaseError = (await rollback(connection)) ?? undefined;
       return {
         status: "failed",
         reason_code: error instanceof AuthorityStoreProtocolError
@@ -534,7 +672,7 @@ export class PostgreSqlAuthorityStore implements AuthorityStore {
           : "PostgreSQL transaction failed before COMMIT",
       };
     } finally {
-      connection.release();
+      await connection.release(releaseError);
     }
   }
 
@@ -549,27 +687,25 @@ export class PostgreSqlAuthorityStore implements AuthorityStore {
         reason: error instanceof Error ? error.message : "invalid operation id",
       };
     }
-    let connection: PostgreSqlAuthorityConnection | null = null;
     try {
-      connection = await this.connect();
-      const storeIdentity = await requireStoreIdentity(connection);
-      const value = oneRow(await connection.query(
-        `${SELECT_TRANSACTION_COLUMNS_SQL}
-         WHERE commit.tenant_id = $1 AND commit.goal_id = $2 AND commit.operation_id = $3`,
-        [this.tenantId, this.goalId, normalized],
-      ), "PostgreSQL authority receipt");
-      if (value === null) return { status: "missing" };
-      const transaction = decodeTransactionRow(value);
-      return {
-        status: "found",
-        cursor: transaction.cursor,
-        provider_revision: providerRevisionToken(storeIdentity, transaction.provider_revision),
-        receipts: structuredClone(transaction.receipts),
-      };
+      return await this.readInTenantTransaction(async (connection) => {
+        const storeIdentity = await requireStoreIdentity(connection);
+        const value = oneRow(await connection.query(
+          `${SELECT_TRANSACTION_COLUMNS_SQL}
+           WHERE commit.tenant_id = $1 AND commit.goal_id = $2 AND commit.operation_id = $3`,
+          [this.tenantId, this.goalId, normalized],
+        ), "PostgreSQL authority receipt");
+        if (value === null) return { status: "missing" } as const;
+        const transaction = decodeTransactionRow(value);
+        return {
+          status: "found",
+          cursor: transaction.cursor,
+          provider_revision: providerRevisionToken(storeIdentity, transaction.provider_revision),
+          receipts: structuredClone(transaction.receipts),
+        } as const;
+      });
     } catch (error) {
       return readFailure(error);
-    } finally {
-      connection?.release();
     }
   }
 
@@ -590,52 +726,55 @@ export class PostgreSqlAuthorityStore implements AuthorityStore {
         reason: error instanceof Error ? error.message : "invalid scan request",
       };
     }
-    let connection: PostgreSqlAuthorityConnection | null = null;
     try {
-      connection = await this.connect();
-      const storeIdentity = await requireStoreIdentity(connection);
-      const current = oneRow(
-        await connection.query(SELECT_HEAD_SQL, [this.tenantId, this.goalId]),
-        "PostgreSQL authority head",
-      );
-      if (current === null) {
-        return { status: "page", transactions: [], next_cursor: afterCursor, has_more: false };
-      }
-      const head = decodeHeadRow(current);
-      if (offset > BigInt(head.cursor)) {
+      return await this.readInTenantTransaction(async (connection) => {
+        const storeIdentity = await requireStoreIdentity(connection);
+        const current = oneRow(
+          await connection.query(SELECT_HEAD_SQL, [this.tenantId, this.goalId]),
+          "PostgreSQL authority head",
+        );
+        if (current === null) {
+          return {
+            status: "page",
+            transactions: [],
+            next_cursor: afterCursor,
+            has_more: false,
+          } as const;
+        }
+        const head = decodeHeadRow(current);
+        if (offset > BigInt(head.cursor)) {
+          return {
+            status: "failed",
+            reason_code: "scan_cursor_out_of_range",
+            reason: "scan cursor is ahead of the provider head",
+          } as const;
+        }
+        const result = rows(await connection.query(
+          `${SELECT_TRANSACTION_COLUMNS_SQL}
+           WHERE commit.tenant_id = $1 AND commit.goal_id = $2 AND commit.cursor > $3::bigint
+           ORDER BY commit.cursor
+           LIMIT $4`,
+          [this.tenantId, this.goalId, offset.toString(), (BigInt(limit) + 1n).toString()],
+        )).map(decodeTransactionRow);
+        const hasMore = result.length > limit;
+        const page = result.slice(0, limit);
+        const transactions: AuthorityStoreCommittedTransaction[] = page.map((value) => ({
+          cursor: value.cursor,
+          provider_revision: providerRevisionToken(storeIdentity, value.provider_revision),
+          operation_id: value.operation_id,
+          events: structuredClone(value.events),
+          projection: structuredClone(value.projection),
+          receipts: structuredClone(value.receipts),
+        }));
         return {
-          status: "failed",
-          reason_code: "scan_cursor_out_of_range",
-          reason: "scan cursor is ahead of the provider head",
-        };
-      }
-      const result = rows(await connection.query(
-        `${SELECT_TRANSACTION_COLUMNS_SQL}
-         WHERE commit.tenant_id = $1 AND commit.goal_id = $2 AND commit.cursor > $3::bigint
-         ORDER BY commit.cursor
-         LIMIT $4`,
-        [this.tenantId, this.goalId, offset.toString(), (BigInt(limit) + 1n).toString()],
-      )).map(decodeTransactionRow);
-      const hasMore = result.length > limit;
-      const page = result.slice(0, limit);
-      const transactions: AuthorityStoreCommittedTransaction[] = page.map((value) => ({
-        cursor: value.cursor,
-        provider_revision: providerRevisionToken(storeIdentity, value.provider_revision),
-        operation_id: value.operation_id,
-        events: structuredClone(value.events),
-        projection: structuredClone(value.projection),
-        receipts: structuredClone(value.receipts),
-      }));
-      return {
-        status: "page",
-        transactions,
-        next_cursor: transactions.at(-1)?.cursor ?? afterCursor,
-        has_more: hasMore,
-      };
+          status: "page",
+          transactions,
+          next_cursor: transactions.at(-1)?.cursor ?? afterCursor,
+          has_more: hasMore,
+        } as const;
+      });
     } catch (error) {
       return readFailure(error);
-    } finally {
-      connection?.release();
     }
   }
 }

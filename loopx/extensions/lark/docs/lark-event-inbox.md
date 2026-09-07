@@ -31,6 +31,15 @@ parent sender is the app id of the configured profile. A reply to a person,
 another app, or an unverifiable parent remains captured but does not wake the
 agent. The agent does not need to keep a websocket open.
 
+When Lark inbox and the same registered agent's Reward Memory are both enabled,
+a non-empty registry-routed drain can also return an advisory
+`reward_memory_feedback_review` hint. It asks the agent to review reusable
+feedback and preview the existing scoped `reward-memory ingest-event` command;
+it does not ingest chat, grant authority, or change settlement/ACK requirements.
+This explicit path does not require `automatic_ingest=true`. See the
+[Reward Memory inbox workflow](../../../capabilities/reward_memory/README.md#inbox-feedback-review-explicit-ingestion)
+for eligibility, source verification, write/readback and default-off behavior.
+
 ### Optional turn-start Agent reading hook
 
 Realtime collection is the preferred ingress, but a long-running Agent may also
@@ -53,13 +62,19 @@ turn-start hook
 
 Core owns the provider-neutral hook registration, output budget, allowed
 owner-private write scopes, the narrow `provider_message_reaction` external
-write scope, failure isolation, and `agent_read_required`
-contract. The Lark extension owns history pagination, provider-envelope
-validation, private cursors, and inbox readback. The CLI composition root runs
-the hook before status/quota projection. Raw content remains only in the local
-inbox and appears to the Agent only through the existing goal-bound
-`drain_command`; it never enters the public Goal registry, hook receipt, or
-quota packet.
+write scope, failure isolation, and `agent_read_required` contract. A hook that
+can require Agent reading must also register one bounded public-safe
+`required_read`; the generic kernel validates and deduplicates it, then the live
+decision mirrors it into both interaction channels with `ordering=before_work`.
+Fresh ordinary material notifies without replacing the selected work lane;
+durable material left unsettled preempts on the following turn, while direct
+questions and verified replies retain immediate reply-lane precedence.
+The Lark extension owns that drain descriptor, history pagination,
+provider-envelope validation, private cursors, and inbox readback. The CLI
+composition root runs the hook before status/quota projection. Raw content
+remains only in the local inbox and appears to the Agent only through the
+registered drain command; it never enters the public Goal registry, hook
+receipt, or quota packet.
 
 The distinction between `empty`, `provider_contract_error`, permission failure,
 and provider unavailability is mandatory. A success envelope whose message list
@@ -116,6 +131,19 @@ its local-private chat id, persists every message from that chat, and verifies
 the reply relation through message readback before scheduling a reply. Full-chat
 capture is not full-chat activation; unrelated conversation remains available
 to domain interpretation without being treated as addressed to the bot.
+
+Goal Channel connections do not treat a spawned `lark-cli` child as listener
+readiness. The runtime waits for the provider event bus `ready` marker (or a
+real typed event) before projecting `listening`; startup without that handshake
+remains non-ready and retryable. Multi-Agent onboarding creates an
+Agent-labelled Topic for each route. Users send requests inside the matching
+Topic. A group-level message with more than one eligible Agent route is
+deliberately rejected as ambiguous instead of guessing an Agent from prose.
+
+For a periodic-report request, semantic activation belongs to the Agent. After
+reading an exact item, the Agent calls `loopx periodic-report request` with its
+`message_id`. The Lark adapter validates binding and addressing evidence only;
+it never classifies the text or searches the inbox for weekly-report strings.
 
 ## Activate the provider
 
@@ -264,7 +292,9 @@ the profile, chat id, message id, reply text, or provider payload.
 
 ## Host collector lifecycle
 
-Keep the collector config ignored and untracked. It references the generic
+In Git projects, keep the collector config ignored and untracked. A non-Git
+project may keep it only below `.loopx/config`; parent Git boundaries and paths
+outside that private root remain rejected. The config references the generic
 inbox config but owns host-only details such as the chat id and supervisor:
 
 ```json

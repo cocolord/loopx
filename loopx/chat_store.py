@@ -86,6 +86,13 @@ def _session_channel(payload: dict[str, Any]) -> str:
     return f"goal.{payload.get('goal_id')}"
 
 
+def _require_matching_replay(
+    existing: dict[str, Any], *, identity: str, request: dict[str, Any]
+) -> None:
+    if any(existing.get(field) != value for field, value in request.items()):
+        raise ValueError(f"{identity} already belongs to a different request")
+
+
 def _atomic_write_json(path: Path, payload: dict[str, Any], *, preserve_mode: bool = False) -> None:
     previous_mode = path.stat().st_mode & 0o777 if preserve_mode and path.exists() else 0o600
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
@@ -146,9 +153,13 @@ class ChatSessionStore:
         os.chmod(self.root, 0o700)
         os.chmod(self.sessions_root, 0o700)
         self.compact_completed_events()
+        self._recover_turn_completions()
 
     def _session_dir(self, session_id: str) -> Path:
-        return self.sessions_root / _opaque_id(session_id, field="session_id")
+        token = _opaque_id(session_id, field="session_id")
+        if token in {".", ".."}:
+            raise ValueError("session_id must be a compact opaque id")
+        return self.sessions_root / token
 
     def _session_path(self, session_id: str) -> Path:
         return self._session_dir(session_id) / "session.json"
@@ -308,7 +319,7 @@ class ChatSessionStore:
                     preserve_active_turn
                     and active_turn is not None
                     and active_turn.get("status")
-                    in {"queued", "starting", "running", "interrupting"}
+                    in {"queued", "starting", "running", "completing", "interrupting"}
                 ):
                     return payload, True
                 resume_snapshot = dict(payload)
@@ -507,6 +518,11 @@ class ChatSessionStore:
         ):
             existing = _read_json(path)
             if existing.get("schema_version") == CHAT_INGRESS_SCHEMA_VERSION:
+                _require_matching_replay(
+                    existing,
+                    identity="client_ingress_id",
+                    request={"mode": _opaque_id(mode, field="mode"), "message": str(message)},
+                )
                 return existing, False
             now = utc_now()
             payload = {
@@ -571,6 +587,25 @@ class ChatSessionStore:
             ):
                 existing = self.turn_for_client(session_id, client_id)
                 if existing is not None:
+                    # Attachments live in the transcript, not the Turn record.
+                    # This also supports pre-existing Turns without a migration.
+                    original = next(
+                        (row for row in self.messages(session_id)
+                         if row.get("role") == "user"
+                         and row.get("turn_id") == existing["turn_id"]),
+                        None,
+                    )
+                    if original is None:
+                        raise ValueError("client_turn_id original request is unavailable")
+                    _require_matching_replay(
+                        {**existing, "attachments": original.get("attachments") or None},
+                        identity="client_turn_id",
+                        request={
+                            "message": str(message),
+                            "origin": _opaque_id(origin, field="origin"),
+                            "attachments": attachments or None,
+                        },
+                    )
                     return existing, False
                 session = self.load_session(session_id)
                 if session is None or session.get("status") == "closed":
@@ -578,7 +613,9 @@ class ChatSessionStore:
                 active_turn_id = session.get("active_turn_id")
                 if active_turn_id:
                     active = self.load_turn(session_id, str(active_turn_id))
-                    if active and active.get("status") in {"queued", "starting", "running", "interrupting"}:
+                    if active and active.get("status") in {
+                        "queued", "starting", "running", "completing", "interrupting"
+                    }:
                         raise RuntimeError(str(active_turn_id))
                 now = utc_now()
                 turn_id = uuid.uuid4().hex
@@ -646,6 +683,14 @@ class ChatSessionStore:
             ):
                 existing = self.turn_for_client(session_id, client_id)
                 if existing is not None:
+                    _require_matching_replay(
+                        existing,
+                        identity="client_turn_id",
+                        request={
+                            "message": str(message),
+                            "origin": _opaque_id(origin, field="origin"),
+                        },
+                    )
                     return existing, False
                 session = self.load_session(session_id)
                 if session is None or session.get("status") == "closed":
@@ -857,7 +902,14 @@ class ChatSessionStore:
         payload = _read_json(self._turn_path(session_id, turn_id))
         return payload if payload.get("schema_version") == CHAT_TURN_SCHEMA_VERSION else None
 
-    def update_turn(self, session_id: str, turn_id: str, **changes: Any) -> dict[str, Any]:
+    def update_turn(
+        self,
+        session_id: str,
+        turn_id: str,
+        *,
+        expected_statuses: set[str] | None = None,
+        **changes: Any,
+    ) -> dict[str, Any] | None:
         path = self._turn_path(session_id, turn_id)
         with exclusive_file_lock(path, agent_id="loopx-chat", operation="update_chat_turn"):
             payload = self.load_turn(session_id, turn_id)
@@ -872,6 +924,8 @@ class ChatSessionStore:
             unknown = set(changes) - allowed
             if unknown:
                 raise ValueError(f"unsupported chat turn fields: {sorted(unknown)}")
+            if expected_statuses is not None and payload.get("status") not in expected_statuses:
+                return None
             payload.update(changes)
             _atomic_write_json(path, payload, preserve_mode=True)
             return payload
@@ -883,29 +937,161 @@ class ChatSessionStore:
         *,
         response: dict[str, Any],
         terminal_metadata: dict[str, Any] | None = None,
+        idempotent: bool = False,
     ) -> None:
         """Emit the canonical structured-response events for a completed Turn."""
 
+        events: list[tuple[str, dict[str, Any]]] = []
         for proposal in response.get("proposals") or []:
-            self.append_event(
-                session_id,
-                turn_id,
-                kind="proposal.ready",
-                payload={"proposal": proposal},
-            )
+            events.append(("proposal.ready", {"proposal": proposal}))
         if response.get("gate"):
-            self.append_event(
+            events.append(("gate.ready", {"gate": response["gate"]}))
+        events.append(
+            (
+                "turn.completed",
+                {**(terminal_metadata or {}), "response": response},
+            )
+        )
+        if idempotent:
+            kinds = {kind for kind, _payload in events}
+            existing = [
+                (str(event.get("kind") or ""), event.get("payload"))
+                for event in self.events_after(session_id, turn_id, None)
+                if event.get("kind") in kinds
+            ]
+            if existing != events[: len(existing)]:
+                raise ValueError("chat completion event history conflicts with response")
+            events = events[len(existing) :]
+        for kind, payload in events:
+            self.append_event(session_id, turn_id, kind=kind, payload=payload)
+
+    def finalize_managed_turn_completion(
+        self,
+        session_id: str,
+        turn_id: str,
+    ) -> dict[str, Any] | None:
+        """Publish a reserved managed completion after all visible side effects."""
+
+        path = self._turn_path(session_id, turn_id)
+        with exclusive_file_lock(
+            path,
+            agent_id="loopx-chat",
+            operation="finalize_managed_chat_turn",
+        ):
+            turn = self.load_turn(session_id, turn_id)
+            if turn is None:
+                raise KeyError("chat turn was not found")
+            if turn.get("status") == "completed":
+                return turn
+            if turn.get("status") != "completing":
+                return None
+            response = turn.get("response")
+            if not isinstance(response, dict):
+                raise ValueError("completing chat turn requires a response")
+            completed_at = str(turn.get("completed_at") or utc_now())
+            if response.get("message"):
+                self.append_message(
+                    session_id,
+                    role="agent",
+                    text=str(response["message"]),
+                    turn_id=turn_id,
+                    message_id=f"managed.{turn_id}.completed",
+                )
+            self.append_completed_response_events(
                 session_id,
                 turn_id,
-                kind="gate.ready",
-                payload={"gate": response["gate"]},
+                response=response,
+                idempotent=True,
             )
-        self.append_event(
-            session_id,
-            turn_id,
-            kind="turn.completed",
-            payload={**(terminal_metadata or {}), "response": response},
-        )
+            self.release_active_turn(
+                session_id,
+                turn_id,
+                last_activity_at=completed_at,
+                last_error_code=None,
+            )
+            turn["status"] = "completed"
+            _atomic_write_json(path, turn, preserve_mode=True)
+            return turn
+
+    def finalize_turn_completion(
+        self,
+        session_id: str,
+        turn_id: str,
+    ) -> dict[str, Any] | None:
+        turn = self.load_turn(session_id, turn_id)
+        if turn is None:
+            raise KeyError("chat turn was not found")
+        if turn.get("completion_id"):
+            return self.finalize_attached_turn_completion(session_id, turn_id)
+        return self.finalize_managed_turn_completion(session_id, turn_id)
+
+    def _recover_turn_completions(self) -> None:
+        # ponytail: owner-local startup scan; add an index only if history makes it measurable.
+        for path in self.sessions_root.glob("*/turns/*.json"):
+            turn = _read_json(path)
+            if (
+                turn.get("schema_version") == CHAT_TURN_SCHEMA_VERSION
+                and turn.get("status") == "completing"
+            ):
+                self.finalize_turn_completion(
+                    str(turn["session_id"]),
+                    str(turn["turn_id"]),
+                )
+
+    def finalize_attached_turn_completion(
+        self,
+        session_id: str,
+        turn_id: str,
+    ) -> dict[str, Any] | None:
+        """Publish a reserved attached completion after all visible side effects."""
+
+        turn_path = self._turn_path(session_id, turn_id)
+        with exclusive_file_lock(
+            turn_path,
+            agent_id="loopx-chat",
+            operation="finalize_attached_chat_turn",
+        ):
+            turn = self.load_turn(session_id, turn_id)
+            if turn is None:
+                raise KeyError("attached Agent turn was not found")
+            if turn.get("status") not in {"completing", "completed"}:
+                return None
+            response = turn.get("response")
+            if not isinstance(response, dict):
+                raise ValueError("completing attached Agent turn requires a response")
+            completion_id = _opaque_id(
+                turn.get("completion_id"),
+                field="completion_id",
+            )
+            completed_at = str(turn.get("completed_at") or utc_now())
+            self.append_message(
+                session_id,
+                role="agent",
+                text=str(response.get("message") or ""),
+                turn_id=turn_id,
+                origin="attached_host",
+                message_id=f"attached.{completion_id}",
+            )
+            self.append_completed_response_events(
+                session_id,
+                turn_id,
+                response=response,
+                terminal_metadata={
+                    "delivery_mode": CHAT_SESSION_MODE_ATTACHED,
+                    "completion_id": completion_id,
+                },
+                idempotent=True,
+            )
+            self.release_active_turn(
+                session_id,
+                turn_id,
+                last_activity_at=completed_at,
+                last_error_code=None,
+            )
+            if turn.get("status") == "completing":
+                turn["status"] = "completed"
+                _atomic_write_json(turn_path, turn, preserve_mode=True)
+            return turn
 
     def complete_attached_turn(
         self,
@@ -917,7 +1103,7 @@ class ChatSessionStore:
         response: dict[str, Any],
         agent_message: str,
     ) -> tuple[dict[str, Any], bool]:
-        """Complete one attached-host claim with idempotent transcript writeback."""
+        """Reserve and finalize one duplicate-safe attached-host completion."""
 
         turn_path = self._turn_path(session_id, turn_id)
         normalized_claim_id = _opaque_id(claim_id, field="claim_id")
@@ -931,14 +1117,13 @@ class ChatSessionStore:
             turn = self.load_turn(session_id, turn_id)
             if session is None or turn is None:
                 raise KeyError("attached Agent turn was not found")
-            created = turn.get("status") != "completed"
-            if not created:
+            created = turn.get("status") == "running"
+            if turn.get("status") in {"completing", "completed"}:
                 if turn.get("completion_id") != normalized_completion_id:
                     raise ValueError("the Turn was already completed by another receipt")
-            else:
+            elif created:
                 if (
                     session.get("active_turn_id") != turn_id
-                    or turn.get("status") != "running"
                 ):
                     raise ValueError(
                         "the Turn is not the active claimed attached-host Turn"
@@ -950,8 +1135,11 @@ class ChatSessionStore:
                 completed_at = utc_now()
                 turn.update(
                     {
-                        "status": "completed",
-                        "response": response,
+                        "status": "completing",
+                        "response": {
+                            **response,
+                            "message": str(response.get("message") or agent_message),
+                        },
                         "completion_id": normalized_completion_id,
                         "completed_at": completed_at,
                         "last_activity_at": completed_at,
@@ -960,108 +1148,74 @@ class ChatSessionStore:
                     }
                 )
                 _atomic_write_json(turn_path, turn, preserve_mode=True)
-
-            completed_at = str(turn.get("completed_at") or utc_now())
-            stored_response = turn.get("response")
-            transcript_message = (
-                str(stored_response.get("message") or agent_message)
-                if isinstance(stored_response, dict)
-                else agent_message
-            )
-            self.append_message(
-                session_id,
-                role="agent",
-                text=transcript_message,
-                turn_id=turn_id,
-                origin="attached_host",
-                message_id=f"attached.{normalized_completion_id}",
-            )
-            if created:
-                if isinstance(stored_response, dict):
-                    self.append_completed_response_events(
-                        session_id,
-                        turn_id,
-                        response=stored_response,
-                        terminal_metadata={
-                            "delivery_mode": CHAT_SESSION_MODE_ATTACHED,
-                            "completion_id": normalized_completion_id,
-                        },
-                    )
-            self.release_active_turn(
-                session_id,
-                turn_id,
-                last_activity_at=completed_at,
-                last_error_code=None,
-            )
-            return turn, created
+            else:
+                raise ValueError(
+                    "the Turn is not the active claimed attached-host Turn"
+                )
+        finalized = self.finalize_attached_turn_completion(session_id, turn_id)
+        if finalized is None:
+            raise ValueError("the attached Agent turn could not be finalized")
+        return finalized, created
 
     def close_attached_session(self, session_id: str) -> bool:
         """Close an idle attached Session without stranding a claimed Turn."""
 
-        session_path = self._session_path(session_id)
-        with self._session_lock(session_id):
-            with exclusive_file_lock(
-                session_path,
-                agent_id="loopx-chat",
-                operation="close_attached_chat_session",
-            ):
-                session = self.load_session(session_id)
-                if session is None:
-                    return False
-                if session.get("session_mode") != CHAT_SESSION_MODE_ATTACHED:
-                    raise ValueError("the selected Session is not an attached host session")
-                if session.get("status") == "closed":
-                    return True
-                active_turn_id = str(session.get("active_turn_id") or "")
-                if active_turn_id:
-                    active_turn = self.load_turn(session_id, active_turn_id)
-                    if active_turn and active_turn.get("status") not in TERMINAL_TURN_STATES:
-                        raise RuntimeError("attached_session_turn_active")
-                live_queued_turns = self._settle_expired_queued_turns(
-                    session_id,
-                    now=datetime.now(timezone.utc),
-                )
-                if live_queued_turns:
-                    raise RuntimeError("attached_session_queue_pending")
-                now = utc_now()
-                session.update(
-                    {
-                        "status": "closed",
-                        "active_turn_id": None,
-                        "last_activity_at": now,
-                        "updated_at": now,
-                    }
-                )
-                _atomic_write_json(session_path, session, preserve_mode=True)
-                return True
+        return self._close_session_if_idle(
+            session_id,
+            expected_mode=CHAT_SESSION_MODE_ATTACHED,
+            operation="close_attached_chat_session",
+            mode_error="the selected Session is not an attached host session",
+            active_error="attached_session_turn_active",
+            queue_error="attached_session_queue_pending",
+        )
 
     def close_managed_session(self, session_id: str) -> bool:
         """Close an idle managed Session without stranding background work."""
 
+        return self._close_session_if_idle(
+            session_id,
+            expected_mode=CHAT_SESSION_MODE_MANAGED,
+            operation="close_managed_chat_session",
+            mode_error="the selected Session is an attached host session",
+            active_error="managed_session_turn_active",
+            queue_error="managed_session_queue_pending",
+        )
+
+    def _close_session_if_idle(
+        self,
+        session_id: str,
+        *,
+        expected_mode: str,
+        operation: str,
+        mode_error: str,
+        active_error: str,
+        queue_error: str,
+    ) -> bool:
         session_path = self._session_path(session_id)
         with self._session_lock(session_id):
             with exclusive_file_lock(
                 session_path,
                 agent_id="loopx-chat",
-                operation="close_managed_chat_session",
+                operation=operation,
             ):
                 session = self.load_session(session_id)
                 if session is None:
                     return False
-                if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
-                    raise ValueError("the selected Session is an attached host session")
+                if session.get("session_mode") != expected_mode:
+                    raise ValueError(mode_error)
                 if session.get("status") == "closed":
                     return True
                 active_turn_id = str(session.get("active_turn_id") or "")
                 if active_turn_id:
                     active_turn = self.load_turn(session_id, active_turn_id)
                     if active_turn is None or active_turn.get("status") not in TERMINAL_TURN_STATES:
-                        raise RuntimeError("managed_session_turn_active")
-                if self._settle_expired_queued_turns(
+                        raise RuntimeError(active_error)
+                live_queued_turns = self._settle_expired_queued_turns(
                     session_id,
                     now=datetime.now(timezone.utc),
-                ):
-                    raise RuntimeError("managed_session_queue_pending")
+                )
+                if live_queued_turns:
+                    raise RuntimeError(queue_error)
                 now = utc_now()
                 session.update(
                     {

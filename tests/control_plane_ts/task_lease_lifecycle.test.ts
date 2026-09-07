@@ -369,6 +369,26 @@ test("lifecycle rejects stale versions and expired leases before writeback", asy
   assert.equal((await lease(root)).version, 1);
 });
 
+test("lifecycle accepts active leases with high-precision fractional seconds", async (t) => {
+  const root = await workspace(t);
+  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
+  const existing = await lease(root);
+  existing.expires_at = "2026-09-01T03:10:00.123456789Z";
+  await writeFile(
+    join(root, "runtime", "goals", "goal-a", "task-leases", "todo_target.json"),
+    JSON.stringify(existing),
+    "utf8",
+  );
+
+  const renewed = await executeTaskLeaseLifecycle(
+    await lifecycleRequest(root, "renew"),
+    { now: () => new Date("2026-09-01T03:01:00.000Z") },
+  );
+
+  assert.equal(renewed.ok, true);
+  assert.equal(renewed.renewed, true);
+});
+
 test("holder verification is hard-lease-only and fence close releases only its verified lease", async (t) => {
   const root = await workspace(t);
   const hardAuthority = await authority(root, {
@@ -598,6 +618,10 @@ test("fence close write failure leaves the lease unchanged and unlocks", async (
 
 test("user-gate auto-acquire returns a persistent fence that can be closed", async (t) => {
   const root = await workspace(t);
+  const runtimeShadow = {
+    schema_version: "loopx_coordination_runtime_shadow_binding_v0",
+    provider: "file_v0",
+  };
   const facts = await authority(root, {
     todos: [{
       todo_id: "todo_target",
@@ -615,10 +639,15 @@ test("user-gate auto-acquire returns a persistent fence that can be closed", asy
       idempotency_key: null,
       expected_version: null,
       allow_user_gate_auto_acquire: true,
+      runtime_shadow: runtimeShadow,
     }),
     { now: () => ACQUIRE_NOW },
   );
   assert.equal(checked.ok, true);
+  const autoCapture = checked.coordination_runtime_shadow_capture as Record<string, unknown>;
+  assert.equal(typeof autoCapture.entry_id, "string");
+  assert.equal(autoCapture.seq, 1);
+  assert.equal(autoCapture.failure, null);
   const fence = checked.fence as Record<string, unknown>;
   assert.equal(fence.auto_acquired, true);
   assert.equal((await lease(root)).status, "active");
@@ -635,10 +664,15 @@ test("user-gate auto-acquire returns a persistent fence that can be closed", asy
       fence_owner: "agent-a",
       fence_idempotency_key: (await lease(root)).idempotency_key,
       fence_expected_version: (await lease(root)).version,
+      runtime_shadow: runtimeShadow,
     }),
   }, { now: () => new Date("2026-09-01T03:01:00.000Z") });
   assert.equal(closed.ok, true);
   assert.equal(closed.released, true);
+  const closeCapture = closed.coordination_runtime_shadow_capture as Record<string, unknown>;
+  assert.equal(typeof closeCapture.entry_id, "string");
+  assert.equal(closeCapture.seq, 2);
+  assert.equal(closeCapture.failure, null);
   assert.equal((await lease(root)).status, "released");
 });
 

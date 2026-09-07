@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import warnings
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -15,19 +16,24 @@ from ...control_plane.goals.goal_frontier import (
 )
 from ...control_plane.todos.active_state_todo_parser import parse_active_state_todos
 from ...control_plane.todos.quota_summary import summarize_user_todos_for_quota
+from ...control_plane.todos.todo_index import MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL
 from ...history import collect_history, load_registry
+from ...paths import resolve_runtime_root
 from ...registry import registry_goals
+from ...rollout_event_log import load_rollout_events, rollout_event_log_path
 from .stage_completion import STAGE_COMPLETION_RECEIPT_SCHEMA
 from .stage_completion import derive_periodic_report_stage_completion_from_runs
 from .presets import build_periodic_report_preset_activation
 from .project_progress_snapshot import build_project_progress_snapshot_from_state
+from .incremental import read_periodic_report_publication_cursor
+from .machine_defaults import resolve_goal_periodic_report_subscription
+from .machine_store import read_periodic_report_machine_defaults
 from .triggers import build_periodic_report_trigger_decision
+from .request_action import REQUEST_ACTION_SCHEMA
 
 
 PERIODIC_REPORT_POST_WRITEBACK_HOOK_ID = "periodic_report.runtime_trigger"
-PERIODIC_REPORT_TRIGGER_EVALUATION_INTENT = (
-    "periodic_report.trigger_evaluation"
-)
+PERIODIC_REPORT_TRIGGER_EVALUATION_INTENT = "periodic_report.trigger_evaluation"
 
 
 def _result(*, status: str, intent: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -61,14 +67,54 @@ def _goal_config(registry_path: Path, goal_id: str) -> Mapping[str, Any]:
 
 
 def periodic_report_post_writeback_hooks_for_goal(
-    *, registry_path: Path, goal_id: str
+    *, registry_path: Path, goal_id: str, runtime_root: Path | None = None
 ) -> tuple[PostWritebackHookRegistration, ...]:
-    """Resolve the explicit project profile opt-in at the composition root."""
+    """Resolve a Goal override or live machine-default profile at composition.
 
-    config = _goal_config(registry_path, goal_id)
-    if config.get("enabled") is not True:
+    Both branches resolve through the canonical subscription resolver, so an
+    invalid Goal override is reported here the same way the delivery paths
+    report it. Store read and subscription validation failures degrade to no
+    hooks with one warning: composition happens outside the dispatch
+    isolation boundary, so optional hooks never alter the primary truth of
+    the CLI command that composes them.
+    """
+
+    registry = load_registry(registry_path)
+    effective_runtime_root = runtime_root or resolve_runtime_root(
+        registry,
+        registry_path=registry_path,
+    )
+    goal = next(
+        (
+            item
+            for item in registry_goals(registry)
+            if str(item.get("id") or "").strip() == str(goal_id or "").strip()
+        ),
+        None,
+    )
+    if not isinstance(goal, Mapping):
         return ()
-    preset = str(config.get("profile_preset") or "").strip()
+    goal_override = _goal_config(registry_path, goal_id)
+    try:
+        subscription = resolve_goal_periodic_report_subscription(
+            goal,
+            (
+                None
+                if goal_override
+                else read_periodic_report_machine_defaults(effective_runtime_root)
+            ),
+        )
+    except (TypeError, ValueError) as exc:
+        warnings.warn(
+            f"periodic-report subscription for goal {goal_id} failed to resolve; "
+            f"post-writeback hooks are disabled: {exc}",
+            UserWarning,
+            stacklevel=2,
+        )
+        return ()
+    if subscription.get("enabled") is not True:
+        return ()
+    preset = str(subscription.get("profile_preset") or "").strip()
     if not preset:
         return ()
     activation = build_periodic_report_preset_activation(preset)
@@ -236,6 +282,14 @@ def build_periodic_report_post_writeback_projection(
     if receipt is None:
         return {}
     result: dict[str, object] = {"stage_completion": receipt}
+    publication_cursor = read_periodic_report_publication_cursor(
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        agent_id=normalized_agent_id,
+    )
+    available_capabilities = payload.get("available_capabilities")
+    if available_capabilities is None and isinstance(payload.get("turn"), Mapping):
+        available_capabilities = payload["turn"].get("available_capabilities")
     project_progress = build_project_progress_snapshot_from_state(
         state_text=state_text,
         goal=goal,
@@ -243,9 +297,24 @@ def build_periodic_report_post_writeback_projection(
         goal_id=goal_id,
         agent_id=normalized_agent_id,
         completed_at=str(receipt["completed_at"]),
+        publication_cursor=publication_cursor,
+        available_capabilities=available_capabilities,
+        rollout_events=load_rollout_events(
+            rollout_event_log_path(runtime_root, goal_id),
+            limit=MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,
+        ),
     )
+    if publication_cursor is not None and project_progress is None:
+        return {}
+    if publication_cursor is not None:
+        result["last_report"] = {
+            "delivered_at": publication_cursor["delivered_at"],
+            "covered_trigger_ids": publication_cursor["covered_trigger_ids"],
+        }
     if project_progress is not None:
         result["project_progress"] = project_progress
+    if isinstance(available_capabilities, list) and available_capabilities:
+        result["available_capabilities"] = list(available_capabilities)
     return result
 
 
@@ -281,6 +350,9 @@ def periodic_report_post_writeback_hook(
             if isinstance(projection, Mapping)
             else None
         )
+        last_report = (
+            projection.get("last_report") if isinstance(projection, Mapping) else None
+        )
         intent_payload: dict[str, Any] = {
             "schema_version": "periodic_report_trigger_evaluation_intent_v0",
             "stage_completion": dict(stage),
@@ -291,6 +363,15 @@ def periodic_report_post_writeback_hook(
         }
         if isinstance(project_progress, Mapping):
             intent_payload["project_progress"] = dict(project_progress)
+        if isinstance(last_report, Mapping):
+            intent_payload["last_report"] = dict(last_report)
+        observed_capabilities = (
+            projection.get("available_capabilities")
+            if isinstance(projection, Mapping)
+            else None
+        )
+        if isinstance(observed_capabilities, list) and observed_capabilities:
+            intent_payload["available_capabilities"] = list(observed_capabilities)
         return _result(
             status="intent",
             intent={
@@ -308,7 +389,12 @@ def periodic_report_post_writeback_hook(
         capability_id="periodic-report",
         event_kinds=("refresh_state", "todo_complete"),
         intent_kinds=(PERIODIC_REPORT_TRIGGER_EVALUATION_INTENT,),
-        requested_read_scope=("stage_completion", "project_progress"),
+        requested_read_scope=(
+            "stage_completion",
+            "project_progress",
+            "last_report",
+            "available_capabilities",
+        ),
         producer=producer,
         policy_version=policy_version,
     )
@@ -329,16 +415,84 @@ def evaluate_periodic_report_trigger_evaluation_intent(
     if not isinstance(payload, Mapping):
         raise ValueError("periodic-report trigger intent payload is invalid")
     if (
-        payload.get("schema_version")
-        != "periodic_report_trigger_evaluation_intent_v0"
+        payload.get("schema_version") != "periodic_report_trigger_evaluation_intent_v0"
         or payload.get("generation_authorized") is not False
         or payload.get("external_delivery_authorized") is not False
     ):
         raise ValueError("periodic-report trigger intent authority is invalid")
-    stage = payload.get("stage_completion")
     profile_ref = payload.get("profile_ref")
     trigger_policy = payload.get("trigger_policy")
-    if not all(isinstance(value, Mapping) for value in (stage, profile_ref, trigger_policy)):
+    if not isinstance(profile_ref, Mapping) or not isinstance(
+        trigger_policy, Mapping
+    ):
+        raise ValueError("periodic-report trigger intent is missing typed facts")
+    report_request = payload.get("report_request")
+    if isinstance(report_request, Mapping):
+        expected = {
+            "schema_version",
+            "request_id",
+            "goal_id",
+            "agent_id",
+            "requested_at",
+            "source_digest",
+            "requester_kind",
+            "addressing_source",
+        }
+        if (
+            set(report_request) != expected
+            or report_request.get("schema_version") != REQUEST_ACTION_SCHEMA
+            or report_request.get("requester_kind") != "user"
+            or report_request.get("addressing_source")
+            not in {"provider_mention", "verified_reply"}
+            or any(
+                not str(report_request.get(field) or "").strip()
+                for field in (
+                    "request_id",
+                    "goal_id",
+                    "agent_id",
+                    "requested_at",
+                    "source_digest",
+                )
+            )
+        ):
+            raise ValueError("periodic-report typed request is invalid")
+        requested_at = str(report_request["requested_at"])
+        request_id = str(report_request["request_id"])
+        evidence_digest = "sha256:" + hashlib.sha256(
+            json.dumps(
+                {
+                    "request_id": request_id,
+                    "goal_id": report_request["goal_id"],
+                    "agent_id": report_request["agent_id"],
+                    "source_digest": report_request["source_digest"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        return build_periodic_report_trigger_decision(
+            {
+                "schema_version": "periodic_report_trigger_request_v0",
+                "evaluated_at": requested_at,
+                "profile": {
+                    "profile_id": profile_ref.get("profile_id"),
+                    "profile_version": profile_ref.get("profile_version"),
+                },
+                "trigger_policy": dict(trigger_policy),
+                "candidates": [
+                    {
+                        "trigger_kind": "manual",
+                        "observed_at": requested_at,
+                        "source_ref": f"request:{request_id}",
+                        "evidence_digest": evidence_digest,
+                        "facts": {"authorized": True},
+                    }
+                ],
+            }
+        )
+
+    stage = payload.get("stage_completion")
+    if not isinstance(stage, Mapping):
         raise ValueError("periodic-report trigger intent is missing typed facts")
     required_stage_fields = (
         "stage_identity",
@@ -351,49 +505,55 @@ def evaluate_periodic_report_trigger_evaluation_intent(
         stage.get("schema_version") != STAGE_COMPLETION_RECEIPT_SCHEMA
         or stage.get("acceptance") != "validated"
         or stage.get("outcome_checkpoint_satisfied") is not True
-        or any(not str(stage.get(field) or "").strip() for field in required_stage_fields)
+        or any(
+            not str(stage.get(field) or "").strip() for field in required_stage_fields
+        )
     ):
         raise ValueError("periodic-report stage completion receipt is invalid")
     completed_at = str(stage["completed_at"])
     stage_identity = str(stage["stage_identity"])
-    evidence_digest = "sha256:" + hashlib.sha256(
-        json.dumps([stage_identity], separators=(",", ":")).encode()
-    ).hexdigest()
-    return build_periodic_report_trigger_decision(
-        {
-            "schema_version": "periodic_report_trigger_request_v0",
-            "evaluated_at": completed_at,
-            "profile": {
-                "profile_id": profile_ref.get("profile_id"),
-                "profile_version": profile_ref.get("profile_version"),
-            },
-            "trigger_policy": dict(trigger_policy),
-            "candidates": [
-                {
-                    "trigger_kind": "bounded_segment_milestone",
-                    "observed_at": completed_at,
-                    "source_ref": f"stage:{stage_identity}",
-                    "evidence_digest": evidence_digest,
-                    "facts": {
-                        "segment_ref": stage_identity,
-                        "transition": "segment_completed",
-                        "delivered_count": 0,
-                        "remaining_todo_count": 0,
-                        "durable_writeback": True,
-                        "acceptance": "validated",
-                        "completed_at": completed_at,
-                        "completion_receipt_ref": f"stage:{stage_identity}",
-                        "stage_identity": stage_identity,
-                        "closed_vision_revision": stage["closed_vision_revision"],
-                        "frontier_identity": stage["frontier_identity"],
-                        "stage_transition": stage["transition"],
-                        "outcome_checkpoint_satisfied": True,
-                        "status": "completed",
-                    },
-                }
-            ],
-        }
+    evidence_digest = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps([stage_identity], separators=(",", ":")).encode()
+        ).hexdigest()
     )
+    request = {
+        "schema_version": "periodic_report_trigger_request_v0",
+        "evaluated_at": completed_at,
+        "profile": {
+            "profile_id": profile_ref.get("profile_id"),
+            "profile_version": profile_ref.get("profile_version"),
+        },
+        "trigger_policy": dict(trigger_policy),
+        "candidates": [
+            {
+                "trigger_kind": "bounded_segment_milestone",
+                "observed_at": completed_at,
+                "source_ref": f"stage:{stage_identity}",
+                "evidence_digest": evidence_digest,
+                "facts": {
+                    "segment_ref": stage_identity,
+                    "transition": "segment_completed",
+                    "delivered_count": 0,
+                    "remaining_todo_count": 0,
+                    "durable_writeback": True,
+                    "acceptance": "validated",
+                    "completed_at": completed_at,
+                    "completion_receipt_ref": f"stage:{stage_identity}",
+                    "stage_identity": stage_identity,
+                    "closed_vision_revision": stage["closed_vision_revision"],
+                    "frontier_identity": stage["frontier_identity"],
+                    "stage_transition": stage["transition"],
+                    "outcome_checkpoint_satisfied": True,
+                    "status": "completed",
+                },
+            }
+        ],
+    }
+    if isinstance(payload.get("last_report"), Mapping):
+        request["last_report"] = dict(payload["last_report"])
+    return build_periodic_report_trigger_decision(request)
 
 
 __all__ = [

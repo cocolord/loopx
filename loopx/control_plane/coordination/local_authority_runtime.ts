@@ -1,0 +1,837 @@
+import { isAbsolute, join } from "node:path";
+
+import type { JsonObject } from "../effect_program.ts";
+import { requireJsonObject } from "../runtime_decode.ts";
+import {
+  LOCAL_COORDINATION_MUTATION_REQUEST_SCHEMA,
+  LOCAL_COORDINATION_MUTATION_RESULT_SCHEMA,
+  LOCAL_COORDINATION_PROMOTION_RECEIPT_SCHEMA,
+  LOCAL_COORDINATION_PROMOTION_REQUEST_SCHEMA,
+  LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+  LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA,
+  LOCAL_COORDINATION_TODO_LIST_RESULT_SCHEMA,
+  LOCAL_COORDINATION_TODO_READ_REQUEST_SCHEMA,
+  LOCAL_COORDINATION_TODO_READ_RESULT_SCHEMA,
+} from "./coordination_state_contract.generated.ts";
+import {
+  commitCoordinationProjectionMutation,
+  indexCoordinationProjection,
+  indexCoordinationProjectionTodos,
+  validateCoordinationTodoReadModel,
+  type CoordinationProjectionMutation,
+} from "./coordination_projection.ts";
+import type { AuthorityStore, AuthorityStoreReceiptResult } from "./authority_store.ts";
+import {
+  canonicalAuthorityBytes,
+  canonicalAuthorityObject,
+  canonicalAuthoritySha256,
+  requireAuthorityStoreId,
+} from "./authority_store_codec.ts";
+import { FileAuthorityStore } from "./file_authority_store.ts";
+import {
+  decodeLegacyCoordinationWriterFence,
+  LEGACY_COORDINATION_WRITER_FENCE_SCHEMA,
+  loadLegacyCoordinationWriterFence,
+} from "./legacy_writer_fence.ts";
+import {
+  COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA,
+  qualifyCoordinationRuntimeShadow,
+} from "./runtime_shadow.ts";
+import {
+  COORDINATION_TODO_CLAIM_RESULT_SCHEMA,
+  executeCoordinationTodoClaim,
+} from "./todo_claim.ts";
+import {
+  COORDINATION_TODO_CREATE_RESULT_SCHEMA,
+  executeCoordinationTodoCreate,
+} from "./todo_create.ts";
+import {
+  COORDINATION_TODO_UPDATE_REQUEST_SCHEMA,
+  COORDINATION_TODO_UPDATE_RESULT_SCHEMA,
+  executeCoordinationTodoUpdate,
+} from "./todo_update.ts";
+import { editCoordinationTodo, TODO_COMPATIBILITY_EDIT_RESULT_SCHEMA } from "./todo_compatibility_edit.ts";
+import {
+  normalizeIdempotencyKey,
+  normalizeTtl,
+} from "../work_items/task_lease_acquire.ts";
+
+export const LOCAL_COORDINATION_TODO_CLAIM_REQUEST_SCHEMA =
+  "loopx_local_coordination_todo_claim_request_v0";
+export const LOCAL_COORDINATION_TODO_CREATE_REQUEST_SCHEMA =
+  "loopx_local_coordination_todo_create_request_v0";
+export {
+  LOCAL_COORDINATION_MUTATION_REQUEST_SCHEMA,
+  LOCAL_COORDINATION_MUTATION_RESULT_SCHEMA,
+  LOCAL_COORDINATION_PROMOTION_RECEIPT_SCHEMA,
+  LOCAL_COORDINATION_PROMOTION_REQUEST_SCHEMA,
+  LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+  LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA,
+  LOCAL_COORDINATION_TODO_LIST_RESULT_SCHEMA,
+  LOCAL_COORDINATION_TODO_READ_REQUEST_SCHEMA,
+  LOCAL_COORDINATION_TODO_READ_RESULT_SCHEMA,
+} from "./coordination_state_contract.generated.ts";
+export { LEGACY_COORDINATION_WRITER_FENCE_SCHEMA } from "./legacy_writer_fence.ts";
+
+interface LocalAuthorityRuntimeDependencies {
+  createStore?: (directory: string, goalId: string) => AuthorityStore;
+  createShadowStore?: (directory: string, goalId: string) => AuthorityStore;
+  createCanonicalStore?: (directory: string, goalId: string) => AuthorityStore;
+}
+
+function runtimeRoot(value: unknown): string {
+  if (typeof value !== "string" || value.trim() !== value || !isAbsolute(value)) {
+    throw new Error("runtime_root must be an absolute path");
+  }
+  return value;
+}
+
+function claimAgentValue(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${label} must be a non-empty string`);
+  }
+  return value;
+}
+
+function claimObservedAt(value: unknown): Date {
+  if (typeof value !== "string" || value.trim() !== value) {
+    throw new Error("observed_at must be a trimmed ISO-8601 timestamp");
+  }
+  const observedAt = new Date(value);
+  if (Number.isNaN(observedAt.valueOf())) {
+    throw new Error("observed_at must be a valid ISO-8601 timestamp");
+  }
+  return observedAt;
+}
+
+function authorityDirectory(root: string): string {
+  return join(root, "authority", "file-v0");
+}
+
+function shadowDirectory(root: string): string {
+  return join(root, "authority-shadow", "file-v0");
+}
+
+function requiredPositiveSafeInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > 10_000) {
+    throw new Error(`${label} must be a positive safe integer no greater than 10000`);
+  }
+  return Number(value);
+}
+
+function requiredUniqueStrings(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.length > 32) {
+    throw new Error(`${label} must be an array with at most 32 entries`);
+  }
+  const values = value.map((entry, index) =>
+    requireAuthorityStoreId(entry, `${label}[${index}]`)
+  );
+  if (new Set(values).size !== values.length) throw new Error(`${label} contains duplicates`);
+  return values;
+}
+
+interface LocalCoordinationPromotionRequest {
+  runtime_root: string;
+  goal_id: string;
+  operation_id: string;
+  expected_shadow_provider_revision: string;
+  expected_shadow_projection_sha256: string;
+  minimum_operations: number;
+  required_event_kinds: string[];
+  writer_fence: JsonObject;
+}
+
+function decodePromotionRequest(value: unknown): LocalCoordinationPromotionRequest {
+  const input = requireJsonObject(value, "local coordination promotion request");
+  if (input.schema_version !== LOCAL_COORDINATION_PROMOTION_REQUEST_SCHEMA) {
+    throw new Error("local coordination promotion request schema mismatch");
+  }
+  const fence = decodeLegacyCoordinationWriterFence(input.writer_fence);
+  return {
+    runtime_root: runtimeRoot(input.runtime_root),
+    goal_id: requireAuthorityStoreId(input.goal_id, "goal id"),
+    operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
+    expected_shadow_provider_revision: requireAuthorityStoreId(
+      input.expected_shadow_provider_revision,
+      "expected shadow provider revision",
+    ),
+    expected_shadow_projection_sha256: requireAuthorityStoreId(
+      input.expected_shadow_projection_sha256,
+      "expected shadow projection sha256",
+    ),
+    minimum_operations: requiredPositiveSafeInteger(
+      input.minimum_operations,
+      "minimum_operations",
+    ),
+    required_event_kinds: requiredUniqueStrings(
+      input.required_event_kinds,
+      "required_event_kinds",
+    ),
+    writer_fence: fence,
+  };
+}
+
+function promotionIdentity(request: LocalCoordinationPromotionRequest): JsonObject {
+  return canonicalAuthorityObject({
+    schema_version: LOCAL_COORDINATION_PROMOTION_RECEIPT_SCHEMA,
+    operation_id: request.operation_id,
+    goal_id: request.goal_id,
+    source_shadow_provider_revision: request.expected_shadow_provider_revision,
+    source_projection_sha256: request.expected_shadow_projection_sha256,
+    writer_fence_id: request.writer_fence.fence_id,
+    source_version: request.writer_fence.source_version,
+  }, "local coordination promotion identity");
+}
+
+function matchingReceipt(
+  result: AuthorityStoreReceiptResult,
+  expected: JsonObject,
+): Extract<AuthorityStoreReceiptResult, { status: "found" }> | null {
+  return result.status === "found" && result.receipts.length === 1 &&
+      canonicalAuthorityBytes(result.receipts[0]).equals(canonicalAuthorityBytes(expected))
+    ? result
+    : null;
+}
+
+async function promotionReadback(
+  store: AuthorityStore,
+  request: LocalCoordinationPromotionRequest,
+): Promise<{ matched: boolean; provider_revision?: string; cursor?: string; reason_code?: string }> {
+  const receiptResult = await store.readReceipt(request.operation_id);
+  const receipt = matchingReceipt(receiptResult, promotionIdentity(request));
+  if (receipt === null) {
+    return {
+      matched: false,
+      reason_code: receiptResult.status === "found"
+        ? "local_authority_promotion_identity_mismatch"
+        : "local_authority_promotion_receipt_missing",
+    };
+  }
+  const lineage = await store.scanCommitted(null, 1);
+  const promotion = lineage.status === "page" ? lineage.transactions[0] : undefined;
+  if (
+    promotion === undefined ||
+    promotion.cursor !== "1" ||
+    promotion.operation_id !== request.operation_id ||
+    canonicalAuthoritySha256(promotion.projection) !== request.expected_shadow_projection_sha256
+  ) {
+    return { matched: false, reason_code: "local_authority_promotion_lineage_mismatch" };
+  }
+  return {
+    matched: true,
+    provider_revision: receipt.provider_revision,
+    cursor: receipt.cursor,
+  };
+}
+
+function promotionResult(
+  request: LocalCoordinationPromotionRequest,
+  status: "applied" | "replayed" | "recovered",
+  readback: Awaited<ReturnType<typeof promotionReadback>>,
+): JsonObject {
+  return {
+    schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+    status,
+    operation_id: request.operation_id,
+    provider_revision: readback.provider_revision,
+    cursor: readback.cursor,
+    source_shadow_provider_revision: request.expected_shadow_provider_revision,
+    source_projection_sha256: request.expected_shadow_projection_sha256,
+    writer_fence_id: request.writer_fence.fence_id,
+    source_version: request.writer_fence.source_version,
+    canonical_authority: "file_v0",
+    legacy_writer_fenced: true,
+    legacy_fallback_used: false,
+  };
+}
+
+/**
+ * Explicit Stage 2C cutover. The shadow must still match the caller's exact
+ * qualified revision and digest after the legacy writer fence is engaged.
+ * Nothing calls this from a read path, so canonical promotion cannot happen
+ * implicitly as a side effect of observing a healthy shadow.
+ */
+export async function promoteLocalCoordinationAuthority(
+  value: unknown,
+  dependencies: LocalAuthorityRuntimeDependencies = {},
+): Promise<JsonObject> {
+  let request: LocalCoordinationPromotionRequest;
+  try {
+    request = decodePromotionRequest(value);
+  } catch (error) {
+    return {
+      schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "invalid_local_coordination_promotion_request",
+      reason: error instanceof Error ? error.message : "invalid promotion request",
+      legacy_writer_fenced: false,
+      legacy_fallback_used: false,
+    };
+  }
+  if (request.writer_fence.source_projection_sha256 !== request.expected_shadow_projection_sha256) {
+    return {
+      schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "local_authority_writer_fence_projection_mismatch",
+      reason: "writer fence is not bound to the selected shadow projection",
+      legacy_writer_fenced: false,
+      legacy_fallback_used: false,
+    };
+  }
+  if (
+    request.writer_fence.goal_id !== request.goal_id ||
+    request.writer_fence.expected_shadow_provider_revision !==
+      request.expected_shadow_provider_revision
+  ) {
+    return {
+      schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "local_authority_writer_fence_revision_mismatch",
+      reason: "writer fence is not bound to the selected goal and shadow revision",
+      legacy_writer_fenced: false,
+      legacy_fallback_used: false,
+    };
+  }
+
+  const shadow = dependencies.createShadowStore?.(
+    shadowDirectory(request.runtime_root),
+    request.goal_id,
+  ) ?? new FileAuthorityStore(shadowDirectory(request.runtime_root), request.goal_id);
+  const canonical = dependencies.createCanonicalStore?.(
+    authorityDirectory(request.runtime_root),
+    request.goal_id,
+  ) ?? dependencies.createStore?.(
+    authorityDirectory(request.runtime_root),
+    request.goal_id,
+  ) ?? new FileAuthorityStore(authorityDirectory(request.runtime_root), request.goal_id);
+  try {
+    const persistedFence = await loadLegacyCoordinationWriterFence(
+      request.runtime_root,
+      request.goal_id,
+    );
+    if (
+      persistedFence.status !== "loaded" ||
+      !canonicalAuthorityBytes(persistedFence.fence).equals(
+        canonicalAuthorityBytes(request.writer_fence),
+      )
+    ) return {
+      schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: persistedFence.status === "failed"
+        ? persistedFence.reason_code
+        : "local_authority_writer_fence_not_verified",
+      reason: persistedFence.status === "failed"
+        ? persistedFence.reason
+        : "exact durable legacy writer fence must be engaged before promotion",
+      legacy_writer_fenced: false,
+      legacy_fallback_used: false,
+    };
+    const existing = await canonical.loadAuthority();
+    if (existing.status === "loaded") {
+      const readback = await promotionReadback(canonical, request);
+      return readback.matched
+        ? promotionResult(request, "replayed", readback)
+        : {
+          schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+          status: "failed",
+          reason_code: readback.reason_code ?? "local_authority_already_initialized",
+          reason: "canonical local authority is already initialized by different content",
+          legacy_writer_fenced: true,
+          legacy_fallback_used: false,
+        };
+    }
+    if (existing.status !== "missing") return {
+      schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+      ...existing,
+      legacy_writer_fenced: true,
+      legacy_fallback_used: false,
+    };
+
+    const shadowHead = await shadow.loadAuthority();
+    if (shadowHead.status !== "loaded") return {
+      schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: shadowHead.status === "missing"
+        ? "local_authority_shadow_missing"
+        : shadowHead.reason_code,
+      reason: shadowHead.status === "missing" ? "qualified shadow authority is missing" : shadowHead.reason,
+      legacy_writer_fenced: true,
+      legacy_fallback_used: false,
+    };
+    const observedDigest = canonicalAuthoritySha256(shadowHead.head);
+    if (
+      shadowHead.provider_revision !== request.expected_shadow_provider_revision ||
+      observedDigest !== request.expected_shadow_projection_sha256
+    ) return {
+      schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "local_authority_shadow_fence_mismatch",
+      reason: "shadow revision or projection changed before promotion",
+      observed_shadow_provider_revision: shadowHead.provider_revision,
+      observed_shadow_projection_sha256: observedDigest,
+      legacy_writer_fenced: true,
+      legacy_fallback_used: false,
+    };
+    indexCoordinationProjection(shadowHead.head, request.goal_id);
+
+    const qualification = await qualifyCoordinationRuntimeShadow({
+      schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA,
+      runtime_root: request.runtime_root,
+      goal_id: request.goal_id,
+      projection: shadowHead.head,
+      minimum_operations: request.minimum_operations,
+      required_event_kinds: request.required_event_kinds,
+    }, {
+      createStore: () => shadow,
+    });
+    if (qualification.status !== "qualified" || qualification.qualified !== true) return {
+      schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "local_authority_shadow_not_qualified",
+      reason: "shadow parity evidence does not satisfy the promotion policy",
+      qualification_status: qualification.status,
+      legacy_writer_fenced: true,
+      legacy_fallback_used: false,
+    };
+
+    const finalShadowHead = await shadow.loadAuthority();
+    if (
+      finalShadowHead.status !== "loaded" ||
+      finalShadowHead.provider_revision !== request.expected_shadow_provider_revision ||
+      canonicalAuthoritySha256(finalShadowHead.head) !== request.expected_shadow_projection_sha256
+    ) return {
+      schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "local_authority_shadow_changed_during_qualification",
+      reason: "shadow head changed while promotion evidence was being verified",
+      legacy_writer_fenced: true,
+      legacy_fallback_used: false,
+    };
+
+    const identity = promotionIdentity(request);
+    const committed = await canonical.commitAuthority({
+      expected_provider_revision: null,
+      operation_id: request.operation_id,
+      events: [{
+        ...identity,
+        schema_version: "loopx_local_coordination_promotion_event_v0",
+        mode_transition: "legacy_canonical_to_file_v0",
+      }],
+      next_projection: finalShadowHead.head,
+      receipts: [identity],
+    });
+    if (committed.status === "applied") {
+      const readback = await promotionReadback(canonical, request);
+      return readback.matched
+        ? promotionResult(request, "applied", readback)
+        : {
+          schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+          status: "failed",
+          reason_code: readback.reason_code ?? "local_authority_promotion_readback_mismatch",
+          reason: "promotion commit lacks an exact durable readback",
+          legacy_writer_fenced: true,
+          legacy_fallback_used: false,
+        };
+    }
+    const readback = await promotionReadback(canonical, request);
+    if (readback.matched) {
+      return promotionResult(
+        request,
+        committed.status === "ambiguous" ? "recovered" : "replayed",
+        readback,
+      );
+    }
+    return {
+      schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+      ...committed,
+      ...(committed.status === "ambiguous" ? { reconciliation_required: true } : {}),
+      legacy_writer_fenced: true,
+      legacy_fallback_used: false,
+    };
+  } catch (error) {
+    return {
+      schema_version: LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "local_authority_promotion_unavailable",
+      reason: error instanceof Error ? error.message : "promotion unavailable",
+      legacy_writer_fenced: true,
+      legacy_fallback_used: false,
+    };
+  }
+}
+
+function decodeMutations(value: unknown): CoordinationProjectionMutation[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("mutations must be a non-empty array");
+  }
+  return value.map((candidate, index) => {
+    const mutation = canonicalAuthorityObject(candidate, `mutations[${index}]`);
+    switch (mutation.kind) {
+      case "todo_upsert":
+        return {
+          kind: "todo_upsert",
+          todo: canonicalAuthorityObject(mutation.todo, `mutations[${index}].todo`),
+          ...(mutation.clear_fields === undefined ? {} : {
+            clear_fields: requiredUniqueStrings(
+              mutation.clear_fields, `mutations[${index}].clear_fields`,
+            ),
+          }),
+        };
+      case "todo_remove":
+        return {
+          kind: "todo_remove",
+          todo_id: requireAuthorityStoreId(mutation.todo_id, `mutations[${index}].todo_id`),
+        };
+      case "lease_upsert":
+        return {
+          kind: "lease_upsert",
+          lease: canonicalAuthorityObject(mutation.lease, `mutations[${index}].lease`),
+        };
+      case "lease_remove":
+        return {
+          kind: "lease_remove",
+          todo_id: requireAuthorityStoreId(mutation.todo_id, `mutations[${index}].todo_id`),
+        };
+      default:
+        throw new Error(`mutations[${index}].kind is unsupported`);
+    }
+  });
+}
+
+/** Provider-first mutation entry point. It never reads a legacy projection. */
+export async function mutateLocalCoordinationAuthority(
+  value: unknown,
+  dependencies: LocalAuthorityRuntimeDependencies = {},
+): Promise<JsonObject> {
+  try {
+    const input = requireJsonObject(value, "local coordination mutation request");
+    if (input.schema_version !== LOCAL_COORDINATION_MUTATION_REQUEST_SCHEMA) {
+      throw new Error("local coordination mutation request schema mismatch");
+    }
+    const root = runtimeRoot(input.runtime_root);
+    const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
+    const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
+      new FileAuthorityStore(authorityDirectory(root), goalId);
+    const result = await commitCoordinationProjectionMutation(store, {
+      goal_id: goalId,
+      operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
+      expected_provider_revision: requireAuthorityStoreId(
+        input.expected_provider_revision,
+        "expected provider revision",
+      ),
+      mutations: decodeMutations(input.mutations),
+    });
+    return {
+      schema_version: LOCAL_COORDINATION_MUTATION_RESULT_SCHEMA,
+      ...result,
+      source_authority: "file_v0",
+      decision_read_from_provider: true,
+      legacy_fallback_used: false,
+    };
+  } catch (error) {
+    return {
+      schema_version: LOCAL_COORDINATION_MUTATION_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "invalid_local_coordination_mutation_request",
+      reason: error instanceof Error ? error.message : "invalid mutation request",
+      source_authority: "file_v0",
+      decision_read_from_provider: true,
+      legacy_fallback_used: false,
+    };
+  }
+}
+
+/** Local file-provider adapter for the provider-neutral Todo claim transaction. */
+export async function claimLocalCoordinationTodo(
+  value: unknown,
+  dependencies: LocalAuthorityRuntimeDependencies = {},
+): Promise<JsonObject> {
+  try {
+    const input = requireJsonObject(value, "local coordination Todo claim request");
+    if (input.schema_version !== LOCAL_COORDINATION_TODO_CLAIM_REQUEST_SCHEMA) {
+      throw new Error("local coordination Todo claim request schema mismatch");
+    }
+    if (typeof input.dry_run !== "boolean") {
+      throw new Error("dry_run must be a JSON boolean");
+    }
+    const root = runtimeRoot(input.runtime_root);
+    const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
+    const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
+      new FileAuthorityStore(authorityDirectory(root), goalId);
+    if (!Array.isArray(input.registered_agents)) {
+      throw new Error("registered_agents must be a JSON array");
+    }
+    const registeredAgents = input.registered_agents.map(
+      (value) => claimAgentValue(value, "registered agent"),
+    );
+    const leaseRequestValue = input.lease_request;
+    const leaseRequest = leaseRequestValue === null || leaseRequestValue === undefined
+      ? null
+      : (() => {
+        const request = requireJsonObject(leaseRequestValue, "lease_request");
+        const expectedVersion = request.expected_version;
+        if (expectedVersion !== null && expectedVersion !== undefined &&
+            (!Number.isSafeInteger(expectedVersion) || Number(expectedVersion) < 0)) {
+          throw new Error(
+            "lease_request.expected_version must be a non-negative safe integer or null",
+          );
+        }
+        return {
+          idempotency_key: normalizeIdempotencyKey(request.idempotency_key),
+          expected_version: expectedVersion === undefined ? null : expectedVersion as number | null,
+          ttl_seconds: normalizeTtl(request.ttl_seconds),
+        };
+      })();
+    const result = await executeCoordinationTodoClaim(store, {
+      goal_id: goalId,
+      todo_id: requireAuthorityStoreId(input.todo_id, "todo id"),
+      claimed_by: claimAgentValue(input.claimed_by, "claimed_by"),
+      actor_agent_id: input.actor_agent_id === null || input.actor_agent_id === undefined
+        ? null
+        : claimAgentValue(input.actor_agent_id, "actor_agent_id"),
+      expected_role: input.role === null || input.role === undefined
+        ? null
+        : requireAuthorityStoreId(input.role, "role"),
+      registered_agents: registeredAgents,
+      operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
+      lease_request: leaseRequest,
+      dry_run: input.dry_run,
+      now: claimObservedAt(input.observed_at),
+    });
+    return {
+      ...result,
+      source_authority: "file_v0",
+      decision_read_from_provider: true,
+      legacy_fallback_used: false,
+    };
+  } catch (error) {
+    return {
+      schema_version: COORDINATION_TODO_CLAIM_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "invalid_local_coordination_todo_claim_request",
+      reason: error instanceof Error ? error.message : "invalid Todo claim request",
+      source_authority: "file_v0",
+      decision_read_from_provider: true,
+      legacy_fallback_used: false,
+    };
+  }
+}
+
+/** Local file-provider adapter for the provider-neutral work-item create transaction. */
+export async function createLocalCoordinationTodo(
+  value: unknown,
+  dependencies: LocalAuthorityRuntimeDependencies = {},
+): Promise<JsonObject> {
+  const providerEvidence = {
+    source_authority: "file_v0",
+    decision_read_from_provider: true,
+    legacy_fallback_used: false,
+  };
+  try {
+    const input = requireJsonObject(value, "local coordination Todo create request");
+    if (input.schema_version !== LOCAL_COORDINATION_TODO_CREATE_REQUEST_SCHEMA) {
+      throw new TypeError("local coordination Todo create request schema mismatch");
+    }
+    if (typeof input.dry_run !== "boolean") {
+      throw new TypeError("dry_run must be a JSON boolean");
+    }
+    const root = runtimeRoot(input.runtime_root);
+    const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
+    const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
+      new FileAuthorityStore(authorityDirectory(root), goalId);
+    if (!Array.isArray(input.registered_agents)) {
+      throw new TypeError("registered_agents must be a JSON array");
+    }
+    const result = await executeCoordinationTodoCreate(store, {
+      goal_id: goalId,
+      todo: requireJsonObject(input.todo, "todo"),
+      actor_agent_id: input.actor_agent_id === null || input.actor_agent_id === undefined
+        ? null
+        : claimAgentValue(input.actor_agent_id, "actor_agent_id"),
+      registered_agents: input.registered_agents.map(
+        (agent) => claimAgentValue(agent, "registered agent"),
+      ),
+      operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
+      dry_run: input.dry_run,
+      now: claimObservedAt(input.observed_at),
+    });
+    return {
+      ...result,
+      ...providerEvidence,
+    };
+  } catch (error) {
+    return {
+      schema_version: COORDINATION_TODO_CREATE_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "invalid_local_coordination_todo_create_request",
+      reason: error instanceof Error ? error.message : "invalid Todo create request",
+      ...providerEvidence,
+    };
+  }
+}
+
+/** Local file-provider adapter for one provider-neutral metadata mutation. */
+export async function updateLocalCoordinationTodo(
+  value: unknown,
+  dependencies: LocalAuthorityRuntimeDependencies = {},
+): Promise<JsonObject> {
+  const providerEvidence = {source_authority: "file_v0",
+    decision_read_from_provider: true, legacy_fallback_used: false};
+  try {
+    const input = requireJsonObject(value, "local coordination Todo update request");
+    if (input.schema_version !== COORDINATION_TODO_UPDATE_REQUEST_SCHEMA) {
+      throw new TypeError("local coordination Todo update request schema mismatch");
+    }
+    if (!Array.isArray(input.registered_agents) || !Array.isArray(input.clear_fields)) {
+      throw new TypeError("registered_agents and clear_fields must be JSON arrays");
+    }
+    const root = runtimeRoot(input.runtime_root);
+    const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
+    const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
+      new FileAuthorityStore(authorityDirectory(root), goalId);
+    return {...await executeCoordinationTodoUpdate(store, {
+      goal_id: goalId, todo_id: requireAuthorityStoreId(input.todo_id, "todo id"),
+      expected_role: input.role === null || input.role === undefined ? null :
+        requireAuthorityStoreId(input.role, "role"),
+      actor_agent_id: input.actor_agent_id === null || input.actor_agent_id === undefined ? null :
+        claimAgentValue(input.actor_agent_id, "actor_agent_id"),
+      registered_agents: input.registered_agents.map((agent) =>
+        claimAgentValue(agent, "registered agent")),
+      operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
+      patch: requireJsonObject(input.patch, "Todo update patch"),
+      clear_fields: input.clear_fields.map((field) => claimAgentValue(field, "clear field")),
+      dry_run: input.dry_run as boolean,
+      now: claimObservedAt(input.observed_at),
+    }), ...providerEvidence};
+  } catch (error) {
+    return {schema_version: COORDINATION_TODO_UPDATE_RESULT_SCHEMA, status: "failed",
+      changed: false, reason_code: "invalid_local_coordination_todo_update_request",
+      reason: error instanceof Error ? error.message : "invalid Todo update request",
+      ...providerEvidence};
+  }
+}
+
+/** Embedded file adapter; no Markdown input or projection write is accepted. */
+export async function editLocalCoordinationTodo(
+  value: unknown,
+  dependencies: LocalAuthorityRuntimeDependencies = {},
+): Promise<JsonObject> {
+  try {
+    const input = requireJsonObject(value, "local compatibility edit");
+    const {runtime_root, ...request} = input;
+    const root = runtimeRoot(runtime_root);
+    const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
+    const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
+      new FileAuthorityStore(authorityDirectory(root), goalId);
+    return {...await editCoordinationTodo(store, request),
+      source_authority: "file_v0", decision_read_from_provider: true, legacy_fallback_used: false};
+  } catch (error) {
+    return {schema_version: TODO_COMPATIBILITY_EDIT_RESULT_SCHEMA, status: "failed",
+      reason_code: "invalid_local_compatibility_edit", changed: false,
+      reason: error instanceof Error ? error.message : "invalid local compatibility edit"};
+  }
+}
+
+/** Provider-first exact Todo read. Missing/unavailable state never falls back. */
+export async function readLocalCoordinationTodo(
+  value: unknown,
+  dependencies: LocalAuthorityRuntimeDependencies = {},
+): Promise<JsonObject> {
+  try {
+    const input = requireJsonObject(value, "local coordination Todo read request");
+    if (input.schema_version !== LOCAL_COORDINATION_TODO_READ_REQUEST_SCHEMA) {
+      throw new Error("local coordination Todo read request schema mismatch");
+    }
+    const root = runtimeRoot(input.runtime_root);
+    const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
+    const todoId = requireAuthorityStoreId(input.todo_id, "todo id");
+    const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
+      new FileAuthorityStore(authorityDirectory(root), goalId);
+    const head = await store.loadAuthority();
+    if (head.status !== "loaded") {
+      return {
+        schema_version: LOCAL_COORDINATION_TODO_READ_RESULT_SCHEMA,
+        ...head,
+        source_authority: "file_v0",
+        decision_read_from_provider: true,
+        legacy_fallback_used: false,
+      };
+    }
+    const projection = indexCoordinationProjectionTodos(head.head, goalId);
+    validateCoordinationTodoReadModel(head.head, goalId);
+    const todo = projection.todos.get(todoId);
+    return {
+      schema_version: LOCAL_COORDINATION_TODO_READ_RESULT_SCHEMA,
+      status: todo === undefined ? "missing" : "found",
+      todo_id: todoId,
+      ...(todo === undefined ? {} : { todo }),
+      todo_ids: projection.todo_ids,
+      provider_revision: head.provider_revision,
+      cursor: head.cursor,
+      source_authority: "file_v0",
+      decision_read_from_provider: true,
+      legacy_fallback_used: false,
+    };
+  } catch (error) {
+    return {
+      schema_version: LOCAL_COORDINATION_TODO_READ_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "invalid_local_coordination_todo_read_request",
+      reason: error instanceof Error ? error.message : "invalid Todo read request",
+      source_authority: "file_v0",
+      decision_read_from_provider: true,
+      legacy_fallback_used: false,
+    };
+  }
+}
+
+/** Provider-first Todo collection read. Missing/unavailable state never falls back. */
+export async function listLocalCoordinationTodos(
+  value: unknown,
+  dependencies: LocalAuthorityRuntimeDependencies = {},
+): Promise<JsonObject> {
+  try {
+    const input = requireJsonObject(value, "local coordination Todo list request");
+    if (input.schema_version !== LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA) {
+      throw new Error("local coordination Todo list request schema mismatch");
+    }
+    const root = runtimeRoot(input.runtime_root);
+    const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
+    const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
+      new FileAuthorityStore(authorityDirectory(root), goalId);
+    const head = await store.loadAuthority();
+    if (head.status !== "loaded") {
+      return {
+        schema_version: LOCAL_COORDINATION_TODO_LIST_RESULT_SCHEMA,
+        ...head,
+        source_authority: "file_v0",
+        decision_read_from_provider: true,
+        legacy_fallback_used: false,
+      };
+    }
+    const projection = indexCoordinationProjectionTodos(head.head, goalId);
+    const todoReadModel = validateCoordinationTodoReadModel(head.head, goalId);
+    return {
+      schema_version: LOCAL_COORDINATION_TODO_LIST_RESULT_SCHEMA,
+      status: "loaded",
+      todos: projection.todo_ids.map((todoId) => projection.todos.get(todoId)!),
+      todo_ids: projection.todo_ids,
+      todo_read_model: todoReadModel,
+      provider_revision: head.provider_revision,
+      cursor: head.cursor,
+      source_authority: "file_v0",
+      decision_read_from_provider: true,
+      legacy_fallback_used: false,
+    };
+  } catch (error) {
+    return {
+      schema_version: LOCAL_COORDINATION_TODO_LIST_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "invalid_local_coordination_todo_list_request",
+      reason: error instanceof Error ? error.message : "invalid Todo list request",
+      source_authority: "file_v0",
+      decision_read_from_provider: true,
+      legacy_fallback_used: false,
+    };
+  }
+}

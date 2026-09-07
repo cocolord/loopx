@@ -19,7 +19,9 @@ from loopx.cli_commands.todo_argument_validation import (
     validate_todo_suggest_options,
     validate_todo_supersede_options,
     validate_todo_update_options,
+    validate_shared_todo_options,
 )
+from loopx.control_plane.work_items.task_lease import TaskLeaseError
 
 
 def test_todo_handler_expands_shared_paths_and_keeps_suggest_project_only(
@@ -564,7 +566,8 @@ def test_quota_action_selection_requires_turn_identity() -> None:
                 "Continue the work.",
             ],
             "todo claim only accepts --todo-id, --claimed-by, --agent-id, optional --role, "
-            "--project, --state-file, and --dry-run; unsupported: "
+            "--claim-operation-id, --task-lease-idempotency-key, "
+            "--task-lease-expected-version, --project, --state-file, and --dry-run; unsupported: "
             "--decision-outcome, --next-agent-todo",
         ),
     ],
@@ -581,6 +584,16 @@ def test_todo_claim_validation_preserves_exact_diagnostics(
         validate_todo_claim_options(args)
 
     assert str(exc_info.value) == expected
+
+
+@pytest.mark.parametrize("command", ["add", "list", "update", "complete", "supersede"])
+@pytest.mark.parametrize("operation_id", ["retry-one", ""])
+def test_claim_operation_id_is_not_silently_ignored_by_other_commands(command, operation_id):
+    args = build_parser().parse_args([
+        "todo", command, "--goal-id", "example-goal", "--claim-operation-id", operation_id,
+    ])
+    with pytest.raises(ValueError, match="supported only by todo claim"):
+        validate_shared_todo_options(args)
 
 
 @pytest.mark.parametrize(
@@ -762,7 +775,7 @@ def test_todo_complete_preserves_typed_task_lease_error(
     tmp_path: Path,
 ) -> None:
     def reject_stale_instance(**_kwargs: object) -> dict[str, object]:
-        raise todo_command.TaskLeaseError(
+        raise TaskLeaseError(
             "todo has an active task lease",
             code="lease_fence_required",
             payload={"lease_version": 3},
@@ -1132,7 +1145,7 @@ def test_doctor_accepts_subcommand_json_format(
     monkeypatch.setattr(
         doctor_command,
         "collect_doctor",
-        lambda *, deep=False, agent_type=None: {
+        lambda *, deep=False, agent_type=None, installation_only=False: {
             "ok": True,
             "deep": deep,
             "agent_type": agent_type,

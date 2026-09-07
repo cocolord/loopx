@@ -1,3 +1,4 @@
+import type { WorkspaceLoadError } from "../../data/workspace-progressive-status";
 export type WorkspaceGoalState =
   | "需修复"
   | "等你"
@@ -16,6 +17,7 @@ export type WorkspaceHomeLane =
   | "stopped";
 
 export type WorkspaceAgentTodo = {
+  resumeWhen?: string | null;
   claimedBy?: string | null;
   dependencies?: string[];
   done: boolean;
@@ -24,6 +26,7 @@ export type WorkspaceAgentTodo = {
   priority?: string | null;
   status?: string | null;
   taskClass?: string | null;
+  taskDomain?: string | null;
   text: string;
   todoId: string;
 };
@@ -50,9 +53,28 @@ export type WorkspaceRepositoryContext = {
   readOnly: true;
 };
 
+export type WorkspaceGoalSubagentConfiguration = {
+  allowedDomains: string[];
+  domainCandidates?: Array<{
+    domain: string;
+    matchingTodoCount: number;
+  }>;
+  enabled: boolean;
+  maxChildren: number;
+};
+
 export type WorkspaceGoal = {
+  loadState?: "loading" | "error";
+  loadError?: WorkspaceLoadError;
   activationState: "active" | "stopped";
   agentId: string;
+  agentLanes?: Array<{
+    agentId: string;
+    label: string;
+    lastActivityAt?: string | null;
+    state?: string | null;
+  }>;
+  agentLaneCount?: number;
   agentLabel?: string;
   agentSentence: string;
   agentTodos: WorkspaceAgentTodo[];
@@ -65,6 +87,7 @@ export type WorkspaceGoal = {
   nextSentence: string;
   repository?: WorkspaceRepositoryContext;
   state: WorkspaceGoalState;
+  subagentExecution?: WorkspaceGoalSubagentConfiguration;
   title: string;
   usage?: WorkspaceGoalUsage | null;
 };
@@ -122,6 +145,24 @@ export type WorkspaceOutput = {
   summary?: string;
   title: string;
   todoId?: string;
+  report?: {
+    addedCount: number;
+    changedCount: number;
+    deliveredAt: string;
+    generationId: string;
+    items: Array<{
+      changeKind: "added" | "changed";
+      previousStatus?: string;
+      sourceRef: string;
+      status: string;
+      summary: string;
+      title: string;
+    }>;
+    periodEndAt: string;
+    periodStartAt: string;
+    predecessorPublicationId?: string | null;
+    publicationId: string;
+  };
 };
 
 export type WorkspaceChannel = "manager" | "attention" | "running" | "outputs";
@@ -240,6 +281,10 @@ export type WorkspaceModel = {
   goalNotifications?: WorkspaceGoalNotification[];
   goals: WorkspaceGoal[];
   openUserTodoCount: number;
+  periodicReports?: {
+    error?: string | null;
+    loading: boolean;
+  };
   systemHealth?: WorkspaceSystemHealth;
   timeline?: WorkspaceTimelineItem[];
   userTodos: WorkspaceAttention[];
@@ -269,7 +314,7 @@ export type WorkspaceDrawerSelection =
   | { item: WorkspaceRun; kind: "run" }
   | { item: WorkspaceOutput; kind: "output" }
   | { item: WorkspaceActionPreview; kind: "proposal" }
-  | { goalId?: string; kind: "settings"; tab?: "appearance" | "lark" }
+  | { goalId?: string; kind: "settings"; tab?: "appearance" | "capabilities" | "language" | "lark" | "machine" }
   | {
       item: WorkspaceSchedule;
       kind: "schedule";
@@ -284,6 +329,10 @@ export type PersonalHomeCompatibleModel = {
   userTodos: WorkspaceAttention[];
   workers?: WorkspaceWorker[];
 };
+
+export type WorkspaceGoalArchiveLoadState =
+  | { phase: "idle" | "loading" | "ready"; error: null }
+  | { phase: "error"; error: string };
 
 export type PersonalWorkspaceCallbacks = {
   onApplyProposal?: (proposal: WorkspaceActionPreview) => void | Promise<void>;
@@ -300,10 +349,21 @@ export type PersonalWorkspaceCallbacks = {
   onOpenGoalView?: (tab: WorkspaceGoalTab) => void;
   onOpenRunSession?: (run: WorkspaceRun) => void | Promise<void>;
   onOpenOutput?: (output: WorkspaceOutput) => void;
+  onPreviewGoalSubagentConfiguration?: (
+    request: WorkspaceGoalSubagentConfiguration & { goalId: string },
+  ) => Promise<{
+    changed: boolean;
+    configuration: WorkspaceGoalSubagentConfiguration;
+    previewId: string;
+  }>;
+  onApplyGoalSubagentConfiguration?: (
+    request: WorkspaceGoalSubagentConfiguration & { goalId: string; previewId: string },
+  ) => Promise<WorkspaceGoalSubagentConfiguration>;
   onGoalActivationStateChange?: (goalId: string, activationState: "active" | "stopped") => void;
   onGoalDeleted?: (goalId: string) => void;
   onReconcileStatus?: () => void | Promise<void>;
   onRefresh?: () => void | Promise<void>;
+  onRetryGoalArchive?: () => void | Promise<void>;
   onPreviewAction?: (request: WorkspaceActionPreviewRequest) => WorkspaceActionPreview | Promise<WorkspaceActionPreview>;
   onRequestGoalCreate?: () => WorkspaceActionPreview | Promise<WorkspaceActionPreview | void> | void;
   onRequestScheduleConfig?: (kind: WorkspaceScheduleKind, goalId: string | null) => WorkspaceActionPreview | Promise<WorkspaceActionPreview | void> | void;

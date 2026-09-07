@@ -34,6 +34,34 @@ QUOTA_SETTLEMENT_READBACK_REQUEST_SCHEMA = (
 QUOTA_SETTLEMENT_READBACK_RESULT_SCHEMA = (
     "loopx_quota_settlement_readback_result_v0"
 )
+SEMANTIC_REPLAN_GUARD_SCHEMA = "semantic_replan_guard_v0"
+
+
+def render_refresh_recovery_markdown(payload: dict[str, Any]) -> str | None:
+    """Present an admitted recovery result without deriving settlement policy."""
+    recovery = payload.get("refresh_recovery") or {}
+    if recovery.get("decision") not in {"replay", "repair_receipt", "reject"}:
+        return None
+    lines = [
+        "# LoopX State Refresh",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- recovery: `{recovery['decision']}`",
+        f"- reason: `{recovery.get('reason')}`",
+        "- appended: `False` — original writeback preserved; no new delivery or spend.",
+    ]
+    checkpoint = payload.get("vision_checkpoint") or {}
+    if checkpoint:
+        lines.append(
+            f"- vision_checkpoint: `{checkpoint.get('decision')}`; satisfied={checkpoint.get('satisfied')}"
+        )
+    if payload.get("error"):
+        lines.append(str(payload["error"]))
+    elif checkpoint.get("satisfied") is False:
+        lines.append(
+            "Retry the same refresh command and Turn with --vision-unchanged-reason if an existing vision still applies, or --agent-vision-json for a valid vision patch. Do not repeat work or begin a new Turn for this checkpoint."
+        )
+    return "\n".join(lines)
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +74,7 @@ class QuotaSettlementReadback:
     terminal_closeout: SettlementResult[dict[str, Any]]
     terminal_settlement: SettlementResult[dict[str, Any]]
     workspace_causality: dict[str, str] | None
+    semantic_replan_guard: dict[str, str | None] | None
     writeback_run: dict[str, Any] | None
     spend_run: dict[str, Any] | None
     heartbeat_receipt: dict[str, Any] | None
@@ -54,6 +83,8 @@ class QuotaSettlementReadback:
     completion_event: dict[str, Any] | None
     monitor_phase: ReceiptBoundMonitorPhase | None
     replay_phase: ReceiptBoundReplayPhase | None
+    refresh_recovery: dict[str, Any] | None = None
+
 
 __all__ = [
     "SETTLEMENT_IDENTITY_SCHEMA_VERSION",
@@ -104,6 +135,33 @@ def _optional_readback_record(value: Any) -> dict[str, Any] | None:
     return dict(value)
 
 
+def _semantic_replan_guard(value: Any) -> dict[str, str | None] | None:
+    guard = _optional_readback_record(value)
+    if guard is None:
+        return None
+    scope = guard.get("scope")
+    selected_obligation_id = guard.get("selected_obligation_id")
+    selected_obligation_is_malformed = (
+        selected_obligation_id is not None
+        and not isinstance(selected_obligation_id, str)
+    )
+    legacy_guard_claims_selection = (
+        scope == "legacy_unscoped" and selected_obligation_id is not None
+    )
+    if (
+        guard.get("schema_version") != SEMANTIC_REPLAN_GUARD_SCHEMA
+        or scope not in {"legacy_unscoped", "turn_guard"}
+        or selected_obligation_is_malformed
+        or legacy_guard_claims_selection
+    ):
+        raise RuntimeError("TypeScript semantic replan guard shape mismatch")
+    return {
+        "schema_version": SEMANTIC_REPLAN_GUARD_SCHEMA,
+        "scope": str(scope),
+        "selected_obligation_id": selected_obligation_id,
+    }
+
+
 def read_heartbeat_settlement(
     runtime_root: Path,
     *,
@@ -114,6 +172,7 @@ def read_heartbeat_settlement(
     replan_obligation_id: str | None = None,
     infer_turn_instance_id: bool = False,
     allow_unbound_binding: bool = False,
+    refresh_retry: dict[str, Any] | None = None,
 ) -> QuotaSettlementReadback | None:
     """Read one complete heartbeat settlement through the TS domain owner."""
 
@@ -130,6 +189,11 @@ def read_heartbeat_settlement(
                 "replan_obligation_id": replan_obligation_id,
                 "infer_turn_instance_id": infer_turn_instance_id,
                 "allow_unbound_binding": allow_unbound_binding,
+                **(
+                    {"refresh_retry": refresh_retry}
+                    if refresh_retry is not None
+                    else {}
+                ),
             },
         )
     except EffectRuntimeRejected as exc:
@@ -169,7 +233,11 @@ def read_heartbeat_settlement(
             if workspace_causality is not None
             else None
         ),
+        semantic_replan_guard=_semantic_replan_guard(
+            payload.get("semantic_replan_guard")
+        ),
         writeback_run=_optional_readback_record(payload.get("writeback_run")),
+        refresh_recovery=_optional_readback_record(payload.get("refresh_recovery")),
         spend_run=_optional_readback_record(payload.get("spend_run")),
         heartbeat_receipt=_optional_readback_record(payload.get("heartbeat_receipt")),
         writeback_event=_optional_readback_record(payload.get("writeback_event")),

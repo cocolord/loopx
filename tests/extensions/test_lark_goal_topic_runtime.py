@@ -9,7 +9,10 @@ from typing import Any
 
 from loopx.extensions.lark.event_collector import _jq_projection
 from loopx.extensions.lark.event_inbox import inspect_lark_event_inbox
-from loopx.extensions.lark.goal_channel_contracts import read_goal_channel_binding
+from loopx.extensions.lark.goal_channel_contracts import (
+    binding_for_goal,
+    read_goal_channel_binding,
+)
 from loopx.extensions.lark.goal_channel_targets import read_goal_channel_targets
 from loopx.extensions.lark.goal_topic_connections import connect_lark_goal_topic
 
@@ -358,7 +361,8 @@ def test_agent_scoped_async_inbox_queues_without_chat_reply_or_ack(
 
     assert connected["ok"] is True
     assert configured[0]["lark_event_inbox_agent_id"] == "agent-alpha"
-    binding = read_goal_channel_binding(binding_path)["bindings"]["goal-alpha"]
+    binding = binding_for_goal(read_goal_channel_binding(binding_path), "goal-alpha")
+    assert binding is not None
     assert binding["agent_id"] == "agent-alpha"
     assert binding["routing"]["capture_scope"] == "addressed_only"
     assert binding["routing"]["ingress_mode"] == "async_inbox"
@@ -404,6 +408,7 @@ def test_agent_scoped_async_inbox_queues_without_chat_reply_or_ack(
     assert projection["processed_count"] == 0
     assert projection["thread_complete"] is False
     assert projection["coverage_warning"]
+    assert "periodic-report" not in projection["instruction"]
 
 
 def test_invalid_persisted_routing_state_never_answers_replies_or_acknowledges(
@@ -435,7 +440,11 @@ def test_invalid_persisted_routing_state_never_answers_replies_or_acknowledges(
     )
     assert connected["ok"] is True
     binding = read_goal_channel_binding(binding_path)
-    binding["bindings"]["goal-alpha"]["routing"]["ingress_mode"] = "async-inbox"
+    connection = binding_for_goal(binding, "goal-alpha")
+    assert connection is not None
+    binding["bindings"]["goal-alpha"]["connections"][connection["connection_id"]][
+        "routing"
+    ]["ingress_mode"] = "async-inbox"
 
     result = process_lark_goal_topic_event(
         target_payload=read_goal_channel_targets(target_path),
@@ -798,12 +807,90 @@ def test_profile_stream_keeps_one_consumer_open_between_messages(
 
     timeout_index = captured["args"].index("--timeout")
     assert captured["args"][timeout_index + 1] == "30m"
+    assert "--quiet" not in captured["args"]
+    assert result == {
+        "ok": False,
+        "status": "stream_not_ready",
+        "event_count": 0,
+        "replied_count": 0,
+    }
+
+
+def test_profile_stream_waits_for_provider_ready_before_reporting_listening(
+    tmp_path: Path,
+) -> None:
+    from loopx.extensions.lark.goal_topic_runtime import stream_lark_goal_topic_profile
+
+    health: list[dict[str, Any]] = []
+    snapshot = {
+        "target_payload": {
+            "targets": {
+                "mew-product": {
+                    "name": "mew-product",
+                    "provider": "lark",
+                    "enabled": True,
+                    "channel": {"chat_id": "oc_public_fixture"},
+                    "identity": {
+                        "sender_profile": "mew",
+                        "sender_identity": "bot",
+                        "bot_app_id": "cli_public_fixture",
+                        "cli_bin": "fake-lark",
+                    },
+                }
+            }
+        },
+        "binding_payloads": {
+            "goal-alpha": {
+                "bindings": {
+                    "goal-alpha": {
+                        "goal_id": "goal-alpha",
+                        "provider": "lark",
+                        "enabled": True,
+                        "target_ref": "mew-product",
+                        "topic": {"root_message_id": "om_topic_alpha"},
+                    }
+                }
+            }
+        },
+    }
+
+    class ReadyConsumer:
+        stdout = iter(
+            (
+                "[event] local bus not found; checking remote connections...\n",
+                "[event] ready event_key=im.message.receive_v1\n",
+            )
+        )
+
+        def poll(self) -> int:
+            return 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+        def terminate(self) -> None:
+            raise AssertionError("a completed consumer must not be terminated")
+
+        def kill(self) -> None:
+            raise AssertionError("a completed consumer must not be killed")
+
+    result = stream_lark_goal_topic_profile(
+        profile="mew",
+        snapshot_provider=lambda: snapshot,
+        stop=threading.Event(),
+        runtime_root=tmp_path,
+        answer=lambda _route, _text: "ok",
+        process_factory=lambda _args: ReadyConsumer(),
+        health_sink=lambda update: health.append(dict(update)),
+    )
+
     assert result == {
         "ok": True,
         "status": "stream_ended",
         "event_count": 0,
         "replied_count": 0,
     }
+    assert [item["status"] for item in health] == ["starting", "listening"]
 
 
 def test_profile_poll_routes_provider_event_through_existing_reply_path(

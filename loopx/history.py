@@ -33,7 +33,11 @@ from .control_plane.runtime.run_index_rebuild import (
     collision_review_groups,
     validate_reviewed_collision_plan,
 )
-from .control_plane.goals.activation import goal_activation_state
+from .control_plane.goals.activation import (
+    GoalActivationState,
+    goal_activation_state,
+    normalize_goal_activation_state,
+)
 from .control_plane.runtime.time import now_local_iso, parse_timestamp
 from .doctor import PROMOTION_READINESS_CLASSIFICATIONS
 from .execution_profile import compact_execution_profile
@@ -181,7 +185,19 @@ def load_index(
 
     records: list[dict[str, Any]] = []
     positions: dict[tuple[str, str, str], int] = {}
+    artifact_exists: dict[tuple[str, str], bool] = {}
     raw_count = 0
+
+    def artifact_is_present(value: Any) -> bool:
+        text = str(value or "").strip()
+        cache_key = (text, str(artifact_root or ""))
+        if cache_key not in artifact_exists:
+            artifact_exists[cache_key] = _indexed_artifact_exists(
+                value,
+                artifact_root=artifact_root,
+            )
+        return artifact_exists[cache_key]
+
     with path.open(encoding="utf-8") as f:
         for line in f:
             if not line.strip():
@@ -200,14 +216,8 @@ def load_index(
                 str(item.get("markdown_path") or ""),
             )
             item = dict(item)
-            item["json_exists"] = _indexed_artifact_exists(
-                item.get("json_path"),
-                artifact_root=artifact_root,
-            )
-            item["markdown_exists"] = _indexed_artifact_exists(
-                item.get("markdown_path"),
-                artifact_root=artifact_root,
-            )
+            item["json_exists"] = artifact_is_present(item.get("json_path"))
+            item["markdown_exists"] = artifact_is_present(item.get("markdown_path"))
             if key in positions:
                 records[positions[key]].update(item)
             else:
@@ -233,9 +243,15 @@ def collect_history(
     goal_id: str | None,
     limit: int,
     include_runtime_goals: bool = True,
+    activation_state_filter: GoalActivationState | str | None = None,
 ) -> dict[str, Any]:
     registry = load_registry(registry_path)
     goal_meta = {str(goal.get("id")): goal for goal in registry_goals(registry)}
+    activation_filter = (
+        normalize_goal_activation_state(activation_state_filter)
+        if activation_state_filter is not None
+        else None
+    )
     goals: list[dict[str, Any]] = []
     all_runs: list[dict[str, Any]] = []
 
@@ -243,8 +259,17 @@ def collect_history(
         runtime_root,
         registry,
         goal_id,
-        include_runtime_goals=include_runtime_goals,
+        include_runtime_goals=include_runtime_goals and activation_filter is None,
     ):
+        registry_member = current_goal_id in goal_meta
+        meta = goal_meta.get(current_goal_id) or {}
+        activation_state = (
+            goal_activation_state(meta)
+            if registry_member
+            else GoalActivationState.ACTIVE
+        )
+        if activation_filter is not None and activation_state is not activation_filter:
+            continue
         index_path = runtime_root / "goals" / current_goal_id / "runs" / "index.jsonl"
         runs, raw_count = load_index(
             index_path,
@@ -265,15 +290,11 @@ def collect_history(
             run["goal_id"] = str(run.get("goal_id") or current_goal_id)
         all_runs.extend(runs)
 
-        registry_member = current_goal_id in goal_meta
-        meta = goal_meta.get(current_goal_id) or {}
         adapter = meta.get("adapter") if isinstance(meta.get("adapter"), dict) else {}
         quota = goal_quota_with_spend_ledger(meta, runs) if registry_member else None
         goal_record = {
             "id": current_goal_id,
-            "activation_state": goal_activation_state(meta).value
-            if registry_member
-            else "active",
+            "activation_state": activation_state.value,
             "display_name": meta.get("display_name") if registry_member else None,
             "domain": meta.get("domain"),
             "status": meta.get("status") if registry_member else "legacy-runtime",

@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { settlementIdentity } from "../../loopx/control_plane/effect_program.ts";
 import {
+  projectSemanticReplanGuard,
   QUOTA_SETTLEMENT_READBACK_REQUEST_SCHEMA,
   readQuotaSettlement,
 } from "../../loopx/control_plane/quota/settlement_readback.ts";
@@ -19,6 +20,32 @@ const identity = settlementIdentity({
   agent_id: agentId,
   todo_id: todoId,
   turn_instance_id: turnId,
+});
+
+test("semantic replan guard distinguishes legacy, none, and exact selection", () => {
+  assert.deepEqual(projectSemanticReplanGuard({}), {
+    schema_version: "semantic_replan_guard_v0",
+    scope: "legacy_unscoped",
+    selected_obligation_id: null,
+  });
+  assert.deepEqual(projectSemanticReplanGuard({
+    semantic_replan_obligation_id: "",
+  }), {
+    schema_version: "semantic_replan_guard_v0",
+    scope: "turn_guard",
+    selected_obligation_id: null,
+  });
+  assert.deepEqual(projectSemanticReplanGuard({
+    semantic_replan_obligation_id: "replan-0000000000000001",
+  }), {
+    schema_version: "semantic_replan_guard_v0",
+    scope: "turn_guard",
+    selected_obligation_id: "replan-0000000000000001",
+  });
+  assert.throws(
+    () => projectSemanticReplanGuard({ semantic_replan_obligation_id: "bad" }),
+    /semantic replan guard is malformed/,
+  );
 });
 
 async function fixture(options: {
@@ -154,6 +181,23 @@ function request(runtimeRoot: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
+test("refresh recovery admission never survives a failed Turn identity", async () => {
+  const root = await fixture({ guard: false, writeback: true });
+  try {
+    const result = await readQuotaSettlement(request(root, {
+      refresh_retry: {
+        vision: null, unchanged_reason: "Existing vision applies.", merge_patch: false,
+        workspace_requested: false, mutation: {}, delivery_outcome: "outcome_progress",
+        delivery_batch_scale: null, delivery_boundary: null, progress_observation: null,
+      },
+    }));
+    assert.equal(result.refresh_recovery, null);
+    assert.equal(result.writeback_run, null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function appendSpendRun(runtimeRoot: string, extra: Record<string, unknown>) {
   await appendFile(
     join(runtimeRoot, "goals", goalId, "runs", "index.jsonl"),
@@ -191,6 +235,11 @@ test("reads the complete receipt chain and workspace causality once", async () =
   assert.equal((result.terminal_closeout as any).payload.ok, true);
   assert.equal(result.monitor_phase, "settled");
   assert.equal(result.replay_phase, "settled");
+  assert.deepEqual(result.semantic_replan_guard, {
+    schema_version: "semantic_replan_guard_v0",
+    scope: "legacy_unscoped",
+    selected_obligation_id: null,
+  });
   assert.deepEqual(result.workspace_causality, {
     schema_version: "delivery_workspace_causality_v0",
     todo_id: todoId,

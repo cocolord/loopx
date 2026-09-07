@@ -3,7 +3,7 @@
 - Status：Accepted，transaction-payoff 阶段进行中
 - Proposed by：LoopX maintainers
 - Date：2026-08-15
-- Last revised：2026-08-23
+- Last revised：2026-09-05
 - Scope：LoopX 控制面核心从 Python 到 TypeScript 的增量、replacement-first
   迁移；不长期维护两份语义实现
 - Tracking issue：[#3225](https://github.com/huangruiteng/loopx/issues/3225)
@@ -12,6 +12,136 @@
   两者不一致视为缺陷。
 
 ---
+
+## 当前实现检查点
+
+受检入的 generator 校验语言中立 contract，并生成深度不可变的 Python/TypeScript
+binding，覆盖原生 domain 与 projection section。两端 runtime 直接 import 生成物；
+CI 检查源数据一致性并拒绝陈旧生成物。这删除了重复 contract loader，但不改变
+Todo 语义或 promotion policy。
+
+coordination 路径使用同一份语言中立的 `coordination_state_contract_v0.json`。
+原生 `TodoDomainRecord` 持有任务语义，包括 `archive_state`；
+`TodoProjectionMetadata` 包含 `source_section` 和可选 `index`。TypeScript reducer
+与 provider-first collection reader 接受独立版本的原生 domain manifest；测试证明
+原生创建、归档、receipt replay 与 store reopen 不需要 Markdown metadata。Python
+仅将 typed read result 适配为兼容 summary。这是 contract 检查点，不是已经完成的
+CLI lifecycle cutover。
+
+Provider-first `todo update --text/--note` 保留不改变认领关系的文案修正：
+已注册、未被排除且符合 agent binding 的 actor，可以编辑未认领、active 且未完成的
+agent Todo，不得因此写入 `claimed_by`；其他 claim owner 的 Todo 仍拒绝修改。
+只允许 patch/clear text 与 note，不授予治理字段修改权或 hard-lease 执行权。
+资格检查、CAS 与 receipt replay 由 TS 事务持有；promotion 不应把文案修正变成认领。
+Provider conformance 同时覆盖原生与 v0 记录，真实 CLI 在无 Markdown 时验证该行为。
+
+默认 Markdown 与显式 promotion 两条 `todo claim` 路径现在都由同一个 TS claim
+decision 处理 actor、registration、role、status、archive、exclusion 与现有 owner
+检查；Python legacy writer 只在持锁后提交该 decision。显式 promotion 后，claim
+只跨一次 runtime 边界，由同一 TS 事务同时处理原生
+和 v0 记录。新 claim 要求 active、open Todo，并检查当前 actor/lease；同一 operation
+的重试先恢复原 claim receipt，再考虑当前资格。观测时间和当前注册信息不属于请求
+身份。回放 receipt 不续租，也不表示当前仍持有任务。非 preview 的成功 `no_change`
+同样在 head CAS 下持久化终态 receipt：存储 revision 可以前进，但 Todo 状态、
+`updated_at` 和 domain events 不变。结构合法的空注册名单允许历史回放，不能发起
+新 claim；非法名单仍失败。preview 保持零写入，非法 preview boolean 在访问 provider
+前失败。CLI 默认仍为每次调用生成新 operation id。在已经 promotion 的 canonical
+authority 上，可显式使用
+`loopx todo claim --goal-id <goal> --todo-id <todo> --claimed-by <agent> --agent-id <agent> --claim-operation-id <public-safe-id>`
+进行跨进程重试：响应丢失后复用相同 id 和请求意图；同 id 搭配不同意图会失败。
+preview 不消耗该 id。legacy 模式会拒绝此选项，不写入也不自动 promotion；省略
+选项即可保持默认行为。历史 replay 不授予 lease 或当前所有权，claim/lease 联合
+获取仍是后续工作。
+
+下一 replacement slice 让 promotion 后的 `todo add` 成为同一 authority owner 上的
+原生 create transaction。Python 只校验既有 CLI 参数并一次性适配为带版本的 domain
+record；语义重复、replay、actor/owner 资格、CAS、receipt 和 projection-outbox
+mutation 都由 TypeScript 持有。preview 与真实 subprocess CLI 路径会先删除 Markdown
+state file 再验证，因此 promotion 不会悄悄恢复 Markdown 写入。completion-validation
+argv 保持 typed data，不退回 shell 编码的兼容字段。未 promotion 的默认 goal 在显式
+promotion 边界前继续使用既有 Markdown transaction。
+
+旧 v0 consumer manifest 继续可读，并保留所有已有字段。默认 Markdown capture 仍
+输出 v0；本 PR 不改写已存 head，也不自动晋升 goal。schema 分层不等于允许后续迁移
+丢失 v0 provenance 或改变旧排序。
+
+### 长程持久化也是迁移收益的一部分
+
+产品目标是单个 goal 至少持续十个自然日。shared-authority RFC 的
+[第 7.2 节](./shared-goal-authority-state-provider-v0.zh-CN.md#72-十天-goal本地存储资格化目标提案)
+统一维护负载、性能预算、保留策略和真实 soak 验收；变化的容量数字不在此重复维护。
+
+与 provider-first Todo caller 同期推进完整本地持久化切片：资格化嵌入式事务存储
+（SQLite 为首选候选）、有界 live head/receipt lookup、crash-safe checkpoint 与精确
+历史 readback。file-v0 保留作 conformance/import 基线。只把 Python 改为 TypeScript、
+换数据库但保留不断增长的 head，或只通过加速容量测试，都不证明十天连续性。
+本地晋升等待容量与自然时间双重资格化，不等待 PostgreSQL 服务，也不在第十天使
+receipt 过期。
+
+### 交付语义：先修正规则，再迁移
+
+交付历史边界将 `classification`、`health_check` 与 `recommended_action` 视为
+叙述文本。它们不能生成或解除 follow-through obligation，不能证明 outcome，也
+不能判定交付规模。例如，`unblocked after dependency update` 不构成 blocker
+receipt，`implemented network protocol parser` 不构成仅完成准备工作的证据。
+
+规则继续由 `control_plane/work_items/delivery_outcome.py`、`delivery_signals.py`
+和 `outcome_followthrough.py` 持有。本批在既有 owner 中完成正确性前置修复，不新增
+capability/provider，也不宣称完成 TypeScript 事务迁移。删除关键词推断与 status
+常量，不增加 runtime crossing、schema 或 service；复用已有 typed blocker
+settlement 判定，不复制证据绑定规则。
+
+验收不变量是**叙述非干涉**：固定 typed fields 与配置，改写叙述或增加未经验证的
+`compact_evidence` / `case_result` 对象，都不能改变交付语义与后续执行义务。
+classification 保留为历史标签；没有明确展示消费者时，不保留旧预测逻辑。
+
+- 合法的显式 outcome、turn kind 和 scale 保持原有语义。显式 blocker kind
+  继续可读。带作用域的 typed blocked observation 必须通过既有 work-item/evidence
+  绑定检查，才能将 gap 判定为 blocker writeback；只有 `outcome_gap` 不够。
+- 历史字段缺失或不受支持时保持 unknown。unknown 中断连续小规模／outcome-gap
+  证据计数，不视为成功或推断出的失败。未配置 floor 且没有 outcome 时，保留
+  `not_configured` 展示哨兵值。
+- 新交付声明通过现有 writer API 写显式 enum，例如
+  `refresh-state --delivery-outcome ... --delivery-batch-scale ...`。
+  纯状态刷新仍可不声明交付；本批不强迫每次刷新声明进展。既有写入 enum 校验、
+  settlement evidence、quota 和 gate 检查继续有效。
+- 旧 outcome-marker/hint 配置继续可读，并保留 floor 是否配置的含义；配置中的
+  词语不再分类 run。不改写持久历史，也不新增开关恢复错误行为。此前由未结构化
+  历史标签推导的 status、handoff/review 和 quota 决策会发生明确的行为变化。
+
+交付领域的迁移单元是完整的 delivery-history-to-obligation projection，包含规模／结果
+连续计数与 status/quota 消费者。这定义该领域的切片边界，不改变下文 provider-first
+Todo 的交付顺序。每批有界历史最多跨 runtime 一次，删除被替代的
+Python decision，保留独立审阅的 typed case，并通过真实 CLI 验证叙述变异用例。
+旧推断本身错误，因此只有传输 golden parity 不够。另行盘点仍缺少 material-result
+字段的 writer，并用明确兼容计划退役旧 marker/hint 配置。本批不迁移精确的旧
+lifecycle classification code 或其他 cadence policy，不能宣称全局已无文本规则。
+
+### 下一步交付顺序
+
+1. **一组 provider-first Todo 完整事务。** 原生 create、claim、update、
+   complete-with-successor、archive 及相关 lease effect 经过现有 TS authority owner。
+   每个内聚的纵向切片包含真实 CLI caller、replay/CAS/error 测试，并删除被替代的
+   Python decision。仅统一 schema 或常量不满足退出条件。
+   单命令切片（例如通过同一兼容 editor 的 `todo update --text/--note`）只是
+   合成/资格化 goal 的验证里程碑，不是真实 goal 的 promote：一旦 promote，其余
+   legacy writer 仍被 fence 以 fail-closed 拦截。因此活跃 goal 的 promote 要等
+   到其 agent 实际使用的写命令族都经由同一个统一 TS 提交权威（同一入口的分命令
+   transaction 类型（共享同一个 effect-runtime 边界，而不是平行语义 owner），并且
+   capture/projection outbox 落盘接通之后。
+   删除的收益只在该入口背后的 in-place Markdown editor 被纯投影 renderer 替代时兑现。
+
+2. **先资格化，再启用。** 与 shared-authority RFC 的显式 v0 import、consumer
+   parity、writer fencing、capture/projection outbox recovery 和 fenced export 汇合。
+   集成上述本地持久化切片，包含历史 receipt 保留、容量与 >=10 天 soak 证据。
+   file-v0 conformance 不足以支持长程晋升；不默认切换 authority，也不依赖 PostgreSQL service。
+3. **删除 bridge，再收敛入口。** 最后一个 caller 切换后，删除被替代的 reference
+   aggregate 与 Python facade；native CLI/App 和可选 daemon 复用同一 kernel。
+   每个切片报告删除的 product LOC、新增 bridge LOC、crossings 与剩余删除条件。
+   连续两个切片只有 scaffolding 时，停止并重新规划。
+
+stack 中的 schema identifier 清理是独立维护，不是上述路线的前置条件。只吸收所选
+完整事务确实依赖的下游改动；base 合并后，其余工作再 rebase。
 
 ## 0. 用一个例子说明决策
 
@@ -138,6 +268,7 @@ replay、receipt 与 settlement。这个架构选择已经落地，不再是假�
 | Scheduler durable state（[#3440](https://github.com/huangruiteng/loopx/pull/3440)） | State normalization、persistence、replay 与一笔粗粒度 transition 由 TS 拥有 | Python compatibility path 仍承担跨 runtime transport 税 |
 | Scheduler heartbeat/state transaction | TypeScript 拥有 receipt freshness、ACK 与 host-failure validation、state construction、failure-cache transition、replay/CAS fencing、atomic write，以及 public JSON/Markdown projection | 生成的 receipt-bound host follow-up 直接进入 native TS CLI；Python 只处理 unbound/manual compatibility call 与 external host mutation |
 | Quota spend commit transaction | TypeScript 拥有最终 spend transition 校验、typed event 构造、effect replay/CAS fencing、crash repair，以及 JSON/Markdown/index write set | Python 仍投影 `should-run` 与 settlement readback facts，并在 CLI/index writer 进程内迁移前持有 legacy cross-writer index lock |
+| Quota void commit transaction | TypeScript 拥有 spend-target resolution、before/after reduction、canonical correction 构造、effect replay/index CAS、prepared-receipt repair，以及 JSON/Markdown/index write set | Python 保留 `should-run` facts、clock/effect identity、legacy cross-writer index lock、一次 transport 与 compatibility entrypoint |
 | Quota monitor-poll commit transaction | TypeScript 拥有 monitor admission 复核、target/event/result 构造、effect replay/index CAS、provider intent，以及可修复的 JSON/Markdown/index persistence | Python 投影 compact `should-run` facts，在最多两次 reduction 之间调用真实 Todo provider，刷新 legacy status，并持有 cross-writer index lock |
 | Runtime decoder（[#3443](https://github.com/huangruiteng/loopx/pull/3443)） | 稳定 primitive decoding 进入一个很小的共享模块；domain decoder 仍留在本地 | 没有理由建设更大的 schema framework |
 | Transaction 兑现（[#3464](https://github.com/huangruiteng/loopx/pull/3464)、[#3481](https://github.com/huangruiteng/loopx/pull/3481) 与 Todo completion） | Turn settlement、quota delivery routing 与 Todo completion 均只跨一个粗粒度 TS boundary；Todo transaction 拥有 identity、replay fence、validation planning/result reduction、continuation/recovery 与 completion metadata | Python 仍执行显式 external provider，并物化 legacy Markdown/event result；其他 domain 仍需各自的 bounded cutover |
@@ -211,7 +342,7 @@ leaf pattern 会增加总复杂度。
 
 按删除杠杆与 runtime traffic 选切口，而不是按翻译难度选。已经交付的 Turn
 settlement、quota delivery routing、Todo completion、scheduler heartbeat、quota
-spend commit 与 task-lease acquire cutover 建立了这一模式。后续候选必须明确剩余
+spend commit、quota void commit 与 task-lease acquire cutover 建立了这一模式。后续候选必须明确剩余
 transaction 及其删除杠杆；剩余 quota settlement readback 只有在能退出或显著收窄
 facade，而不是再增加 leaf handler 时才适合迁移。
 
@@ -253,6 +384,16 @@ window 仍需 differential proof 时才保留 characterization corpus；引入�
   截断 JSONL 尾行，其他损坏仍然 fail closed。
   Python 只保留 `should-run`/settlement fact projection、一次 coarse transport call 与
   legacy kernel index lock；它不再构造或写入 spend event。
+- Quota void commit：TypeScript 在 mutation lock 内定位被引用的 spend，归约
+  before/after accounting decision，构造 canonical correction，并通过闭合的
+  spend/void accounting-artifact kernel 提交 JSON、Markdown、index row 与 prepared
+  receipt。同一 effect 的 retry 会 replay 或修复同一 transaction；新的 CLI invocation
+  仍是新的 effect，因此保留对同一 spend target 再追加 correction 的既有行为。
+  Malformed index row 现在由静默跳过改为 fail closed。Void artifact 文件名加入
+  effect digest，JSONL row 改用 compact JSON；public payload 语义保持稳定。共享 kernel
+  同时加固既有 spend recovery 的持久化 receipt/path identity。Python 只保留
+  `should-run` facts、UUID/clock、一次 coarse transport call 与 legacy cross-writer
+  index lock。
 - 本地 task-lease lifecycle：native TypeScript transaction 现在拥有 acquire、renew、
   transfer、release、terminal verification、holder verification 与 fence close。它们拥有
   boundary decode、handoff 与 owner/Todo eligibility、同 Todo 与重叠 write scope
@@ -280,10 +421,12 @@ window 仍需 differential proof 时才保留 characterization corpus；引入�
   compare-and-swap、idempotency 与 lease-file durability check。无效 identity 会在
   provider 前停止；provider 后发生 crash/retry 时则重入同 key 的幂等路径。
 
-Quota-spend cutover 删除了 Python spend-event builder 与三文件 writer。它的 bounded
-facade 会在 quota CLI 和剩余 run-index writer 进程内执行 transaction 后退出；在此
-之前，它只提供 compact projection facts，并与未迁 writer 共享 legacy Python index
-lock。Todo cutover 删除了 Python state-evaluation dataclass、local identity projection、
+Quota-accounting cutover 删除了 Python spend/void event builder 与三文件 writer。
+当 quota decision 与顶层 CLI 在进程内执行 TypeScript、全部 run-index writer 改用
+native lock，并且 legacy Python void API compatibility window 结束时，它们的 bounded
+facade 即可退出。在此之前，Python 只提供 compact projection facts、clock/effect
+identity、result validation 与共享 legacy index lock。Todo cutover 删除了 Python
+state-evaluation dataclass、local identity projection、
 replay helper，以及这些 implementation leaf 的 public runtime handler。剩余 Python
 Todo facade 只拥有 transport、external command execution、source compare-and-swap、
 legacy response projection 与实际 Markdown/event write；当 writer 与 CLI 进入 native
@@ -303,6 +446,19 @@ Lifecycle receipt 可以在 transport response 丢失或 owner caller 退出后�
 managed Node server PID；stale reclaim 会先取得 token claim，并用抗路径替换的文件身份
 核验后再退役 lock。这不构成“同一 Node 进程内 handler 超时后仍并行执行时”的
 exactly-once 保证；原 handler 可能仍存活时，caller 不得启动第二笔独立 operation。
+
+#### Quota void commit 迁移经济账
+
+| 字段 | 回执 |
+| --- | --- |
+| Canonical owner | 迁移前由 Python `slot_accounting.py` 拥有 spend-target lookup、correction reduction、event/result 构造、artifact 分配及 JSON/Markdown/index persistence。迁移后由版本化 TypeScript `quota.void.commit` 拥有这些语义，并通过闭合的 spend/void accounting kernel 拥有 effect fence、index CAS、receipt、replay 与 repair。 |
+| 删除的旧语义代码 | 删除 212 行 Python 产品代码，包括原 void lookup、transition、event/projection、path allocation 与 JSON/Markdown/index writer 路径。 |
+| 新增的 bridge 代码 | 新增 263 行 Python diff LOC，其中 243 行是有界的 `void_commit.py` transport/compatibility facade，另有 `loopx/quota.py` 与 legacy `slot_accounting.py` surface 中 20 行 import、re-export、normalization 与 route wiring。 |
+| 跨 runtime 调用 | 公开 execute 与 dry-run 路径从零次 crossing 变为一次 coarse request/response。Exact-effect replay 或 repair 也使用一次。不同 CLI invocation 仍是不同 effect；legacy preview 加 record 两步 compatibility surface 的每个 entrypoint 各调用一次。 |
+| 产品代码净增减 | 产品代码新增 2,210 行、删除 898 行，净增 1,312 行。Test/example 另计新增 1,416 行、删除 3 行，净增 1,413 行；build configuration 为 +3，docs 不计入。生产共享 kernel 已同时服务 spend 与 void，并替换 `spend_commit.ts` 中 671 行逻辑，不是预留的 speculative framework。 |
+| 迁移 scaffolding | 没有新增 migration-only worker、parity corpus 或临时 schema framework。保留 native boundary/invariant/replay/CAS/repair 测试作为已交付和持久化 contract；Python bridge 测试随 compatibility facade 一起退出。 |
+| Facade 退出 | 当 quota decision 与顶层 CLI 在进程内执行 TypeScript、全部 run-index writer 使用 native lock，并且 legacy `build_*void*`/`record_*void*` Python API compatibility window 结束时，删除 Python void facade。 |
+| 正确性与性能 | Typed-decoder 负例、legacy target compatibility、effect isolation、index CAS、malformed receipt/path、exact index-row identity、受支持的 duplicate-index repair、concurrent mutation、truncated-tail repair、公开 CLI 行为，以及干净 wheel/sdist semantic probe 均通过。16 次 cold start 的 p50/p95 为 230.88/260.92 ms；128 次 warm typed ping 为 1.07/1.29 ms，warm void preview 为 1.93/2.34 ms。64 次 durable facade transaction 中，commit 为 30.64/37.49 ms，exact-effect replay 为 8.05/9.86 ms。Daemon RSS 在 idle 时为 108.38 MiB，256 次请求后为 109.80 MiB。64 对交错 full-CLI 样本中，baseline/candidate p50/p95 为 736.51/828.68 与 779.52/856.49 ms，p95 增量为 27.81 ms（3.36%）。这个绝对增量来自新增的一次 managed-runtime fingerprint/request 与 prepared-receipt durability；百分比低于 5% 物质回退门槛，Stage 3 会删除这次 crossing。 |
 
 #### Task-lease acquire 迁移经济账
 
@@ -409,6 +565,32 @@ happy path 及其 retry/recovery path 上实测，不能由 handler 数量推断
   Turn 内连续发生的 checkpoint。
 - 进程 crash 与 retry 不得重复已经提交的内部 effect。
 - wheel 与 sdist 安装到全新环境后，从打包文件执行 deep semantic probe。
+
+#### Caller 可观测语义是 promotion 门禁
+
+每笔 Python 到 TypeScript cutover 在实现前都要盘点所有生产 caller 分支的行为。盘点
+包括：可接受输入与默认归一化；已传入、未传入、空值与显式清除参数；资格与重叠拒绝
+的优先级；完整诊断与修复建议；从 dispatch 到持久化后独立 readback；authority、
+ownership、receipt 与 no-effect 结果；以及 transaction 支持时的 replay 或并发更新。
+只有相同 reason code，或 provider conformance 通过，不足以证明 parity。
+
+Cutover PR 必须分别为不可变基线 revision 和精确审查 head 记录机器可重放的执行
+receipt。除非声明且独立批准有意差异，两次运行必须使用同一有界脚本、合成 fixture
+指纹、公开生产入口与真实受影响 backend。每个 receipt 都要写明 revision、命令、
+backend、退出状态、归一化观测指纹，以及公开安全的证据指针或内联观测。归一化可以
+消除临时路径、时间戳等已记录的非确定性，但不得消除诊断、字段存在性、优先级、
+持久状态、identity、ownership 或 effect 差异。
+
+同一 harness 还必须证明回归敏感性：它要在历史缺陷或一个故意注入的语义 mutation
+上使独立定义的 invariant 失败，并在修复 head 上通过。Mutation 例如丢弃字段或诊断
+细节，或引入更强前置条件。绕过生产入口的单测，或所有 provider 都已共享候选规则
+的测试集，只能算辅助覆盖，不是 baseline/head 证明。如果无法安全运行真实 backend
+或不可变基线，promotion 必须以 `not_yet_proven` 暂停；文字说明不能豁免该缺口。
+
+这项验证是离线证据，不是第二份 authority。生产环境不同时运行 Python 与 TypeScript，
+不从候选实现推导期望结果，cutover 后不保留 legacy rule。有意行为变更必须与 parity row
+分开，根据公开 contract 说明理由并显式批准。Promotion 后只保留表达持久公开或
+持久化语义的 fixture。
 
 Characterization output 是证据，不是 specification。Pinned 行为若与独立 review 的
 invariant 冲突，PR 必须披露，并把行为变更单独批准。旧 authority 删除后，promotion

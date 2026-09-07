@@ -3,7 +3,7 @@
 - Status: Accepted, transaction-payoff phase in progress
 - Proposed by: LoopX maintainers
 - Date: 2026-08-15
-- Last revised: 2026-08-23
+- Last revised: 2026-09-05
 - Scope: an incremental, replacement-first migration of the LoopX control-plane
   core from Python to TypeScript without maintaining two semantic
   implementations
@@ -13,6 +13,175 @@
   English version are semantic mirrors. A difference between them is a defect.
 
 ---
+
+## Current implementation checkpoint
+
+A checked-in generator validates the language-neutral contract and emits
+deeply immutable Python/TypeScript bindings, including the native domain and
+projection sections. Both runtimes import these bindings; CI checks source
+parity and rejects stale generated files. This removes duplicate contract
+loaders without changing Todo semantics or promotion policy.
+
+The coordination path uses one language-neutral
+`coordination_state_contract_v0.json`. Its native `TodoDomainRecord` keeps task
+semantics, including `archive_state`; `TodoProjectionMetadata` contains
+`source_section` and optional `index`. The TypeScript reducer and provider-first
+collection reader accept the separately versioned native domain manifest;
+native creation, archival, receipt replay, and store reopen are tested without
+Markdown metadata. Python only adapts the typed read result to the compatibility
+summary. This is a contract checkpoint, not a completed CLI lifecycle cutover.
+
+Provider-first `todo update --text/--note` preserves claim-neutral correction:
+a registered, non-excluded actor may edit an unclaimed active, non-completed
+agent Todo, subject to its agent binding. It must not introduce `claimed_by`.
+Another claim owner's Todo remains rejected. Only text/note may be patched or
+cleared; governance fields and hard-lease execution authority are not granted.
+The TS transaction owns eligibility, CAS, and receipt replay; promotion must
+not turn a copy correction into a claim. Provider conformance covers both
+native and v0 records, and the production CLI is tested without Markdown.
+
+The default Markdown and explicitly promoted `todo claim` paths now share one
+TypeScript claim decision for actor, registration, role, status, archive,
+exclusion, and existing-owner checks; the Python legacy writer only commits
+that decision while holding its lock. After explicit promotion, claim crosses
+once into the same TS-owned
+transaction for both native and v0 records. New claims require active, open
+Todos and the current actor/lease checks. Exact operation retries recover the
+original claim receipt before current-state eligibility; observation time and
+current registration facts are not request identity. Replaying a receipt does
+not renew a lease or assert current ownership. Successful non-preview
+`no_change` also persists a terminal receipt under head CAS: storage revision
+may advance, but Todo state, `updated_at`, and domain events do not change.
+A structurally valid empty registration list permits historical replay, never
+a fresh claim; malformed lists still fail. Preview remains zero-write, and
+invalid preview booleans fail before provider access. The CLI still creates a
+fresh operation id by default. On an already promoted canonical authority,
+callers can opt into cross-invocation retry with
+`loopx todo claim --goal-id <goal> --todo-id <todo> --claimed-by <agent> --agent-id <agent> --claim-operation-id <public-safe-id>`.
+Reuse the same id and intent after a lost response; changed intent under that
+id fails closed. A preview does not consume the id. The option rejects legacy
+mode without writing or promoting anything; omit it to retain default behavior.
+It grants neither a lease nor current ownership on historical replay. Combined
+claim/lease acquisition remains follow-up work.
+
+The next replacement slice makes promoted `todo add` a native create
+transaction on that same authority owner. Python validates the established CLI
+arguments and adapts them once into the versioned domain record; TypeScript
+owns duplicate identity, replay, actor/owner eligibility, CAS, receipt, and
+projection-outbox mutation. Preview and the real subprocess CLI path are tested
+after deleting the Markdown state file, so promotion cannot silently regain a
+Markdown write path. Completion-validation argv remains typed data rather than
+a shell-encoded compatibility field. Default, unpromoted goals retain their
+existing Markdown transaction until their explicit promotion boundary.
+
+The old v0 consumer manifest remains readable and retains all existing fields.
+Default Markdown capture still emits v0; this PR neither rewrites stored heads
+nor auto-promotes a goal. The schema split is not permission to drop v0
+provenance or change legacy ordering during a later migration.
+
+### Long-goal persistence is part of the migration payoff
+
+The product target is at least ten elapsed days per goal, not a short-lived
+transaction demo. The shared-authority RFC's
+[Section 7.2](./shared-goal-authority-state-provider-v0.md#72-ten-day-goals-local-storage-qualification-target-proposal)
+owns the workload, performance budgets, retention and actual-soak acceptance;
+keep changing capacity numbers there rather than duplicating them here.
+
+Start a cohesive local-persistence slice alongside the provider-first Todo
+caller: qualify an embedded transactional store (SQLite first candidate),
+bounded live head/receipt lookup, crash-safe checkpoints and exact historical
+readback. File-v0 remains the conformance/import baseline. Merely replacing
+Python with TypeScript, swapping databases while retaining ever-growing heads,
+or passing accelerated volume tests is not ten-day continuity evidence.
+Local promotion waits for both volume and elapsed-time qualification; it does
+not wait for a PostgreSQL service and never expires receipts at day ten.
+
+### Delivery semantics: correctness before migration
+
+The delivery-history boundary now treats `classification`, `health_check`, and
+`recommended_action` as narrative. They cannot create or discharge a
+follow-through obligation, prove an outcome, or classify delivery scale.
+For example, `unblocked after dependency update` is not a blocker receipt and
+`implemented network protocol parser` is not preparation-only evidence.
+
+The owning modules remain `control_plane/work_items/delivery_outcome.py`,
+`delivery_signals.py`, and `outcome_followthrough.py`. This is a correctness
+prerequisite inside the existing owner, not a new capability/provider or a
+completed TypeScript transaction migration. It deletes keyword inference and
+its status constants without adding a runtime crossing, schema, or service.
+The existing typed blocker-settlement predicate is reused rather than copied.
+
+The acceptance invariant is **narrative non-interference**: holding typed
+fields and configuration fixed, rewriting narrative or adding an unvalidated
+`compact_evidence` / `case_result` object cannot change delivery semantics or
+its follow-through obligation. Classification remains visible as a history
+label; no legacy prediction is retained without a concrete display consumer.
+
+- Valid explicit outcome, turn-kind, and scale fields retain their meanings.
+  An explicit blocker kind remains readable. A scoped typed blocked observation
+  must pass the existing work-item/evidence binding before it resolves a gap
+  into blocker writeback. A bare `outcome_gap` is insufficient.
+- Missing or unsupported historical delivery fields remain unknown; unknown
+  stops consecutive small-scale/outcome-gap evidence streaks and never counts
+  as success or as an inferred failure. Missing outcome with no configured
+  floor retains the `not_configured` presentation sentinel.
+- New delivery claims use explicit enums through the existing writer APIs
+  (for example `refresh-state --delivery-outcome ... --delivery-batch-scale ...`).
+  State-only refresh remains legal without a delivery claim; this patch does
+  not require every status refresh to declare progress. Existing write-time
+  enum rejection, settlement evidence, quota, and gate checks remain in force.
+- Legacy outcome-marker/hint configuration remains readable and preserves
+  whether an outcome floor is configured. Its words no longer classify runs.
+  No persisted history is rewritten and no new default-off flag restores the
+  erroneous behavior. This intentionally changes status, handoff/review, and
+  quota decisions previously derived from untyped historical labels.
+
+Within this delivery domain, the migration unit is the complete
+delivery-history-to-obligation projection, including scale/outcome streaks and
+its status/quota consumers. This defines the slice boundary without displacing
+the provider-first Todo sequence below.
+It must cross at most once per bounded history batch, delete the replaced
+Python decision path, preserve independently reviewed typed cases, and retain
+narrative-mutation regressions through the real CLI. Transport-only golden
+parity is insufficient because the old inference was incorrect. Separately
+inventory writers still omitting material-result fields and retire obsolete
+marker/hint configuration with an explicit compatibility plan. Exact legacy
+lifecycle classification codes and unrelated cadence policies are outside this
+slice; they must not be reported as migrated or globally free of prose rules.
+
+### Next delivery sequence
+
+1. **One provider-first Todo transaction family.** Route native create, claim,
+   update, complete-with-successor, archive, and their lease effects through
+   the existing TS authority owner. Deliver coherent vertical slices with the
+   real CLI caller, replay/CAS/error tests, and removal of the replaced Python
+   decisions. A schema or constants-only PR does not satisfy this exit.
+   A single-command slice (for example `todo update --text/--note` through a
+   shared compatibility editor) is a validation milestone for synthetic or
+   qualification goals, never a real-goal promotion: once a goal is promoted,
+   every other legacy writer is still fenced fail-closed. Promoting a live goal
+   therefore waits until the write-command family its agents actually use routes
+   through the same unified TS commit authority (per-command transaction types
+   behind one effect-runtime boundary, not parallel semantic owners) and until capture/projection outbox
+   delivery is flushed. The deletion payoff lands only when the in-place
+   Markdown editor is replaced by a pure projection renderer behind that one
+   entry point.
+
+2. **Qualification before activation.** Join that path with the shared-authority
+   RFC's explicit v0 import, consumer parity, writer fencing, capture/projection
+   outbox recovery and fenced export. Integrate the local-persistence slice
+   above, including historical receipt retention, volume and >=10-day soak
+   evidence. File-v0 conformance is insufficient for long-goal promotion. No
+   default authority flip or dependency on PostgreSQL service readiness.
+3. **Retire the bridge, then converge entrypoints.** Delete the replaced
+   reference aggregate and Python facades when their last callers switch;
+   reuse the same kernel from native CLI/App and optional daemon. Report
+   product LOC removed, bridge LOC added, crossings, and remaining deletion
+   conditions per slice. Stop and replan after two scaffolding-only slices.
+
+Stacked schema-identifier cleanup is independent maintenance, not a prerequisite
+for this sequence. Absorb a downstream change only when the selected complete
+transaction actually needs it; rebase the remaining work after its base merges.
 
 ## 0. Decision in one example
 
@@ -159,9 +328,11 @@ choice is now implemented rather than hypothetical.
 | Scheduler durable state ([#3440](https://github.com/huangruiteng/loopx/pull/3440)) | State normalization, persistence, replay, and one coarse transition are TS-owned | The Python compatibility path still pays a cross-runtime transport tax |
 | Scheduler heartbeat/state transaction | TypeScript owns receipt freshness, ACK and host-failure validation, state construction, failure-cache transitions, replay/CAS fencing, atomic writes, and the public JSON/Markdown projection | Generated, receipt-bound host follow-up runs through the native TS CLI; Python remains only for unbound/manual compatibility calls and external host mutation |
 | Quota spend commit transaction | TypeScript owns final spend-transition validation, typed event construction, effect replay/CAS fencing, crash repair, and the JSON/Markdown/index write set | Python still projects `should-run` and settlement readback facts, and holds the legacy cross-writer index lock until the CLI/index writers move in-process |
+| Quota void commit transaction | TypeScript owns spend-target resolution, before/after reduction, canonical correction construction, effect replay/index CAS, prepared-receipt repair, and the JSON/Markdown/index write set | Python retains `should-run` facts, clock/effect identity, the legacy cross-writer index lock, one transport call, and compatibility entry points |
 | Quota monitor-poll commit transaction | TypeScript owns monitor admission revalidation, target/event/result construction, effect replay/index CAS, provider intent, and repairable JSON/Markdown/index persistence | Python projects compact `should-run` facts, invokes the real Todo provider between at most two reductions, reloads legacy status, and holds the cross-writer index lock |
 | Runtime decoders ([#3443](https://github.com/huangruiteng/loopx/pull/3443)) | Stable primitive decoding has one small shared module; domain decoders remain local | No larger schema framework is justified |
 | Transaction payoff ([#3464](https://github.com/huangruiteng/loopx/pull/3464), [#3481](https://github.com/huangruiteng/loopx/pull/3481), and Todo completion) | Turn settlement, quota delivery routing, and Todo completion each cross one coarse TS boundary; the Todo transaction owns identity, replay fencing, validation planning/result reduction, continuation/recovery, and completion metadata | Python still executes explicitly external providers and materializes legacy Markdown/event results; other domains still need their own bounded cutovers |
+| Promoted-authority Todo claim | TypeScript owns the provider-head read, lifecycle validation, complete-record update, hard-lease check, CAS, receipt, and readback-safe result for claims after authority promotion | Default local Markdown mode remains on the legacy writer; other Todo mutations and Markdown regeneration remain bounded follow-ups |
 
 The scheduler facade exit now includes its first bounded Stage 3 route. A
 versioned `heartbeat_followup_cli.ts` accepts bounded compact host facts from
@@ -242,7 +413,7 @@ domains would now increase total complexity.
 
 Select by deletion leverage and runtime traffic, not by ease of translation.
 The shipped Turn settlement, quota delivery-routing, Todo-completion,
-scheduler-heartbeat, quota-spend commit, and task-lease acquire cutovers
+scheduler-heartbeat, quota-spend commit, quota-void commit, and task-lease acquire cutovers
 establish the pattern.
 Subsequent candidates must name a remaining transaction and its deletion
 leverage; remaining quota settlement readback is eligible only when it can
@@ -294,6 +465,18 @@ shipped Stage 2B cutovers are in place:
   Python retains `should-run`/settlement fact projection plus one coarse
   transport call and the legacy kernel index lock; it no longer constructs or
   writes the spend event.
+- Quota void commit: TypeScript finds the referenced spend under the mutation
+  lock, reduces the before/after accounting decision, constructs the canonical
+  correction, and commits its JSON, Markdown, index row, and prepared receipt
+  through the closed spend/void accounting-artifact kernel. Same-effect retry
+  replays or repairs one transaction; a fresh CLI invocation remains a fresh
+  effect and therefore preserves the existing ability to append another
+  correction for the same spend target. Malformed index rows now fail closed
+  instead of being skipped. Void artifact names include an effect digest and
+  JSONL rows use compact JSON; public payload semantics remain stable. The
+  shared kernel also validates persisted receipt/path identity for spend
+  recovery. Python retains `should-run` facts, UUID/clock ownership, one coarse
+  transport call, and the legacy cross-writer index lock.
 - Local task-lease lifecycle: native TypeScript transactions now own acquire,
   renew, transfer, release, terminal verification, holder verification, and
   fence close. They own boundary decode, handoff and owner/Todo eligibility,
@@ -328,11 +511,13 @@ shipped Stage 2B cutovers are in place:
   durability checks. Invalid identities stop before the provider, while a
   crash/retry after the provider re-enters its same-key idempotent path.
 
-The quota-spend cutover removes the Python spend-event builder and three-file
-writer. Its bounded facade exits when the quota CLI and remaining run-index
-writers execute the transaction in-process; until then it supplies compact
-projection facts and shares the legacy Python index lock with unmigrated
-writers. The Todo cutover removes the Python state-evaluation dataclass, local identity
+The quota-accounting cutovers remove the Python spend and void event builders
+and their three-file writers. Their bounded facades exit when quota decision
+and the top-level CLI execute in-process TypeScript, all run-index writers use
+the native lock, and the legacy Python void API compatibility window closes.
+Until then Python supplies compact projection facts, clock/effect identity,
+result validation, and the shared legacy index lock. The Todo cutover removes
+the Python state-evaluation dataclass, local identity
 projection, replay helper, and public runtime handlers for those implementation
 leaves. The remaining Python Todo facade owns transport, external command
 execution, source compare-and-swap, legacy response projection, and the actual
@@ -358,6 +543,19 @@ reclaim uses token claims plus replacement-resistant file identity before
 retiring a lock. This is not an exactly-once guarantee for a timed-out handler
 that is still executing concurrently inside the same Node process; callers must
 not start a second independent operation while that handler may still be live.
+
+#### Quota void commit migration economics
+
+| Field | Receipt |
+| --- | --- |
+| Canonical owner | Before: Python `slot_accounting.py` owned spend-target lookup, correction reduction, event/result construction, artifact allocation, and JSON/Markdown/index persistence. After: versioned TypeScript `quota.void.commit` owns those semantics plus effect fencing, index CAS, receipts, replay, and repair through the closed spend/void accounting kernel. |
+| Legacy semantic code deleted | 212 Python product LOC covering the prior void lookup, transition, event/projection, path-allocation, and JSON/Markdown/index writer path. |
+| Bridge code added | 263 Python diff LOC: the 243-line bounded `void_commit.py` transport/compatibility facade plus 20 import, re-export, normalization, and route-wiring lines in `loopx/quota.py` and the legacy `slot_accounting.py` surface. |
+| Cross-runtime calls | The public execute and dry-run paths move from zero crossings to one coarse request/response. Exact-effect replay or repair also uses one request/response. Distinct CLI invocations remain distinct effects; the legacy two-step preview-plus-record compatibility surface uses one call per entry point. |
+| Product-code net change | Product code is +2,210/−898 LOC, net +1,312. Tests/examples are +1,416/−3, net +1,413; build configuration is +3 and docs are excluded. The production shared kernel is already used by spend and void, replacing 671 lines in `spend_commit.ts` rather than creating a speculative framework. |
+| Migration scaffolding | No migration-only worker, parity corpus, or temporary schema framework is added. Native boundary/invariant/replay/CAS/repair tests remain as shipped and persisted contracts; Python bridge tests exit with the compatibility facade. |
+| Facade exit | Delete the Python void facade when quota decision and the top-level CLI run in-process TypeScript, all run-index writers use the native lock, and the legacy `build_*void*`/`record_*void*` Python API compatibility window closes. |
+| Correctness and performance | Typed-decoder negatives, legacy target compatibility, effect isolation, index CAS, malformed receipts and paths, exact index-row identity, supported duplicate-index repair, concurrent mutation, truncated-tail repair, public CLI behavior, and clean wheel/sdist semantic probes pass. Across 16 cold starts, p50/p95 is 230.88/260.92 ms; 128 warm typed pings are 1.07/1.29 ms and warm void previews are 1.93/2.34 ms. Across 64 durable facade transactions, commit is 30.64/37.49 ms and exact-effect replay is 8.05/9.86 ms. Daemon RSS is 108.38 MiB idle and 109.80 MiB after 256 requests. In 64 interleaved full-CLI pairs, baseline/candidate p50/p95 is 736.51/828.68 versus 779.52/856.49 ms: p95 +27.81 ms (+3.36%). The absolute delta is the measured cost of one new managed-runtime fingerprint/request plus prepared-receipt durability; the percentage stays below the 5% material-regression gate, and Stage 3 removes that crossing. |
 
 #### Task-lease acquire migration economics
 
@@ -474,6 +672,43 @@ not authorize a generic schema framework.
 - Process crash and retry cannot duplicate a committed internal effect.
 - Wheel and sdist are installed into fresh environments and execute deep
   semantic probes from packaged files.
+
+#### Caller-observable semantic parity is a promotion gate
+
+Every Python-to-TypeScript cutover inventories the behavior of every production
+caller branch before implementation. The inventory covers accepted input and
+default normalization; supplied, omitted, empty, and explicit-clear arguments;
+eligibility and overlapping-rejection precedence; complete diagnostics and
+remediation; dispatch-to-persistence readback; authority, ownership, receipt,
+and no-effect outcomes; and replay or concurrent updates when the transaction
+supports them. Equal reason codes or successful provider conformance do not
+establish parity.
+
+The cutover PR records machine-replayable execution receipts for an immutable
+baseline revision and the exact reviewed head. Both runs use the same bounded
+script, synthetic fixture fingerprint, public production entrypoint, and real
+affected backend unless an intentional delta is declared and independently
+approved. Each receipt names the revision, command, backend, exit status,
+normalized observation fingerprint, and public-safe evidence pointer or inline
+observation. Normalization may remove documented nondeterminism such as a
+temporary path or timestamp, but never diagnostics, field presence, precedence,
+persisted state, identity, ownership, or effects.
+
+The same harness must demonstrate regression sensitivity: it fails an
+independently stated invariant on the historical defect or a deliberate
+semantic mutation, such as dropping a field or diagnostic detail or adding a
+stronger precondition, and passes on the fixed head. A unit test that bypasses
+the production entrypoint, or a suite in which every provider already shares
+the candidate rule, is supporting coverage rather than baseline/head proof. If
+the real backend or immutable baseline cannot be exercised safely, promotion is
+held as `not_yet_proven`; prose cannot waive the gap.
+
+This qualification is offline evidence, not a second authority. Production
+does not dual-run Python and TypeScript, derive expected results from the
+candidate, or retain the legacy rule after cutover. Intentional behavior changes
+are separated from parity rows, justified against the public contract, and
+approved explicitly. After promotion, only fixtures that express durable public
+or persisted semantics remain.
 
 Characterization output is evidence, not specification. If a pinned behavior
 contradicts an independently reviewed invariant, the PR must disclose and

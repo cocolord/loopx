@@ -91,10 +91,18 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "command": "loopx evidence-log --goal-id <goal-id> --agent-id <agent-id> --thin",
                 "purpose": "Read the current agent's thin public-safe ledger before replan or handoff.",
             },
+            {
+                "command": "loopx machine-config --help",
+                "purpose": "Inspect typed machine policy, preview changes, and apply an exact plan revision.",
+            },
             {"command": "loopx todo --help", "purpose": "Show todo lifecycle commands."},
             {
                 "command": "loopx task-lease --help",
                 "purpose": "Acquire, renew, transfer, release, or inspect a hard per-todo lease.",
+            },
+            {
+                "command": "loopx coordination-shadow --help",
+                "purpose": "Inspect, bootstrap, or revision-fenced rollback the default-off Stage 2C file shadow.",
             },
             {"command": "loopx quota should-run", "purpose": "Decide whether the next agent turn should run."},
             {"command": "loopx history --goal-id <goal-id>", "purpose": "Read compact run history."},
@@ -162,7 +170,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
             },
             {
                 "command": "loopx resolve-agent-thread",
-                "purpose": "Read one exact host thread binding across the current project without mutating authority.",
+                "purpose": (
+                    "Read one exact host thread binding from an opaque id or copied "
+                    "Codex task deep link without mutating authority."
+                ),
             },
             {
                 "command": "loopx unbind-agent-thread",
@@ -284,6 +295,7 @@ COMMAND_GROUPS: list[dict[str, object]] = [
 MANPAGE_COMMAND_HELP_ONLY = frozenset(
     {
         "archive-runtime",
+        "authority-shadow",
         "backup-state",
         "capability",
         "chat-endpoint",
@@ -311,6 +323,9 @@ MANPAGE_COMMAND_HELP_ONLY = frozenset(
         "global-risks",
         "global-summary",
         "global-todos",
+        "goal-alignment",
+        "amendment-proposal",
+        "goal-amendment-proposal",
         "handoff-mode",
         "heartbeat-prequota",
         "import-doc-registry-authority",
@@ -323,12 +338,14 @@ MANPAGE_COMMAND_HELP_ONLY = frozenset(
         "promotion-gate",
         "read-only-map",
         "refresh-state",
+        "reliability-diagnostics",
         "register-authority-source",
         "registry-boundary",
         "reward",
         "reward-memory",
         "semantic-preference",
         "serve-status",
+        "shared-goal-alignment",
         "uninstall-project",
         "value-connectors",
         "version",
@@ -386,12 +403,10 @@ def render_concise_help(program: str = "loopx") -> str:
     program = _program_name(program)
     return "\n".join(
         [
-            "LoopX keeps long-running agent work moving by preserving goals, todos, gates, quota,",
-            "and evidence between agent turns.",
+            "LoopX keeps long-running agent work moving with durable state and evidence.",
             "",
             "Usage:",
             f"  {program} [global options] <command> [command options]",
-            f"  {program} <command> --help",
             "",
             "Start here:",
             "  /loopx                         Ask the agent to inspect LoopX state.",
@@ -410,6 +425,8 @@ def render_concise_help(program: str = "loopx") -> str:
             "                                  Read this agent's thin ledger before replan.",
             "  loopx todo --help              Add, claim, complete, update, or archive todos.",
             "  loopx task-lease --help        Manage a hard per-todo lease.",
+            "  loopx coordination-shadow --help",
+            "                                  Inspect, bootstrap, or roll back the default-off file shadow.",
             "  loopx quota should-run         Decide whether the next agent turn should run.",
             "",
             "Run the loop:",
@@ -425,7 +442,6 @@ def render_concise_help(program: str = "loopx") -> str:
             "  loopx commands                 Show grouped command reference.",
             "  loopx <command> --help         Show flags for one command.",
             "  man loopx                      Open the installed manual page.",
-            "",
         ]
     )
 

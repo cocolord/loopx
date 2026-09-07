@@ -1,5 +1,30 @@
 use super::*;
 
+#[test]
+#[cfg(target_os = "macos")]
+fn finder_runtime_path_includes_tools_without_loading_shell_profiles() {
+    let path = runtime_search_path(
+        Some("/fixture/user".into()),
+        Some("/usr/bin:/bin:/usr/sbin:/sbin".into()),
+    );
+    let paths: Vec<_> = env::split_paths(&path).collect();
+    assert_eq!(paths[0], PathBuf::from("/fixture/user/.local/bin"));
+    assert!(
+        paths
+            .iter()
+            .position(|p| p == Path::new("/opt/homebrew/bin"))
+            .unwrap()
+            < paths
+                .iter()
+                .position(|p| p == Path::new("/usr/bin"))
+                .unwrap()
+    );
+    assert!(paths.contains(&PathBuf::from("/usr/local/bin")));
+    assert!(paths.contains(&PathBuf::from("/sbin")));
+    let again = runtime_search_path(Some("/fixture/user".into()), Some(path.clone()));
+    assert_eq!(again, path, "tool search must be idempotent");
+}
+
 #[cfg(not(windows))]
 fn spawn_listener_fixture(
     executable: &Path,
@@ -12,6 +37,7 @@ fn spawn_listener_fixture(
     let source = format!(
         r#"#!/usr/bin/env python3
 import socket
+import time
 
 payload = {payload:?}.encode("utf-8")
 server = socket.socket()
@@ -21,6 +47,9 @@ server.listen(8)
 while True:
     connection, _ = server.accept()
     connection.recv(65536)
+    if not payload:
+        time.sleep(60)
+        continue
     response = (
         b"HTTP/1.1 200 OK\r\n"
         b"Content-Type: application/json\r\n"
@@ -94,6 +123,18 @@ fn stale_listener_process_must_match_loopx_command_and_port() {
         8766,
         r#"/opt/loopx/bin/python -c import os\012import runpy\012release_root = os.environ["LOOPX_RELEASE_ROOT"]\012runpy.run_module("loopx.cli", run_name="__main__")\012 --registry /tmp/registry.json serve-status --global-registry --host 127.0.0.1 --port 8766 --limit 80"#,
     ));
+    assert!(is_expected_loopx_listener_command(
+        ServiceKind::Status,
+        executable,
+        8766,
+        r#"/opt/loopx/bin/python -c import os\012import runpy\012release_root = os.environ["LOOPX_RELEASE_ROOT"]\012sys.argv[0] = os.path.join(release_root, "scripts", "loopx")\012module = (\012    "loopx.entrypoint"\012    if os.path.isfile(os.path.join(release_root, "loopx", "entrypoint.py"))\012    else "loopx.cli"\012)\012runpy.run_module(module, run_name="__main__")\012 --registry /tmp/registry.json serve-status --global-registry --host 127.0.0.1 --port 8766 --limit 80"#,
+    ));
+    assert!(is_expected_loopx_listener_command(
+        ServiceKind::Chat,
+        executable,
+        8767,
+        r#"/opt/loopx/bin/python -c LOOPX_MANAGED_RELEASE_LAUNCHER_V1 = True\012release_root = os.environ["LOOPX_RELEASE_ROOT"]\012runpy.run_module(next_module, run_name="__main__")\012 --registry /tmp/registry.json chat --global-registry --host 127.0.0.1 --port 8767 --no-open"#,
+    ));
     assert!(!is_expected_loopx_listener_command(
         ServiceKind::Status,
         executable,
@@ -130,6 +171,33 @@ fn stale_listener_process_must_match_loopx_command_and_port() {
         8766,
         r#"/opt/loopx/bin/python -c runpy.run_module("other.cli", run_name="__main__") serve-status --port 8766"#,
     ));
+    assert!(!is_expected_loopx_listener_command(
+        ServiceKind::Status,
+        executable,
+        8766,
+        r#"/opt/loopx/bin/python -c release_root = os.environ["LOOPX_RELEASE_ROOT"]\012print("loopx.entrypoint")\012runpy.run_module(module, run_name="__main__") serve-status --port 8766"#,
+    ));
+}
+
+#[test]
+fn release_launchers_publish_the_stable_process_fingerprint() {
+    let posix_launcher = include_str!("../../../../../scripts/loopx");
+    let portable_entry = include_str!("../../../../../scripts/loopx_entry.py");
+
+    assert!(posix_launcher.contains(MANAGED_RELEASE_LAUNCHER_MARKER));
+    assert!(portable_entry.contains(MANAGED_RELEASE_LAUNCHER_MARKER));
+}
+
+#[test]
+fn platform_managed_services_have_stable_launchd_labels() {
+    assert_eq!(
+        platform_managed_service_label(ServiceKind::Status),
+        "com.loopx.status"
+    );
+    assert_eq!(
+        platform_managed_service_label(ServiceKind::Chat),
+        "com.loopx.chat"
+    );
 }
 
 #[test]
@@ -241,7 +309,7 @@ fn service_supervisor_reuses_matching_replaces_stale_and_rejects_foreign() {
             )),
         "fixture process must classify as LoopX: {stale_processes:?}"
     );
-    terminate_stale_listener(
+    terminate_verified_listener(
         ServiceKind::Status,
         stale_executable.to_string_lossy().as_ref(),
         stale_port,
@@ -270,7 +338,7 @@ fn service_supervisor_reuses_matching_replaces_stale_and_rejects_foreign() {
         Some(&current_identity),
         Probe::Foreign,
     );
-    let error = terminate_stale_listener(
+    let error = terminate_verified_listener(
         ServiceKind::Status,
         stale_executable.to_string_lossy().as_ref(),
         foreign_port,
@@ -283,6 +351,36 @@ fn service_supervisor_reuses_matching_replaces_stale_and_rejects_foreign() {
         .is_none());
     foreign.kill().expect("stop foreign fixture");
     foreign.wait().expect("reap foreign fixture");
+
+    // A silent listener must be distinct from a foreign HTTP response. Only
+    // the expected LoopX process may be terminated after the startup grace.
+    for confirmed in [true, false] {
+        let port = reserve_loopback_port();
+        let executable = fixture_root.join(if confirmed { "loopx" } else { "silent-foreign" });
+        let mut silent = spawn_listener_fixture(&executable, "chat", port, "");
+        wait_for_probe(
+            ServiceKind::Chat,
+            port,
+            Some(&current_identity),
+            Probe::Unresponsive,
+        );
+        let result = terminate_verified_listener(
+            ServiceKind::Chat,
+            stale_executable.to_string_lossy().as_ref(),
+            port,
+        );
+        if confirmed {
+            result.expect("replace a confirmed but unresponsive LoopX service");
+        } else {
+            assert!(result.is_err());
+            assert!(silent
+                .try_wait()
+                .expect("foreign listener status")
+                .is_none());
+            silent.kill().expect("clean up foreign fixture");
+        }
+        silent.wait().expect("reap silent fixture");
+    }
 
     fs::remove_dir_all(&fixture_root).expect("remove service supervisor fixture");
 }

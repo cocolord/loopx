@@ -11,7 +11,7 @@ from ...repository_identity import normalize_repository_identity
 from .completion_state import (
     normalize_todo_completion_continuation,
     normalize_todo_completion_recovery,
-    normalize_todo_no_followup,
+    normalize_todo_no_followup as normalize_todo_no_followup,
     require_todo_completion_metadata,
 )
 from .resume_condition import (
@@ -743,6 +743,11 @@ def normalize_todo_status(value: Any) -> str | None:
     return None
 
 
+def normalize_todo_role(value: Any) -> str | None:
+    candidate = str(value or "").strip().lower()
+    return candidate if candidate in {"user", "agent"} else None
+
+
 def todo_done_for_status(status: Any) -> bool:
     return normalize_todo_status(status) in TODO_TERMINAL_STATUS_VALUES
 
@@ -874,6 +879,11 @@ _TODO_METADATA_FIELD_SCHEMA = (
         invalid_message=(
             "todo status must be one of: " + ", ".join(sorted(TODO_STATUS_VALUES))
         ),
+    ),
+    _TodoMetadataField(
+        "role",
+        normalize_todo_role,
+        invalid_message="todo role must be one of: agent, user",
     ),
     _TodoMetadataField(
         "task_class",
@@ -1207,6 +1217,12 @@ def _normalize_todo_metadata_for_write(values: dict[str, Any]) -> dict[str, Any]
     return normalized
 
 
+def normalize_todo_metadata_for_write(values: dict[str, Any]) -> dict[str, Any]:
+    """Return canonical typed Todo metadata without Markdown encoding."""
+
+    return _normalize_todo_metadata_for_write(values)
+
+
 def _format_todo_metadata_values(values: dict[str, Any]) -> str | None:
     normalized = _normalize_todo_metadata_for_write(values)
     fields = [
@@ -1223,6 +1239,7 @@ def format_todo_metadata_line(
     *,
     todo_id: str | None = None,
     status: str | None = None,
+    role: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
     task_domain: str | None = None,
@@ -1347,9 +1364,9 @@ def metadata_line_for_todo_block(
                 key
             ].normalize_for_write(value)
         elif key == "task_repository":
-            normalized = normalize_todo_task_repository(value)
-            if normalized:
-                metadata[key] = normalized
+            normalized_repository = normalize_todo_task_repository(value)
+            if normalized_repository:
+                metadata[key] = normalized_repository
             else:
                 metadata.pop(key, None)
         elif key == "required_capabilities":
@@ -1377,9 +1394,9 @@ def metadata_line_for_todo_block(
             else:
                 metadata.pop(key, None)
         elif key == "continuation_policy":
-            normalized = normalize_todo_continuation_policy(value)
-            if normalized:
-                metadata[key] = normalized
+            normalized_continuation_policy = normalize_todo_continuation_policy(value)
+            if normalized_continuation_policy:
+                metadata[key] = normalized_continuation_policy
             elif value:
                 raise ValueError(
                     "todo continuation_policy must be one of: "
@@ -1390,9 +1407,9 @@ def metadata_line_for_todo_block(
         elif key == "decision_scope":
             metadata[key] = require_todo_decision_scope(value)
         elif key == "required_decision_scopes":
-            normalized = require_todo_required_decision_scopes(value)
-            if normalized:
-                metadata[key] = normalized
+            normalized_decision_scopes = require_todo_required_decision_scopes(value)
+            if normalized_decision_scopes:
+                metadata[key] = normalized_decision_scopes
             else:
                 metadata.pop(key, None)
         elif key == "decision_outcome":
@@ -1404,9 +1421,9 @@ def metadata_line_for_todo_block(
             else:
                 metadata.pop(key, None)
         elif key == "no_followup":
-            normalized = normalize_todo_no_followup(value)
-            if normalized is not None:
-                metadata[key] = normalized
+            normalized_no_followup = normalize_todo_no_followup(value)
+            if normalized_no_followup is not None:
+                metadata[key] = normalized_no_followup
             else:
                 metadata.pop(key, None)
         elif key == "successor_todo_ids":
@@ -1416,15 +1433,15 @@ def metadata_line_for_todo_block(
             else:
                 metadata.pop(key, None)
         elif key in {"completion_continuation", "completion_recovery"}:
-            normalized = require_todo_completion_metadata(key, value)
-            if normalized:
-                metadata[key] = normalized
+            normalized_completion = require_todo_completion_metadata(key, value)
+            if normalized_completion:
+                metadata[key] = normalized_completion
             else:
                 metadata.pop(key, None)
         elif key in {"global_gate", "goal_bound"}:
-            normalized = normalize_todo_global_gate(value)
-            if normalized is not None:
-                metadata[key] = normalized
+            normalized_global_gate = normalize_todo_global_gate(value)
+            if normalized_global_gate is not None:
+                metadata[key] = normalized_global_gate
             else:
                 metadata.pop(key, None)
         elif str(value).strip():
