@@ -625,7 +625,7 @@ def handle_benchmark_boundary_command(
             args.external_agent_result_json,
             args.route_receipt_json,
         )
-        if any(binding_options) and not all(binding_options):
+        if any(value is not None for value in binding_options) and not all(binding_options):
             raise ValueError("benchmark_evidence_binding_inputs_incomplete")
         if args.evidence_binding_json:
             payload = build_bound_benchmark_integrity_qualification(

@@ -358,6 +358,19 @@ def test_partial_opt_in_cannot_fall_back_to_legacy_audit(run_evidence, capsys, o
     assert json.loads(capsys.readouterr().out)["integrity_qualified"] is False
 
 
+def test_empty_binding_options_cannot_disable_bound_audit(run_evidence, capsys):
+    argv = _cli(run_evidence)
+    for option in (
+        "--evidence-binding-json",
+        "--expected-launch-sha256",
+        "--external-agent-result-json",
+        "--route-receipt-json",
+    ):
+        argv[argv.index(option) + 1] = ""
+    assert main(argv) == 1
+    assert json.loads(capsys.readouterr().out)["integrity_qualified"] is False
+
+
 @pytest.mark.parametrize(
     "filename", ["route.json", "atif.json", "result.json", "binding.json"]
 )
