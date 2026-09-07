@@ -13,6 +13,10 @@ from ..agents.identity import build_quota_agent_identity
 from ..goals.goal_frontier import (
     build_goal_frontier_projection_context_from_status,
 )
+from ..goals.goal_frontier.fallback_disposition import (
+    VISION_FALLBACK_GAP_TRIGGER,
+    declared_fallback_gap_from_agent_vision,
+)
 from ..status.autonomous_replan_projection import (
     AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS,
     autonomous_replan_obligation_from_runs,
@@ -301,6 +305,25 @@ def qualify_replan_writeback(
         progress_observation=progress_observation,
         agent_vision=agent_vision,
     )
+    fallback_gaps = [
+        gap for gap in context.get("acceptance_gaps") or []
+        if gap.get("kind") == VISION_FALLBACK_GAP_TRIGGER
+    ]
+    if fallback_gaps and (
+        agent_vision is None
+        or declared_fallback_gap_from_agent_vision(
+            agent_vision, agent_todo_summary=agent_todos, agent_id=safe_agent_id,
+        ) is not None
+    ):
+        # The same TS-owned admission rule qualifies both readback and proposed
+        # Vision state. A new blocker id cannot settle an unhandled alternative.
+        semantic_delta = {
+            **semantic_delta,
+            "accepted": False,
+            "satisfying_outcomes": [],
+            "reason_code": "declared_fallback_unresolved",
+            "reason": "resolve the declared fallback with a real successor, evaluated wait, or explicit vision disposition",
+        }
     if (
         "coverage_backed_no_followup"
         in set(semantic_delta.get("outcomes") or [])

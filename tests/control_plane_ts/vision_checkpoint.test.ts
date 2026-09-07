@@ -468,3 +468,25 @@ test("finalize owns unchanged-reason public safety and budget", () => {
     /vision_unchanged_reason exceeds 240 chars/,
   );
 });
+
+
+test("partial vision patches preserve fallback declarations until explicitly withdrawn", () => {
+  const declarations = [{ declaration_id: "alternate", target_todo_id: "todo_alternate" }];
+  const existing = {
+    state: "vision_active",
+    vision_patch: { vision_summary: "Complete the source check." },
+    fallback_declarations: declarations,
+  };
+  for (const explicit of [false, true]) {
+    const result = buildVisionCheckpoint(prepareRequest({
+      existing_agent_vision: existing,
+      merge_patch: true,
+      agent_vision_packet: {
+        vision_patch: { last_patch_summary: "Source A still waits." },
+        ...(explicit ? { fallback_declarations: [] } : {}),
+      },
+    }));
+    assert.deepEqual((result.agent_vision as Record<string, unknown>).fallback_declarations ?? [],
+      explicit ? [] : declarations);
+  }
+});

@@ -16,6 +16,7 @@ from ...work_items.progress_observation import (
     replan_obligation_trigger_kinds,
     required_semantic_outcomes,
 )
+from .fallback_disposition import VISION_FALLBACK_GAP_TRIGGER
 from .long_todo_chain import (
     LONG_TODO_CHAIN_TRIGGER,
     long_todo_chain_source_checkpoint,
@@ -43,6 +44,8 @@ def autonomous_replan_ack_satisfies_obligation(
 ) -> bool:
     """Reject ACKs that miss the obligation's typed semantic outcome."""
 
+    if any(gap.get("kind") == VISION_FALLBACK_GAP_TRIGGER for gap in acceptance_gaps or []):
+        return False
     if not autonomous_replan_ack_has_frontier_delta(ack):
         return False
     semantic_delta = ack.get("semantic_delta") if isinstance(ack, dict) else {}

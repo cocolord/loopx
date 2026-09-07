@@ -459,6 +459,11 @@ function prepareVisionRefresh(request: VisionRefreshPrepareRequest): JsonObject 
       ? packet.vision_patch as JsonObject
       : packet;
     updatePacket.vision_patch = { ...existingPatch, ...incomingPatch };
+    // A partial patch must not silently erase an unresolved alternate route.
+    // Explicit [] remains the caller's declaration withdrawal operation.
+    if (packet.fallback_declarations === undefined && existing.fallback_declarations !== undefined) {
+      updatePacket.fallback_declarations = existing.fallback_declarations;
+    }
     if (!compactText(packet.state)) updatePacket.state = existing.state;
   }
 

@@ -52,6 +52,7 @@ from .fallback_disposition import (
     FallbackDeclaration,  # noqa: F401
     agent_scoped_selectable_advancement_todo_ids,  # noqa: F401
     declared_fallback_gap_from_agent_vision,
+    VISION_FALLBACK_GAP_TRIGGER,
     parse_fallback_declarations,  # noqa: F401
     parse_vision_todo_delta_entries,
 )
@@ -969,6 +970,9 @@ def _vision_gap_acknowledged(
     autonomous_replan_recorded / quota_slot_spent runs with no advancement).
     """
 
+    # A live unresolved declaration is a state obligation, not historical evidence.
+    if any(gap.get("kind") == VISION_FALLBACK_GAP_TRIGGER for gap in acceptance_gaps):
+        return False
     if not acceptance_gaps or not isinstance(latest_replan_ack, dict):
         return False
     delta_contract = latest_replan_ack.get("delta_contract")
@@ -1046,6 +1050,12 @@ def derive_goal_frontier_replan_obligation_from_summaries(
     compact_acceptance_gaps = [
         item for item in (acceptance_gaps or []) if isinstance(item, dict)
     ]
+    if any(gap.get("kind") == VISION_FALLBACK_GAP_TRIGGER for gap in compact_acceptance_gaps):
+        # Retained diagnostic counts can include executor-excluded work. Only
+        # the existing identity-based selectable frontier can resolve a fallback.
+        selectable_frontier_advancement = len(agent_scoped_selectable_advancement_todo_ids(
+            agent_todo_summary, agent_id=agent_id,
+        ))
     successor_vision_required = any(
         item.get("kind")
         in {VISION_SUCCESSOR_GAP_TRIGGER, VISION_PROFILE_MISSING_TRIGGER}
@@ -1205,8 +1215,12 @@ def derive_goal_frontier_replan_obligation_from_summaries(
             },
         )
     if replan_rule.rule is GoalFrontierReplanRule.VISION_ACCEPTANCE_GAP:
-        rearmed_after_obligation_id = _acknowledged_replan_obligation_id(
-            latest_replan_ack
+        unresolved_fallback = any(
+            gap.get("kind") == VISION_FALLBACK_GAP_TRIGGER
+            for gap in compact_acceptance_gaps
+        )
+        rearmed_after_obligation_id = (
+            None if unresolved_fallback else _acknowledged_replan_obligation_id(latest_replan_ack)
         )
         return build_autonomous_replan_obligation_payload(
             schema_version=AUTONOMOUS_REPLAN_OBLIGATION_SCHEMA_VERSION,
@@ -1227,6 +1241,7 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                         key: gap.get(key)
                         for key in (
                             "generated_at",
+                            "unresolved_todo_ids",
                             "completed_todo_id",
                             "completed_todo_count",
                             "completed_todo_threshold",
@@ -1614,6 +1629,12 @@ def build_goal_frontier_projection_context_from_status(
         )
         if isinstance(gap, dict)
     ]
+    # A blocked primary can suspend its own acceptance gap, but cannot suspend
+    # an explicitly declared alternate route that still has no real disposition.
+    if declared_fallback_gaps:
+        acceptance_gaps = [*acceptance_gaps, *declared_fallback_gaps]
+        source_acceptance_gaps = [*source_acceptance_gaps, *declared_fallback_gaps]
+        vision_wait_state = None
     projected_replan_ack = projected_autonomous_replan_ack_for_agent(
         item,
         project_asset,

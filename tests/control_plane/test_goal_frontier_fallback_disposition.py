@@ -210,7 +210,7 @@ def test_declared_fallback_survives_prepare_compact_and_readback() -> None:
     assert readback["fallback_declarations"] == vision["fallback_declarations"]
 
 
-def test_declared_fallback_without_resolution_projects_single_gap() -> None:
+def test_unresolved_declared_fallback_requires_replan_before_wait() -> None:
     # The structured declaration links the fallback direction to a Todo id,
     # but no runnable Todo with that id exists on this agent's frontier.
     payload = _status_payload(
@@ -226,10 +226,8 @@ def test_declared_fallback_without_resolution_projects_single_gap() -> None:
 
     # The blocked-successor wait state clears ordinary acceptance gaps; the
     # declared fallback would disappear silently without the dedicated field.
-    assert frontier["acceptance_gaps"] == []
-    wait = frontier["vision_wait_state"]
-    assert wait["reason_code"] == "exact_blocked_successor"
-    assert wait["selected_todo_id"] == PRIMARY_WAIT_ID
+    assert frontier["acceptance_gaps"][0]["kind"] == "vision_fallback_unresolved"
+    assert "vision_wait_state" not in frontier
     gaps = frontier["fallback_gaps"]
     assert len(gaps) == 1
     gap = gaps[0]
@@ -239,7 +237,7 @@ def test_declared_fallback_without_resolution_projects_single_gap() -> None:
     assert gap["unresolved_todo_ids"] == [FALLBACK_ID]
     assert "fallback" in gap["recommended_action"]
     assert "do not invent a user gate" in gap["recommended_action"]
-    assert frontier["replan_required"] is False
+    assert frontier["replan_required"] is True
 
     decision = build_quota_should_run(
         payload,
@@ -247,6 +245,9 @@ def test_declared_fallback_without_resolution_projects_single_gap() -> None:
         agent_id=AGENT_ID,
         scheduler_execution_context=(GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT),
     )
+    assert decision["effective_action"] == "autonomous_replan_required"
+    assert decision["execution_obligation"]["must_attempt_work"] is True
+    assert decision["scheduler_hint"]["action"] == "run_now"
     quota_projection = decision["goal_frontier_projection"]
     assert quota_projection["fallback_gaps"][0]["unresolved_todo_ids"] == [FALLBACK_ID]
 
@@ -343,7 +344,7 @@ def test_other_agent_primary_todo_does_not_resolve_the_gap() -> None:
 
     frontier = _frontier_projection(payload)
 
-    assert frontier["acceptance_gaps"] == []
+    assert frontier["acceptance_gaps"][0]["kind"] == "vision_fallback_unresolved"
     gaps = frontier["fallback_gaps"]
     assert len(gaps) == 1
     assert gaps[0]["unresolved_todo_ids"] == [FALLBACK_ID]
@@ -402,7 +403,7 @@ def test_terminal_disposition_closes_fallback_gap_without_regenerating(
     assert second["acceptance_gaps"] == []
 
 
-def test_declared_bounded_successor_delta_resolves_the_gap() -> None:
+def test_successor_declaration_without_real_todo_cannot_admit_wait() -> None:
     payload = _status_payload(
         fallback_runnable=False,
         latest_runs=[_fallback_vision_run(todo_delta=[f"create:{FALLBACK_ID}"])],
@@ -410,7 +411,8 @@ def test_declared_bounded_successor_delta_resolves_the_gap() -> None:
 
     frontier = _frontier_projection(payload)
 
-    assert "fallback_gaps" not in frontier
+    assert frontier["fallback_gaps"][0]["unresolved_todo_ids"] == [FALLBACK_ID]
+    assert frontier["replan_required"] is True
 
 
 def test_unrelated_create_does_not_resolve_fallback_gap() -> None:
@@ -442,9 +444,9 @@ def test_unrelated_create_does_not_resolve_fallback_gap() -> None:
     assert gaps[0]["unresolved_todo_ids"] == [FALLBACK_ID]
 
 
-def test_typed_declaration_successor_relation_resolves_gap() -> None:
-    # A typed declaration-to-successor relation resolves when its declared
-    # bounded successor is created in todo_delta.
+def test_successor_relation_without_real_todo_remains_unresolved() -> None:
+    # A typed declaration-to-successor relation still needs a real Todo;
+    # declaring creation in todo_delta alone cannot resolve it.
     payload = _status_payload(
         fallback_runnable=False,
         latest_runs=[
@@ -462,7 +464,8 @@ def test_typed_declaration_successor_relation_resolves_gap() -> None:
 
     frontier = _frontier_projection(payload)
 
-    assert "fallback_gaps" not in frontier
+    assert frontier["fallback_gaps"]
+    assert frontier["replan_required"] is True
 
 
 def test_legacy_alias_shapes_do_not_declare_a_fallback() -> None:

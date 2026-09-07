@@ -76,6 +76,7 @@ import {
   loadSchedulerState,
   writeSchedulerState,
 } from "./scheduler/state_store.ts";
+import { projectFallbackDisposition } from "./goals/fallback_disposition.ts";
 import { buildVisionCheckpoint } from "./goals/vision_checkpoint.ts";
 import { admitGoalAmendmentProposal } from "./goals/goal_amendment_proposal.ts";
 import { projectSharedGoalAlignment } from "./goals/shared_goal_alignment.ts";
@@ -390,6 +391,7 @@ export function createEffectRuntimeHandlers(
     ["work_item.planning_inventory.detail", projectTodoPlanningInventoryDetail],
     ["work_item.refresh_recommendation.resolve", resolveRefreshRecommendation],
     ["goal.vision_checkpoint.evaluate", buildVisionCheckpoint],
+    ["goal.fallback_disposition.project", projectFallbackDisposition],
     ["goal.shared_goal_alignment.project", projectSharedGoalAlignment],
     ["goal.amendment_proposal.admit", admitGoalAmendmentProposal],
     ["agent.delivery_workspace.evaluate", evaluateDeliveryWorkspace],
