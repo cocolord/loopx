@@ -60,6 +60,11 @@ from .explore_feishu_commands import (
     register_explore_feishu_commands,
 )
 from .explore_planning_commands import register_explore_planning_commands
+from .explore_discovery_commands import (
+    DISCOVERY_COMMANDS,
+    handle_explore_discovery_command,
+    register_explore_discovery_commands,
+)
 
 
 PrintPayload = Callable[
@@ -198,6 +203,8 @@ def register_explore_commands(
         add_subcommand_format,
         _add_projection_limit_args,
     )
+
+    register_explore_discovery_commands(sub, add_subcommand_format)
 
     register_explore_feishu_commands(
         sub,
@@ -473,7 +480,13 @@ def handle_explore_command(
                 else registry_path
             )
         )
-        if args.explore_command == "schema":
+        if args.explore_command in DISCOVERY_COMMANDS:
+            payload = handle_explore_discovery_command(
+                args,
+                registry_path=Path(str(source_runtime_route["source_registry"])),
+                runtime_root=runtime_root,
+            )
+        elif args.explore_command == "schema":
             payload = lark_explore_schema_payload()
         elif args.explore_command == "node":
             event = build_explore_node_event(
