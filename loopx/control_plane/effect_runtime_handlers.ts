@@ -64,7 +64,6 @@ import {
   selectTodoCompletionContinuation,
 } from "./todos/completion_state.ts";
 import { reduceTodoCompletionTransaction } from "./todos/completion_transaction.ts";
-import { resolveTodoCompletionPolicy } from "./todos/completion_policy.ts";
 import { transitionTodoNextAction } from "./todos/next_action.ts";
 import {
   evaluateTodoResumeConditions,
@@ -116,6 +115,7 @@ import {
   rollbackCoordinationRuntimeShadow,
 } from "./coordination/runtime_shadow.ts";
 import {
+  archiveLocalCoordinationTodos,
   claimLocalCoordinationTodo,
   createLocalCoordinationTodo,
   editLocalCoordinationTodo,
@@ -124,8 +124,12 @@ import {
   listLocalCoordinationTodos,
   promoteLocalCoordinationAuthority,
   readLocalCoordinationTodo,
+  terminalLifecycleLocalCoordinationTodo,
 } from "./coordination/local_authority_runtime.ts";
 import { evaluateCoordinationTodoClaimDecision } from "./coordination/todo_claim.ts";
+import { evaluateCoordinationTodoTerminalDecision } from "./coordination/todo_terminal_decision.ts";
+import { evaluateCoordinationTodoArchiveSelection } from "./coordination/todo_archive_selection.ts";
+import { evaluateCoordinationTodoSuccessorDerivation } from "./coordination/todo_successor_derivation.ts";
 import {
   checkLegacyCoordinationWriteAllowed,
   engageLegacyCoordinationWriterFence,
@@ -375,8 +379,10 @@ export function createEffectRuntimeHandlers(
         },
       ),
     ],
+    ["todo.terminal.decide", evaluateCoordinationTodoTerminalDecision],
+    ["todo.archive.select", evaluateCoordinationTodoArchiveSelection],
+    ["todo.successor.derive", evaluateCoordinationTodoSuccessorDerivation],
     ["todo.completion.reduce", reduceTodoCompletionTransaction],
-    ["todo.completion_policy.resolve", resolveTodoCompletionPolicy],
     ["todo.next_action.transition", transitionTodoNextAction],
     ["todo.resume_condition.normalize", normalizeTodoResumeWhen],
     ["todo.resume_condition.evaluate", evaluateTodoResumeConditions],
@@ -422,6 +428,8 @@ export function createEffectRuntimeHandlers(
     ["coordination.local_authority.todo_claim", claimLocalCoordinationTodo],
     ["coordination.local_authority.todo_create", createLocalCoordinationTodo],
     ["coordination.local_authority.todo_update", updateLocalCoordinationTodo],
+    ["coordination.local_authority.todo_terminal", terminalLifecycleLocalCoordinationTodo],
+    ["coordination.local_authority.todo_archive", archiveLocalCoordinationTodos],
     ["coordination.local_authority.todo_compatibility_edit", editLocalCoordinationTodo],
     ["coordination.local_authority.mutate", mutateLocalCoordinationAuthority],
     ["coordination.local_authority.todo_read", readLocalCoordinationTodo],
