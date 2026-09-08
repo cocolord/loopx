@@ -749,7 +749,11 @@ def _prepare_quota_should_run_item(
         project_asset=project_asset,
         user_todo_summary=user_todo_summary,
         agent_todo_summary=agent_todo_summary,
-        agent_todo_source_items=agent_todo_source_items,
+        agent_todo_source_items=select_planning_inventory_source_items(
+            item.get("agent_todos"),
+            project_asset.get("agent_todos") if project_asset else None,
+            include_terminal=True,
+        ),
         fallback_todo_source_items=authoritative_fallback_todo_items,
         fallback_todo_source_authoritative=(
             authoritative_fallback_todo_items is not None
