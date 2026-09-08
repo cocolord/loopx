@@ -887,6 +887,12 @@ sinks render public-safe explore projections for operators.
 
 ## CLI Surface
 
+For opt-in receipt-bound public discovery before a subject universe is frozen,
+see [Pre-universe discovery](docs/discovery.md). Its separate `discover`,
+`discovery-readback`, and `discovery-evaluate` commands remain disabled unless
+an explicit local binding enables them. They create no scheduler or research
+admission authority.
+
 ```text
 loopx explore schema
 loopx explore node --goal-id <id> --title <t> [--node-id ...] [--status ...] [--blocked-reason ...] [--parent ...]
