@@ -209,12 +209,14 @@ def test_real_cli_missing_declared_fallback_projects_true_unresolved_gap(
     assert "lookup_uncertain_todo_ids" not in gap
 
 
+@pytest.mark.parametrize("unrelated_deferred_count", [0, 20])
 def test_real_cli_authority_read_failure_projects_uncertainty(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
+    unrelated_deferred_count: int,
 ) -> None:
-    args = _write_fixture(tmp_path, unrelated_deferred_count=20)
+    args = _write_fixture(tmp_path, unrelated_deferred_count=unrelated_deferred_count)
 
     def fail_authority_read(**_kwargs: object) -> dict:
         raise OSError("fixture canonical authority unavailable")
@@ -292,12 +294,14 @@ def test_real_cli_reads_only_direct_fallback_dependencies(
     assert reads == [FALLBACK_TODO_ID, PREREQUISITE_TODO_ID]
 
 
+@pytest.mark.parametrize("unrelated_deferred_count", [0, 20])
 def test_real_cli_mismatched_authority_identity_is_uncertain(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
+    unrelated_deferred_count: int,
 ) -> None:
-    args = _write_fixture(tmp_path, unrelated_deferred_count=20)
+    args = _write_fixture(tmp_path, unrelated_deferred_count=unrelated_deferred_count)
     original_read = live_decision.list_goal_todos
 
     def mismatched_read(**kwargs: object) -> dict:
@@ -333,3 +337,76 @@ def test_real_cli_without_declarations_does_not_read_fallback_authority(
     result = json.loads(capsys.readouterr().out)
     assert result["should_run"] is False
     assert "fallback_gaps" not in result["goal_frontier_projection"]
+
+
+@pytest.mark.parametrize("fallback_status", ["open", "deferred"])
+@pytest.mark.parametrize(
+    ("resume_kind", "generation", "expected_gap"),
+    [
+        ("todo_done", None, "vision_fallback_unresolved"),
+        ("monitor_changed", 3, None),
+        ("monitor_changed", None, "vision_fallback_unresolved"),
+    ],
+    ids=["monitor-completion-is-invalid", "generation-wait", "missing-baseline"],
+)
+def test_real_cli_fallback_monitor_wait_requires_generation_condition(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    fallback_status: str,
+    resume_kind: str,
+    generation: int | None,
+    expected_gap: str | None,
+) -> None:
+    args = _write_fixture(tmp_path, unrelated_deferred_count=0)
+    state_file = tmp_path / "ACTIVE_GOAL_STATE.md"
+    generation_metadata = (
+        f" resume_monitor_generation={generation}" if generation is not None else ""
+    )
+    state = state_file.read_text().replace(
+        f"todo_id={FALLBACK_TODO_ID} status=deferred "
+        f"task_class=advancement_task claimed_by={AGENT_ID} "
+        f"resume_when=todo_done:{PREREQUISITE_TODO_ID}",
+        f"todo_id={FALLBACK_TODO_ID} status={fallback_status} "
+        f"task_class=advancement_task claimed_by={AGENT_ID} "
+        f"resume_when={resume_kind}:todo_monitor{generation_metadata}",
+    )
+    state += (
+        "\n- [ ] [P2] Observe the fallback dependency.\n"
+        "  <!-- loopx:todo todo_id=todo_monitor status=open "
+        "task_class=continuous_monitor claimed_by=observer "
+        "material_change_generation=3 -->\n"
+    )
+    state_file.write_text(state)
+
+    assert cli_main(args) == 0
+    result = json.loads(capsys.readouterr().out)
+    gaps = result["goal_frontier_projection"].get("fallback_gaps", [])
+    if expected_gap is None:
+        assert gaps == []
+    else:
+        assert gaps[0]["kind"] == expected_gap
+        assert gaps[0]["unresolved_todo_ids"] == [FALLBACK_TODO_ID]
+
+
+@pytest.mark.parametrize("duplicate_id", [FALLBACK_TODO_ID, PREREQUISITE_TODO_ID])
+def test_real_cli_ambiguous_canonical_fallback_read_is_uncertain(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    duplicate_id: str,
+) -> None:
+    args = _write_fixture(tmp_path, unrelated_deferred_count=0)
+    state_file = tmp_path / "ACTIVE_GOAL_STATE.md"
+    state_file.write_text(
+        state_file.read_text()
+        + "\n## User Todo\n\n- [ ] [P2] Resolve a separate user action.\n"
+        + f"  <!-- loopx:todo todo_id={duplicate_id} status=open -->\n"
+    )
+
+    # The existing duplicate-id input gate remains an error. Its advisory
+    # must also retain the ambiguity, rather than claiming canonical absence.
+    assert cli_main(args) == 1
+    result = json.loads(capsys.readouterr().out)
+    gap = result["goal_frontier_projection"]["fallback_gaps"][0]
+    assert gap["kind"] == "vision_fallback_lookup_uncertain"
+    assert gap["lookup_uncertain_todo_ids"] == [FALLBACK_TODO_ID]
+    assert "unresolved_todo_ids" not in gap

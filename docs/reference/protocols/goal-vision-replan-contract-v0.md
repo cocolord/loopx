@@ -453,9 +453,12 @@ For optional fallback advice, live quota reads the declared target/successor
 Todos and one layer of direct resume dependencies, at most 16 exact reads.
 Deeper dependency chains do not expand that lookup. Existing typed resume,
 ownership, and lifecycle rules decide whether each declared path is available.
-An unavailable or mismatched canonical read produces
-`vision_fallback_lookup_uncertain`, rather than treating a missing display row
-as a missing Todo. `fallback_gaps` remains advisory and adds no replan obligation.
+An unavailable, ambiguous, or mismatched canonical read produces
+`vision_fallback_lookup_uncertain`; compact display evidence cannot override a
+failed authority read. Only explicit canonical not-found proves absence.
+Pending `todo_done:<continuous_monitor>` keeps an unresolved fallback; a valid
+`monitor_changed` generation condition may establish a wait. `fallback_gaps`
+remains advisory and adds no replan obligation.
 
 等待资格现在逐项检查已有 acceptance 的 Todo 关联，并在展示裁剪前从完整来源计算。
 A 的等待不能遮住尚未落实的 B；有可执行工作则继续，相关工作都具有合法等待证据才暂缓。

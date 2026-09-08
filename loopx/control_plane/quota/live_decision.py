@@ -10,6 +10,8 @@ from ...todos import list_goal_todos
 from ..coordination.local_authority import LocalCoordinationAuthorityUnavailable
 from ..effect_runtime import EffectRuntimeRemoteError
 from ..goals.goal_frontier.fallback_disposition import (
+    FallbackTodoReadState,
+    FallbackTodoSource,
     parse_fallback_declarations,
 )
 from ..goals.goal_frontier.semantic_history import (
@@ -62,7 +64,7 @@ def _live_fallback_authority_items(
     runtime_root: Path,
     goal_id: str,
     agent_id: str | None,
-) -> list[dict[str, Any]] | None:
+) -> FallbackTodoSource:
     """Read only the exact canonical Todos needed by fallback disposition.
 
     ``status`` is deliberately presentation-bounded, so omission from it can
@@ -101,12 +103,16 @@ def _live_fallback_authority_items(
                 OSError,
                 ValueError,
             ):
-                return None
+                return FallbackTodoReadState.UNAVAILABLE
+            if projection.get("ambiguous") is True:
+                return FallbackTodoReadState.UNAVAILABLE
             item = projection.get("todo")
             if item is None:
-                continue
+                if projection.get("not_found") is True:
+                    continue
+                return FallbackTodoReadState.UNAVAILABLE
             if not isinstance(item, dict) or normalize_todo_id(item.get("todo_id")) != todo_id:
-                return None
+                return FallbackTodoReadState.UNAVAILABLE
             items[todo_id] = dict(item)
             resume_when = normalize_todo_resume_when(item.get("resume_when"))
             if include_dependencies and resume_when:

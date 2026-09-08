@@ -56,6 +56,7 @@ from .ack_policy import (
 from .fallback_disposition import (
     VISION_FRONTIER_TODO_DELTA_ACTIONS,  # noqa: F401
     FallbackDeclaration,  # noqa: F401
+    FallbackTodoSource,
     agent_scoped_selectable_advancement_todo_ids,  # noqa: F401
     declared_fallback_gap_from_agent_vision,
     parse_fallback_declarations,  # noqa: F401
@@ -1405,7 +1406,7 @@ def build_goal_frontier_projection_context_from_status(
     work_lane_contract: dict[str, Any] | None,
     neutral_replan_ack_classifications: set[str],
     agent_todo_source_items: list[dict[str, Any]] | None = None,
-    fallback_todo_source_items: list[dict[str, Any]] | None = None,
+    fallback_todo_source_items: FallbackTodoSource = None,
     available_capabilities: Any = None,
     registered_agent_ids: list[str] | None = None,
     goal_status: str | None = None,

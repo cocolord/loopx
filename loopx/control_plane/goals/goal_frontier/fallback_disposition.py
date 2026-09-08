@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from ...todos.contract import (
@@ -11,7 +12,10 @@ from ...todos.contract import (
     normalize_todo_resume_when,
     normalize_todo_status,
 )
-from ...todos.deferred_resume import todo_summary_blocked_successor_items
+from ...todos.deferred_resume import (
+    todo_resume_condition_is_non_monitor_wait,
+    todo_summary_blocked_successor_items,
+)
 from ...todos.projection import (
     agent_scoped_selectable_advancement_todo_ids,
     todo_item_claimed_by_agent_or_unclaimed,
@@ -53,6 +57,15 @@ VISION_FALLBACK_LOOKUP_UNCERTAIN_ACTION = (
     "retry the fallback disposition from the complete canonical Todo source; "
     "do not infer absence from a bounded presentation lane or invent a user gate"
 )
+
+
+class FallbackTodoReadState(Enum):
+    UNAVAILABLE = "unavailable"
+
+
+# None is an omitted source from a legacy caller; UNAVAILABLE is a failed
+# authority read, which compact display evidence must not override.
+FallbackTodoSource = list[dict[str, Any]] | FallbackTodoReadState | None
 
 
 @dataclass(frozen=True)
@@ -259,7 +272,10 @@ def _authoritative_fallback_disposition_ids(
                 continue
             if condition.get("satisfied") is True:
                 runnable_ids.add(todo_id)
-            elif condition.get("satisfied") is False:
+            elif condition.get("satisfied") is False and (
+                condition.get("kind") == "monitor_changed"
+                or todo_resume_condition_is_non_monitor_wait(condition)
+            ):
                 waiting_ids.add(todo_id)
             continue
 
@@ -274,7 +290,7 @@ def declared_fallback_gap_from_agent_vision(
     *,
     agent_todo_summary: dict[str, Any] | None,
     agent_id: str | None,
-    agent_todo_source_items: list[dict[str, Any]] | None = None,
+    agent_todo_source_items: FallbackTodoSource = None,
     rollout_events: list[dict[str, Any]] | None = None,
     available_capabilities: Any = None,
 ) -> dict[str, Any] | None:
@@ -315,9 +331,9 @@ def declared_fallback_gap_from_agent_vision(
     if not declarations:
         return None
 
-    source_is_authoritative = agent_todo_source_items is not None
+    source_is_authoritative = isinstance(agent_todo_source_items, list)
     uncertain_todo_ids: set[str] = set()
-    if source_is_authoritative:
+    if isinstance(agent_todo_source_items, list):
         (
             selectable_ids,
             waiting_todo_ids,
@@ -329,6 +345,9 @@ def declared_fallback_gap_from_agent_vision(
             rollout_events=rollout_events,
             available_capabilities=available_capabilities,
         )
+    elif agent_todo_source_items is FallbackTodoReadState.UNAVAILABLE:
+        selectable_ids = set()
+        waiting_todo_ids = set()
     else:
         # Legacy direct callers may only have a compact display summary. It
         # remains valid positive evidence, but omission from a bounded lane is

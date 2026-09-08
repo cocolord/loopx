@@ -299,6 +299,17 @@ def todo_summary_monitor_blocked_resume_items(
     return sorted(_dedupe_todo_items(candidates), key=todo_projection_sort_key)
 
 
+def todo_resume_condition_is_non_monitor_wait(condition: dict[str, Any]) -> bool:
+    """A pending condition cannot use a standing monitor as a done prerequisite.
+
+    Generation-fenced monitor waits are validated separately by the TS resume
+    evaluator; this preserves the existing ordinary successor wait boundary.
+    """
+    return condition.get("satisfied") is False and normalize_todo_task_class(
+        condition.get("target_task_class"), text=""
+    ) != TODO_TASK_CLASS_MONITOR
+
+
 def todo_summary_blocked_successor_items(
     value: dict[str, Any],
     *,
@@ -336,13 +347,7 @@ def todo_summary_blocked_successor_items(
         resume_when = normalize_todo_resume_when(item.get("resume_when"))
         raw_condition = item.get("resume_condition")
         condition = raw_condition if isinstance(raw_condition, dict) else {}
-        if not resume_when or condition.get("satisfied") is not False:
-            continue
-        target_task_class = normalize_todo_task_class(
-            condition.get("target_task_class"),
-            text="",
-        )
-        if target_task_class == TODO_TASK_CLASS_MONITOR:
+        if not resume_when or not todo_resume_condition_is_non_monitor_wait(condition):
             continue
         compact = dict(item)
         compact["resume_when"] = resume_when

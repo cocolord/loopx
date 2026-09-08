@@ -3,7 +3,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .control_plane.goals.goal_frontier.fallback_disposition import FallbackTodoSource
 
 from .control_plane import compact_control_plane_policy
 from .control_plane.goals.activation import goal_is_stopped
@@ -877,7 +880,7 @@ def build_quota_should_run(
     receipt_bound_replan_obligation_id: str | None = None,
     turn_instance_id: str | None = None,
     runtime_root: str | Path | None = None,
-    authoritative_fallback_todo_items: list[dict[str, Any]] | None = None,
+    authoritative_fallback_todo_items: FallbackTodoSource = None,
 ) -> dict[str, Any]:
     from .control_plane.quota.should_run import (
         build_quota_should_run as _build_quota_should_run,

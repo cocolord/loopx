@@ -287,6 +287,15 @@ def test_missing_authoritative_source_projects_uncertainty_not_absence() -> None
     assert "unresolved_todo_ids" not in gap
 
 
+def test_legacy_omitted_source_retains_positive_display_evidence() -> None:
+    payload = _status_payload(
+        fallback_runnable=True,
+        latest_runs=[_fallback_vision_run()],
+    )
+
+    assert "fallback_gaps" not in _frontier_projection(payload, include_source=False)
+
+
 def test_retaining_only_the_blocked_primary_successor_is_no_declaration() -> None:
     # The primary successor is the wait state's own object; retaining it does
     # not declare a fallback direction, so no gap is invented.
