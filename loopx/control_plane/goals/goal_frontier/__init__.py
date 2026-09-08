@@ -1406,7 +1406,6 @@ def build_goal_frontier_projection_context_from_status(
     neutral_replan_ack_classifications: set[str],
     agent_todo_source_items: list[dict[str, Any]] | None = None,
     fallback_todo_source_items: list[dict[str, Any]] | None = None,
-    fallback_todo_source_authoritative: bool | None = None,
     available_capabilities: Any = None,
     registered_agent_ids: list[str] | None = None,
     goal_status: str | None = None,
@@ -1539,13 +1538,7 @@ def build_goal_frontier_projection_context_from_status(
                 latest_agent_vision,
                 agent_todo_summary=agent_todo_summary,
                 agent_id=agent_id,
-                agent_todo_source_items=(
-                    fallback_todo_source_items
-                    if fallback_todo_source_authoritative is True
-                    else None
-                    if fallback_todo_source_authoritative is False
-                    else agent_todo_source_items
-                ),
+                agent_todo_source_items=fallback_todo_source_items,
                 rollout_events=latest_runs_for_goal(
                     status_payload,
                     goal_id=goal_id,

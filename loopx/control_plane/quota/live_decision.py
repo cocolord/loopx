@@ -68,8 +68,10 @@ def _live_fallback_authority_items(
     ``status`` is deliberately presentation-bounded, so omission from it can
     never prove that a declared fallback is absent. The live CLI path owns the
     registry/runtime authority needed for exact reads. Resume dependencies are
-    included only when referenced by one of the declared Todos so the existing
-    TypeScript evaluator retains state-transition authority.
+    included only when directly referenced by a declared Todo. Four declarations
+    can name eight targets/successors and eight direct dependencies: at most 16
+    reads. The TypeScript evaluator inspects a dependency's current state, not
+    its own resume chain, and retains state-transition authority.
     """
 
     requested_ids = _fallback_authority_todo_ids(
@@ -82,40 +84,41 @@ def _live_fallback_authority_items(
 
     items: dict[str, dict[str, Any]] = {}
     pending_ids = set(requested_ids)
-    while pending_ids:
-        todo_id = pending_ids.pop()
-        try:
-            projection = list_goal_todos(
-                registry_path=registry_path,
-                goal_id=goal_id,
-                todo_id=todo_id,
-                runtime_root_arg=str(runtime_root),
-                limit=None,
-            )
-        except (
-            EffectRuntimeRemoteError,
-            LocalCoordinationAuthorityUnavailable,
-            OSError,
-            ValueError,
-        ):
-            return None
-        item = projection.get("todo")
-        if not isinstance(item, dict):
-            continue
-        normalized_id = normalize_todo_id(item.get("todo_id"))
-        if not normalized_id:
-            return None
-        items[normalized_id] = dict(item)
-        resume_when = normalize_todo_resume_when(item.get("resume_when"))
-        if resume_when:
-            resume_kind, _, target = resume_when.partition(":")
-            dependency_id = (
-                normalize_todo_id(target)
-                if resume_kind in {"todo_done", "monitor_changed"}
-                else None
-            )
-            if dependency_id and dependency_id not in items:
-                pending_ids.add(dependency_id)
+    for include_dependencies in (True, False):
+        dependency_ids: set[str] = set()
+        for todo_id in sorted(pending_ids):
+            try:
+                projection = list_goal_todos(
+                    registry_path=registry_path,
+                    goal_id=goal_id,
+                    todo_id=todo_id,
+                    runtime_root_arg=str(runtime_root),
+                    limit=None,
+                )
+            except (
+                EffectRuntimeRemoteError,
+                LocalCoordinationAuthorityUnavailable,
+                OSError,
+                ValueError,
+            ):
+                return None
+            item = projection.get("todo")
+            if item is None:
+                continue
+            if not isinstance(item, dict) or normalize_todo_id(item.get("todo_id")) != todo_id:
+                return None
+            items[todo_id] = dict(item)
+            resume_when = normalize_todo_resume_when(item.get("resume_when"))
+            if include_dependencies and resume_when:
+                resume_kind, _, target = resume_when.partition(":")
+                dependency_id = (
+                    normalize_todo_id(target)
+                    if resume_kind in {"todo_done", "monitor_changed"}
+                    else None
+                )
+                if dependency_id:
+                    dependency_ids.add(dependency_id)
+        pending_ids = dependency_ids - requested_ids
     return list(items.values())
 
 

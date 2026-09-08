@@ -449,6 +449,14 @@ rule uses existing acceptance/lineage facts regardless of the optional advisory
 relationships, and it grants no additional authority. Ownership, exclusions,
 capabilities, user gates, and quota remain independent execution constraints.
 
+For optional fallback advice, live quota reads the declared target/successor
+Todos and one layer of direct resume dependencies, at most 16 exact reads.
+Deeper dependency chains do not expand that lookup. Existing typed resume,
+ownership, and lifecycle rules decide whether each declared path is available.
+An unavailable or mismatched canonical read produces
+`vision_fallback_lookup_uncertain`, rather than treating a missing display row
+as a missing Todo. `fallback_gaps` remains advisory and adds no replan obligation.
+
 等待资格现在逐项检查已有 acceptance 的 Todo 关联，并在展示裁剪前从完整来源计算。
 A 的等待不能遮住尚未落实的 B；有可执行工作则继续，相关工作都具有合法等待证据才暂缓。
 无需另外维护 fallback 声明；无关 Todo 的数量和顺序不应改变决策。

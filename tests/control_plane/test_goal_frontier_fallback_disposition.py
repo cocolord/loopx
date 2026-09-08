@@ -158,6 +158,7 @@ def _frontier_projection(payload: dict, *, include_source: bool = True) -> dict:
         user_todo_summary=item["user_todos"],
         agent_todo_summary=item["agent_todos"],
         agent_todo_source_items=source_items,
+        fallback_todo_source_items=source_items,
         work_lane_contract=None,
         neutral_replan_ack_classifications=set(),
         registered_agent_ids=[PRIMARY_AGENT, AGENT_ID],

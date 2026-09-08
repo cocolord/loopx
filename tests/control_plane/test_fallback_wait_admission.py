@@ -9,6 +9,7 @@ import pytest
 
 from loopx.cli import main as cli_main
 from loopx.control_plane.goals.goal_vision import normalize_goal_vision_packet
+from loopx.control_plane.quota import live_decision
 
 GOAL_ID = "fallback-wait-capacity-fixture"
 AGENT_ID = "worker"
@@ -248,4 +249,87 @@ def test_real_cli_uses_dependency_state_from_exact_canonical_read(
         PRIMARY_TODO_ID,
         FALLBACK_TODO_ID,
     }
+    assert "fallback_gaps" not in result["goal_frontier_projection"]
+
+
+@pytest.mark.parametrize("depth", [0, 4, 64, 512])
+def test_real_cli_reads_only_direct_fallback_dependencies(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    depth: int,
+) -> None:
+    args = _write_fixture(tmp_path, unrelated_deferred_count=20)
+    state_file = tmp_path / "ACTIVE_GOAL_STATE.md"
+    state = state_file.read_text()
+    if depth:
+        state = state.replace(
+            f"todo_id={PREREQUISITE_TODO_ID} status=open",
+            f"todo_id={PREREQUISITE_TODO_ID} resume_when=todo_done:todo_chain_0 status=deferred",
+        )
+    for index in range(depth):
+        state += (
+            f"\n- [ ] [P2] Observe prerequisite {index}.\n"
+            f"  <!-- loopx:todo todo_id=todo_chain_{index} status=deferred "
+            "task_class=advancement_task claimed_by=observer "
+            f"resume_when=todo_done:todo_chain_{index + 1} -->\n"
+        )
+    state_file.write_text(state)
+    reads: list[str] = []
+    original_read = live_decision.list_goal_todos
+
+    def record_read(**kwargs: object) -> dict:
+        reads.append(str(kwargs["todo_id"]))
+        return original_read(**kwargs)
+
+    monkeypatch.setattr(live_decision, "list_goal_todos", record_read)
+    assert cli_main(args) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["should_run"] is False
+    assert "fallback_gaps" not in result["goal_frontier_projection"]
+    # The direct prerequisite is deferred regardless of its own dependency.
+    # Its chain cannot alter this wait or add canonical lookup calls.
+    assert reads == [FALLBACK_TODO_ID, PREREQUISITE_TODO_ID]
+
+
+def test_real_cli_mismatched_authority_identity_is_uncertain(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = _write_fixture(tmp_path, unrelated_deferred_count=20)
+    original_read = live_decision.list_goal_todos
+
+    def mismatched_read(**kwargs: object) -> dict:
+        projection = original_read(**kwargs)
+        return {**projection, "todo": {**projection["todo"], "todo_id": "todo_other"}}
+
+    monkeypatch.setattr(live_decision, "list_goal_todos", mismatched_read)
+    assert cli_main(args) == 0
+    result = json.loads(capsys.readouterr().out)
+    gap = result["goal_frontier_projection"]["fallback_gaps"][0]
+    assert gap["kind"] == "vision_fallback_lookup_uncertain"
+    assert gap["lookup_uncertain_todo_ids"] == [FALLBACK_TODO_ID]
+    assert "unresolved_todo_ids" not in gap
+
+
+def test_real_cli_without_declarations_does_not_read_fallback_authority(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = _write_fixture(tmp_path, unrelated_deferred_count=20)
+    index = tmp_path / "runtime" / "goals" / GOAL_ID / "runs" / "index.jsonl"
+    run = json.loads(index.read_text())
+    run["agent_vision"].pop("fallback_declarations")
+    index.write_text(json.dumps(run) + "\n")
+    Path(run["json_path"]).write_text(json.dumps(run) + "\n")
+
+    def unexpected_read(**_kwargs: object) -> dict:
+        pytest.fail("No fallback declaration authorizes an exact fallback lookup")
+
+    monkeypatch.setattr(live_decision, "list_goal_todos", unexpected_read)
+    assert cli_main(args) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["should_run"] is False
     assert "fallback_gaps" not in result["goal_frontier_projection"]

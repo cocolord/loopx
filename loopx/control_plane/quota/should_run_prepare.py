@@ -755,9 +755,6 @@ def _prepare_quota_should_run_item(
             include_terminal=True,
         ),
         fallback_todo_source_items=authoritative_fallback_todo_items,
-        fallback_todo_source_authoritative=(
-            authoritative_fallback_todo_items is not None
-        ),
         available_capabilities=effective_available_capabilities,
         work_lane_contract=work_lane_contract,
         neutral_replan_ack_classifications=AUTONOMOUS_REPLAN_ACK_NEUTRAL_CLASSIFICATIONS,
