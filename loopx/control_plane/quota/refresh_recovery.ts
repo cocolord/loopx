@@ -58,10 +58,7 @@ type Decision = "append" | "replay" | "repair_receipt" | "supplement_checkpoint"
 
 export function isMaterialMonitorPoll(run: JsonObject | null): boolean {
   if (run?.classification !== "quota_monitor_poll") return false;
-  if (run.material_change !== undefined && run.material_change !== null) {
-    return run.material_change === true;
-  }
-  return jsonObject(run.monitor_event)?.material_change === true;
+  return run.material_change === true;
 }
 
 export function refreshRecovery(

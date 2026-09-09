@@ -44,21 +44,17 @@ test("digest uses JSON structure, not property insertion order", () => {
 test("workspace supplements preserve the monitor compatibility boundary", () => {
   const monitor = { ...prior, classification: "quota_monitor_poll", material_change: true,
     vision_checkpoint: null, delivery_batch_scale: null };
-  const nestedMonitor = { ...monitor, material_change: undefined,
-    monitor_event: { material_change: true } };
   assert.equal(refreshRecovery({ ...request, workspace_requested: true }, monitor, true, "required", false).decision, "supplement_workspace");
   const closeout = { ...request, workspace_requested: true, vision: { state: "vision_active" },
     mutation: { next_action: "Validate the successor", autonomous_replan_recorded: false } };
   const admitted = refreshRecovery(closeout, monitor, false, "required", false);
   assert.equal(admitted.reason, "complete_material_monitor_writeback");
-  assert.equal(
-    refreshRecovery(closeout, nestedMonitor, false, "required", false).reason,
-    "complete_material_monitor_writeback",
-  );
   assert.equal(refreshRecovery(closeout, monitor, false, "required", true).decision, "reject");
   for (const invalid of [
     { ...monitor, material_change: false }, { ...monitor, classification: "ordinary_refresh" },
-    { ...nestedMonitor, material_change: false },
+    { ...monitor, material_change: undefined, monitor_event: { material_change: true } },
+    { ...monitor, material_change: null, monitor_event: { material_change: true } },
+    { ...monitor, material_change: "true", monitor_event: { material_change: true } },
     { ...monitor, refresh_recovery: admitted }, { ...monitor, vision_checkpoint: prior.vision_checkpoint },
   ]) assert.equal(refreshRecovery(closeout, invalid, false, "required", false).decision, "reject");
   for (const invalid of [

@@ -262,49 +262,6 @@ test("keeps partial settlement fail-closed without losing durable facts", async 
   assert.equal((result.writeback_run as any).delivery_outcome, "outcome_progress");
 });
 
-test("recovers an exact-turn material monitor persisted with nested evidence", async () => {
-  const runtimeRoot = await fixture({ workspace: true });
-  try {
-    await appendFile(
-      join(runtimeRoot, "goals", goalId, "runs", "index.jsonl"),
-      `${JSON.stringify({
-        classification: "quota_monitor_poll",
-        delivery_outcome: "outcome_progress",
-        goal_id: goalId,
-        agent_id: agentId,
-        todo_id: todoId,
-        turn_instance_id: turnId,
-        monitor_event: { material_change: true },
-      })}\n`,
-    );
-
-    const result = await readQuotaSettlement(request(runtimeRoot, {
-      refresh_retry: {
-        vision: { state: "vision_active" },
-        unchanged_reason: null,
-        merge_patch: false,
-        workspace_requested: true,
-        mutation: { next_action: "Validate the material successor." },
-        delivery_outcome: "outcome_progress",
-        delivery_batch_scale: null,
-        delivery_boundary: null,
-        progress_observation: null,
-      },
-    }));
-
-    assert.equal((result.writeback_run as any).material_change, undefined);
-    assert.equal((result.writeback_run as any).monitor_event.material_change, true);
-    assert.equal((result.refresh_recovery as any).decision, "supplement_workspace");
-    assert.equal(
-      (result.refresh_recovery as any).reason,
-      "complete_material_monitor_writeback",
-    );
-    assert.equal(result.monitor_phase, "settlement_pending");
-  } finally {
-    await rm(runtimeRoot, { recursive: true, force: true });
-  }
-});
-
 test("rejects non-ENOENT settlement readback I/O failures", async (t) => {
   const runtimeRoot = await fixture();
   const indexPath = join(runtimeRoot, "goals", goalId, "runs", "index.jsonl");
