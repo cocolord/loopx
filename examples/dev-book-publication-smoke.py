@@ -15,7 +15,6 @@ CONTROL_PLANE_COURSE = REPO_ROOT / "docs" / "development" / "control-plane-cours
 MKDOCS = REPO_ROOT / "mkdocs.yaml"
 MKDOCS_ZH = BOOK / "mkdocs.zh.yaml"
 MKDOCS_EN = BOOK / "mkdocs.en.yaml"
-MERMAID_RUNTIME = REPO_ROOT / "docs" / "javascripts" / "mermaid.js"
 BRAND_STYLES = REPO_ROOT / "docs" / "stylesheets" / "loopx.css"
 HOMEPAGE = REPO_ROOT / "apps" / "presentation" / "site" / "src" / "App.tsx"
 
@@ -182,13 +181,16 @@ def validate_rendered_site(site_dir: Path) -> None:
     def assert_state_machine_diagrams(html: str, route: str) -> None:
         diagram_count = len(re.findall(r'<pre class="mermaid">', html))
         assert diagram_count == 10, (
-            f"{route}: expected 10 rendered Mermaid containers, found {diagram_count}"
+            f"{route}: expected 10 Mermaid source containers, found {diagram_count}"
         )
         assert "language-mermaid" not in html, (
             f"{route}: Mermaid source was rendered as a highlighted code block"
         )
-        assert "javascripts/mermaid.js" in html, (
-            f"{route}: Mermaid navigation-aware initializer is missing"
+        assert "javascripts/mermaid.js" not in html, (
+            f"{route}: stale custom Mermaid initializer is still referenced"
+        )
+        assert len(re.findall(r'<script src="[^"]*assets/javascripts/bundle\.[^"]+\.min\.js"></script>', html)) == 1, (
+            f"{route}: expected the single MkDocs Material renderer owner"
         )
 
     routes = {
@@ -330,14 +332,11 @@ def main() -> int:
     assert not (REPO_ROOT / "mkdocs.book.en.yaml").exists()
 
     mkdocs = read(MKDOCS)
-    mermaid_runtime = read(MERMAID_RUNTIME)
     assert "book/chapters/" not in mkdocs
     assert "book/en/chapters/" not in mkdocs
     assert "book/**" in mkdocs
-    assert "javascripts/mermaid.js" in mkdocs
-    assert "mermaid@11.12.0/dist/mermaid.esm.min.mjs" in mermaid_runtime
-    assert "document$.subscribe(renderMermaid)" in mermaid_runtime
-    assert '.mermaid:not([data-processed])' in mermaid_runtime
+    assert "javascripts/mermaid.js" not in mkdocs
+    assert not (REPO_ROOT / "docs" / "javascripts" / "mermaid.js").exists()
     chinese_state_machines = read(BOOK / "chapters" / "core-state-machines.md")
     english_state_machines = read(BOOK / "en" / "chapters" / "core-state-machines.md")
     for chapter in (chinese_state_machines, english_state_machines):

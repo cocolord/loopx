@@ -63,9 +63,6 @@ plugins:
 hooks:
   - docs/rewrite_capability_links.py
 
-extra_javascript:
-  - javascripts/mermaid.js
-
 markdown_extensions:
   - attr_list
   - def_list
