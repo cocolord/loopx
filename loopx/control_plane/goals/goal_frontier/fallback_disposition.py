@@ -8,6 +8,7 @@ from ...todos.contract import (
     TODO_STATUS_DEFERRED,
     TODO_STATUS_OPEN,
     TODO_TASK_CLASS_ADVANCEMENT,
+    TODO_TASK_CLASS_MONITOR,
     normalize_todo_id,
     normalize_todo_resume_when,
     normalize_todo_status,
@@ -272,11 +273,25 @@ def _authoritative_fallback_disposition_ids(
                 continue
             if condition.get("satisfied") is True:
                 runnable_ids.add(todo_id)
-            elif condition.get("satisfied") is False and (
-                condition.get("kind") == "monitor_changed"
-                or todo_resume_condition_is_non_monitor_wait(condition)
-            ):
-                waiting_ids.add(todo_id)
+            elif condition.get("satisfied") is False:
+                if condition.get("kind") == "monitor_changed":
+                    # An unchanged generation is a durable wait only while
+                    # its continuous-monitor target remains open.  A terminal
+                    # monitor cannot produce another generation, so accepting
+                    # that condition as pending would hide the fallback gap
+                    # forever.  A changed generation is handled above and
+                    # remains runnable even if the monitor closed concurrently.
+                    target_status = normalize_todo_status(
+                        condition.get("target_status")
+                    )
+                    if (
+                        target_status == TODO_STATUS_OPEN
+                        and condition.get("target_task_class")
+                        == TODO_TASK_CLASS_MONITOR
+                    ):
+                        waiting_ids.add(todo_id)
+                elif todo_resume_condition_is_non_monitor_wait(condition):
+                    waiting_ids.add(todo_id)
             continue
 
         if todo_item_is_actionable_open(item):

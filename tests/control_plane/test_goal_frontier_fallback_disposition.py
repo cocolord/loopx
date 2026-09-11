@@ -460,15 +460,29 @@ def test_declared_fallback_linked_to_monitor_todo_keeps_the_gap() -> None:
 
 
 @pytest.mark.parametrize(
-    ("resume_monitor_generation", "expected_gap_kind"),
+    (
+        "resume_monitor_generation",
+        "monitor_generation",
+        "monitor_status",
+        "expected_gap_kind",
+    ),
     [
-        (3, None),
-        (None, "vision_fallback_unresolved"),
+        (3, 3, "open", None),
+        (None, 3, "open", "vision_fallback_unresolved"),
+        (3, 3, "done", "vision_fallback_unresolved"),
+        (3, 4, "done", None),
     ],
-    ids=["valid-pending-monitor-wait", "invalid-missing-generation-baseline"],
+    ids=[
+        "valid-pending-monitor-wait",
+        "invalid-missing-generation-baseline",
+        "completed-monitor-cannot-remain-pending",
+        "changed-generation-remains-runnable-after-monitor-completes",
+    ],
 )
 def test_fallback_monitor_wait_uses_typed_resume_evaluator(
     resume_monitor_generation: int | None,
+    monitor_generation: int,
+    monitor_status: str,
     expected_gap_kind: str | None,
 ) -> None:
     payload = _status_payload(
@@ -489,7 +503,8 @@ def test_fallback_monitor_wait_uses_typed_resume_evaluator(
         text="[P2] Observe the fallback dependency.",
         task_class="continuous_monitor",
         claimed_by=AGENT_ID,
-        material_change_generation=3,
+        status=monitor_status,
+        material_change_generation=monitor_generation,
     )
 
     decision = build_quota_should_run(
