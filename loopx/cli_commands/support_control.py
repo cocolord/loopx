@@ -28,6 +28,7 @@ from ..heartbeat_prompt import (
     build_heartbeat_prompt_error_payload,
     render_heartbeat_prompt_markdown,
 )
+from ..kiro_cli_goal_mode import KIRO_CLI_BIN
 from ..paths import default_public_scan_root
 from ..presentation.renderers.status_markdown import render_status_markdown
 from ..promotion_gate import (
@@ -62,6 +63,7 @@ from .support_control_backup import (
     handle_backup_state_command,
     register_backup_state_command,
 )
+from .support_control_agent_runtime import register_agent_runtime_arguments
 from .support_control_chat_endpoint import (
     handle_chat_endpoint_command,
     register_chat_endpoint_command,
@@ -87,6 +89,7 @@ FormatSelector = Callable[..., str]
 AddFormat = Callable[[argparse.ArgumentParser], None]
 
 SUPPORT_CONTROL_COMMANDS = {
+    "automation-prompts",
     "backup-state",
     "chat",
     "chat-endpoint",
@@ -107,6 +110,8 @@ def register_support_control_commands(
     subparsers: argparse._SubParsersAction,
     add_subcommand_format: AddFormat,
 ) -> None:
+    from .automation_prompts import register_automation_prompts
+    register_automation_prompts(subparsers, add_subcommand_format)
     register_backup_state_command(subparsers, add_subcommand_format)
     register_heartbeat_control_commands(subparsers, add_subcommand_format)
 
@@ -321,23 +326,7 @@ def register_support_control_commands(
         "--host", default=DEFAULT_CHAT_HOST, help="Loopback bind host."
     )
     chat_parser.add_argument("--port", type=int, default=DEFAULT_CHAT_PORT)
-    chat_parser.add_argument(
-        "--codex-bin",
-        default="codex",
-        help="Codex CLI executable used for the read-only app-server session.",
-    )
-    chat_parser.add_argument(
-        "--claude-bin",
-        default="claude",
-        help="Claude Code CLI executable used for read-only Agent sessions.",
-    )
-    chat_parser.add_argument(
-        "--lark-cli-bin",
-        help=(
-            "Optional explicit lark-cli executable. When omitted, LoopX uses its bounded "
-            "runtime discovery order."
-        ),
-    )
+    register_agent_runtime_arguments(chat_parser, kiro_cli_bin=KIRO_CLI_BIN)
     chat_parser.add_argument(
         "--startup-timeout-seconds",
         type=float,
@@ -412,23 +401,7 @@ def register_support_control_commands(
         "--host", default=DEFAULT_CHAT_HOST, help="Loopback bind host."
     )
     dashboard_parser.add_argument("--port", type=int, default=DEFAULT_CHAT_PORT)
-    dashboard_parser.add_argument(
-        "--codex-bin",
-        default="codex",
-        help="Codex CLI executable used for the read-only app-server session.",
-    )
-    dashboard_parser.add_argument(
-        "--claude-bin",
-        default="claude",
-        help="Claude Code CLI executable used for read-only Agent sessions.",
-    )
-    dashboard_parser.add_argument(
-        "--lark-cli-bin",
-        help=(
-            "Optional explicit lark-cli executable. When omitted, LoopX uses its bounded "
-            "runtime discovery order."
-        ),
-    )
+    register_agent_runtime_arguments(dashboard_parser, kiro_cli_bin=KIRO_CLI_BIN)
     dashboard_parser.add_argument(
         "--assets-dir",
         help="Optional LoopX Chat web bundle directory. Defaults to packaged assets.",
@@ -483,6 +456,15 @@ def handle_support_control_command(
 ) -> int | None:
     if args.command not in SUPPORT_CONTROL_COMMANDS:
         return None
+
+    if args.command == "automation-prompts":
+        from .automation_prompts import run, render
+        try:
+            payload = run(args, registry_path)
+        except Exception as error:
+            payload = {"ok": False, "error": str(error)}
+        print_payload(payload, output_format(args), render)
+        return 0 if payload.get("ok") else 1
 
     if args.command == "chat-endpoint":
         return handle_chat_endpoint_command(
@@ -617,6 +599,18 @@ def handle_support_control_command(
                 turn_granularity=turn_granularity,
                 turn_instance_id=args.turn_instance_id,
             )
+            if args.bootstrap and payload.get("ok"):
+                from ..control_plane.heartbeat.bootstrap_prompt import goal_bootstrap
+                from ..control_plane.heartbeat.budget import build_interface_budget
+                body = goal_bootstrap(args, registry=agent_registry_path)
+                payload["task_body"] = body
+                payload["bootstrap"] = True
+                payload["interface_budget"] = build_interface_budget(
+                    task_body=body, goal_id=args.goal_id,
+                    active_state=str(payload.get("active_state") or ""), thin=True,
+                )
+                if not payload["interface_budget"]["within_budget"]:
+                    raise ValueError("bootstrap exceeds the thin budget; move lengthy policy into registered state")
         except Exception as exc:
             fallback_active_state = active_state
             fallback_resolved_active_state = resolved_active_state
@@ -793,8 +787,11 @@ def handle_support_control_command(
                 if update_action is UpdateAction.APPLY and payload.get("plan", {}).get(
                     "apply_supported"
                 ):
-                    payload = execute_update_plan(
-                        payload, timeout_seconds=args.timeout_seconds
+                    from ..control_plane.heartbeat.installed_prompt_update import update_with_prompts
+                    payload = update_with_prompts(
+                        payload, registry=(registry_path if registry_was_supplied else explicit_global_registry(args.runtime_root)),
+                        runtime_root=args.runtime_root,
+                        timeout_seconds=args.timeout_seconds, runtime_update=execute_update_plan,
                     )
         except Exception as exc:
             payload = {
@@ -912,6 +909,7 @@ def handle_support_control_command(
                 goal_id=getattr(args, "goal_id", None),
                 codex_bin=getattr(args, "codex_bin", "codex"),
                 claude_bin=getattr(args, "claude_bin", "claude"),
+                kiro_cli_bin=getattr(args, "kiro_cli_bin", KIRO_CLI_BIN),
                 lark_cli_bin=getattr(args, "lark_cli_bin", None),
                 assets_dir=Path(args.assets_dir).expanduser().resolve()
                 if getattr(args, "assets_dir", None)
@@ -954,6 +952,7 @@ def handle_support_control_command(
                 goal_id=args.goal_id,
                 codex_bin=args.codex_bin,
                 claude_bin=args.claude_bin,
+                kiro_cli_bin=getattr(args, "kiro_cli_bin", KIRO_CLI_BIN),
                 lark_cli_bin=args.lark_cli_bin,
                 startup_timeout_sec=max(0.1, float(args.startup_timeout_seconds)),
                 idle_timeout_sec=max(0.1, float(args.idle_timeout_seconds)),

@@ -1,4 +1,5 @@
 import { ShadowManagementError, requireShadowPrimaryWriteAllowed } from "../coordination/shadow_management.ts";
+import { parseIsoTimestamp } from "../runtime_timestamp.ts";
 import { LegacyCoordinationWriteError, requireLegacyCoordinationPrimaryWriteAllowed } from "../coordination/legacy_writer_fence.ts";
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
@@ -547,13 +548,11 @@ export function leaseInteger(
   } else if (typeof raw === "string" && /^-?\d+$/u.test(raw)) {
     number = Number(raw);
   }
-  const positive = field === "lease_epoch";
-  const nonNegative = field === "version";
+  const minimum = field === "version" ? 0 : 1;
   if (
-    typeof raw === "boolean" || !Number.isSafeInteger(number) ||
-    (positive && number <= 0) || (nonNegative && number < 0)
+    typeof raw === "boolean" || !Number.isSafeInteger(number) || number < minimum
   ) {
-    let message = "lease acquire_ttl_seconds must be an integer";
+    let message = "lease acquire_ttl_seconds must be a positive integer";
     if (field === "lease_epoch") {
       message = "lease epoch must be a positive integer";
     } else if (field === "version") {
@@ -573,44 +572,6 @@ export function leaseEpoch(lease: LeaseRecord | null): number {
   return leaseInteger(lease, "lease_epoch") ?? 1;
 }
 
-export function parseLeaseTimestamp(value: string): Date | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|z|[+-]\d{2}(?::?\d{2})?)?)?$/u.exec(
-    value.trim(),
-  );
-  if (match === null) return null;
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fraction, timezone] = match;
-  const [year, month, day, hour, minute, second, millisecond] = [
-    yearText,
-    monthText,
-    dayText,
-    hourText ?? "0",
-    minuteText ?? "0",
-    secondText ?? "0",
-    (fraction ?? "").slice(0, 3).padEnd(3, "0") || "0",
-  ].map(Number);
-  const endOfDay = hour === 24;
-  if (
-    endOfDay &&
-    (minute !== 0 || second !== 0 || (fraction !== undefined && /[1-9]/u.test(fraction)))
-  ) return null;
-  const calendarHour = endOfDay ? 0 : hour;
-  const calendar = new Date(0);
-  calendar.setUTCHours(calendarHour, minute, second, millisecond);
-  calendar.setUTCFullYear(year, month - 1, day);
-  if (
-    calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 ||
-    calendar.getUTCDate() !== day || calendar.getUTCHours() !== calendarHour ||
-    calendar.getUTCMinutes() !== minute || calendar.getUTCSeconds() !== second ||
-    calendar.getUTCMilliseconds() !== millisecond
-  ) return null;
-  if (hourText === undefined) return calendar;
-  let text = value.trim().replace(" ", "T").replace(/z$/u, "Z");
-  if (fraction !== undefined) text = text.replace(`.${fraction}`, `.${fraction.slice(0, 3)}`);
-  if (timezone === undefined) text += "Z";
-  else text = text.replace(/([+-]\d{2})$/u, "$1:00");
-  const parsed = new Date(text);
-  return Number.isNaN(parsed.valueOf()) ? null : parsed;
-}
 
 export function leaseIsActive(lease: LeaseRecord | null, at: Date): boolean {
   if (
@@ -626,7 +587,7 @@ export function leaseIsActive(lease: LeaseRecord | null, at: Date): boolean {
       { expires_at: lease.expires_at ?? null },
     );
   }
-  const expiresAt = parseLeaseTimestamp(lease.expires_at);
+  const expiresAt = parseIsoTimestamp(lease.expires_at);
   if (expiresAt === null) {
     throw new TaskLeaseAcquireError(
       "active lease expires_at must be a valid timestamp",
@@ -1216,10 +1177,12 @@ const VALIDATION_FAILURE_CODES = new Set([
   "todo_lease_conflict",
   "write_scope_conflict",
   "authority_source_changed",
+  "corrupt_lease",
 ]);
 
 function failureKind(code: string): string {
   if (INVALID_IDENTITY_CODES.has(code)) return "invalid_identity";
+  if (code === "corrupt_lease") return "permission_denied";
   if (PERMISSION_DENIED_CODES.has(code)) return "permission_denied";
   return "writeback_rejected";
 }

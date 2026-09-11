@@ -42,6 +42,24 @@ for eligibility, source verification, write/readback and default-off behavior.
 
 ### Optional turn-start Agent reading hook
 
+Collector health does not prove that an Agent consumes every collected route.
+Verify the canonical project registry's Agent inbox pointer and the normal
+`lark-inbox drain --goal-id ... --agent-id ...` path together. For multiple
+configured chats, bind the collector configuration rather than one child inbox.
+An empty child inbox is not evidence that other routes have no updates.
+
+Connecting an async Goal Topic now fails with `agent_inbox_binding_conflict`
+before provider calls when it would replace a different enabled Agent inbox
+(including an inherited Goal inbox). Reconnecting the same inbox is unchanged.
+Reconcile route ownership explicitly through the canonical project registry;
+do not clear a multi-route binding just to make topic setup pass. This guard
+prevents silent replacement; it does not automatically merge Topic routes.
+
+Before continuing fallback work, review fresh dependency messages and write any
+resolved wait or priority change to the existing Todo/vision state. Settle the
+message after that durable effect; collection alone is not interpretation or
+permission to reply, deploy, or run work.
+
 Realtime collection is the preferred ingress, but a long-running Agent may also
 need a bounded provider-history tail at the beginning of every LoopX turn. The
 collector config can opt into `turn_start_sync`. This is not a background-only
@@ -237,9 +255,10 @@ messages; use `configured_chat_all` for complete collaboration threads:
 For every reply-enabled Inbox, a missing `reply.received_reaction_emoji`
 defaults to `Get`. Set it explicitly to the empty string to disable this
 provider write. The reaction belongs to the same explicit sender boundary as
-source-thread replies, but only the Agent's turn-start hook may create it:
-realtime collection persists events without reacting, and the hook writes the
-reaction only after it has read and confirmed a still-pending human message.
+source-thread replies. The Agent's turn-start hook creates it after reading and
+confirming a still-pending human message; the synchronous manager route creates
+it immediately before invoking the manager. Realtime collection alone persists
+events without reacting.
 The receipt therefore means "read into the Agent processing chain"; it does not
 mean "collector stored the event", "the Bot was mentioned", "a reply is due",
 or "processing completed". Mention, reply, question, and material-review
@@ -266,9 +285,16 @@ received reaction. The default `Get` satisfies that requirement; when the read
 acknowledgement is explicitly disabled, processing reaction must also be
 disabled. When both are configured, the host should run
 `lark-inbox processing` immediately before interpreting an actionable item.
-LoopX first adds the processing reaction and then removes the received
-reaction. A verified source-thread reply removes any remaining lifecycle
-reaction. If the provider cannot delete a reaction, the operation fails with a
+`reply.received_reaction_policy` selects `transient` (the generic Inbox default)
+or `retain`. With `transient`, LoopX first adds the processing reaction and then
+removes the received reaction; a verified source-thread reply removes remaining
+lifecycle reactions. With `retain`, the received reaction remains visible during
+processing and after the answer; completion removes only processing reactions.
+Generated manager routes default to `retain`, so their `Get` receipt does not
+disappear when the answer arrives. Bound Goal routes keep `transient` behavior.
+Retention uses the existing private reaction ledger across restart and replay;
+it neither recreates reactions on historical messages nor means work completed.
+If the provider cannot delete a transient reaction, the operation fails with a
 retryable cleanup status instead of claiming completion.
 
 Reaction ids are stored only in an owner-private receipt ledger under the
@@ -287,8 +313,13 @@ can read the configured chat. A profile/app mismatch fails with
 `lark_inbox_reply_sender_identity_mismatch`; a profile that cannot access the
 configured chat fails with
 `lark_inbox_reply_sender_not_in_configured_chat`. Neither failure falls back
-to another app. Public results contain only compact status/receipt fields, not
-the profile, chat id, message id, reply text, or provider payload.
+to another app. Inbox and Goal Channel replies retry only the provider's
+explicit transient `verify_failed` Bot identity state, up to three checks.
+Command failures, malformed identity responses, and configured Bot name
+mismatches fail immediately; membership, provider preview, idempotency, send,
+and readback gates remain unchanged. Public results contain only compact
+status/receipt fields, not the profile, chat id, message id, reply text, or
+provider payload.
 
 ## Host collector lifecycle
 

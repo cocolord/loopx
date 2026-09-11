@@ -4,6 +4,7 @@ import hashlib
 import json
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +20,17 @@ from .outbound import (
     lark_provider_preview_matches_outbound,
     lark_readback_matches_outbound,
     normalize_lark_outbound_text,
+    validate_lark_text_request_size,
 )
 
 CommandRunner = Callable[[Sequence[str]], Mapping[str, Any]]
+BOT_IDENTITY_VERIFY_ATTEMPTS = 3
+
+
+class BotIdentityVerification(str, Enum):
+    VERIFIED = "verified"
+    RETRYABLE_VERIFY_FAILED = "retryable_verify_failed"
+    REJECTED = "rejected"
 
 
 def _default_runner(args: Sequence[str]) -> Mapping[str, Any]:
@@ -89,6 +98,51 @@ def _message(value: Any, message_id: str) -> Mapping[str, Any] | None:
             None,
         )
     return None
+
+
+def _bot_identity_verification(
+    *,
+    runner: CommandRunner,
+    base: Sequence[str],
+    expected_name: str,
+) -> BotIdentityVerification:
+    auth = _call(runner, [*base, "auth", "status", "--verify", "--json"])
+    if auth.get("returncode") != 0:
+        return BotIdentityVerification.REJECTED
+    identities = _json_object(auth.get("stdout")).get("identities")
+    identity = identities.get("bot") if isinstance(identities, Mapping) else None
+    if not isinstance(identity, Mapping):
+        return BotIdentityVerification.REJECTED
+    if identity.get("available") is True and identity.get("verified") is True:
+        return (
+            BotIdentityVerification.VERIFIED
+            if str(identity.get("appName") or "") == expected_name
+            else BotIdentityVerification.REJECTED
+        )
+    if str(identity.get("status") or "") == "verify_failed":
+        return BotIdentityVerification.RETRYABLE_VERIFY_FAILED
+    return BotIdentityVerification.REJECTED
+
+
+def _bot_identity_verified(
+    *,
+    runner: CommandRunner,
+    base: Sequence[str],
+    expected_name: str,
+) -> bool:
+    """Retry only the provider's explicit transient verification state."""
+
+    for _attempt in range(BOT_IDENTITY_VERIFY_ATTEMPTS):
+        result = _bot_identity_verification(
+            runner=runner,
+            base=base,
+            expected_name=expected_name,
+        )
+        if result is BotIdentityVerification.VERIFIED:
+            return True
+        if result is BotIdentityVerification.REJECTED:
+            return False
+    return False
 
 
 def _result(
@@ -176,7 +230,12 @@ def _deliver_lark_inbox_outbound(
         raise ValueError(
             "lark inbox reply source message is not captured by this inbox"
         )
-    reply_text = normalize_lark_outbound_text(text)
+    reply_text = normalize_lark_outbound_text(
+        text, limit=None if source_event is not None else 1200,
+    )
+    # Reject an oversized content lower bound before building a CLI argument.
+    # The full rendered request body is checked again after provider preview.
+    validate_lark_text_request_size({"content": json.dumps({"text": reply_text}, ensure_ascii=False, separators=(",", ":"))})
     if not reply_text:
         raise ValueError("lark inbox reply requires non-empty text")
 
@@ -228,15 +287,10 @@ def _deliver_lark_inbox_outbound(
         )
 
     base = ["lark-cli", "--profile", profile]
-    auth = _call(runner, base + ["auth", "status", "--verify", "--json"])
-    identities = _json_object(auth.get("stdout")).get("identities")
-    identity = identities.get("bot", {}) if isinstance(identities, Mapping) else {}
-    identity_verified = bool(
-        auth.get("returncode") == 0
-        and isinstance(identity, Mapping)
-        and identity.get("available") is True
-        and identity.get("verified") is True
-        and str(identity.get("appName") or "") == reply_config["bot_display_name"]
+    identity_verified = _bot_identity_verified(
+        runner=runner,
+        base=base,
+        expected_name=str(reply_config["bot_display_name"]),
     )
     if not identity_verified:
         return _result(
@@ -393,6 +447,14 @@ def _deliver_lark_inbox_outbound(
             format_preflight_passed=True,
             provider_preview_performed=True,
         )
+    preview_payload = _json_object(preview.get("stdout"))
+    preview_data = preview_payload.get("data")
+    api_calls = preview_payload.get("api")
+    if not isinstance(api_calls, list) and isinstance(preview_data, Mapping):
+        api_calls = preview_data.get("api")
+    for call in api_calls if isinstance(api_calls, list) else []:
+        if isinstance(call, Mapping) and isinstance(call.get("body"), Mapping):
+            validate_lark_text_request_size(call["body"])
     guidance = None
     if before_send is not None:
         # Bind review to destination/profile as well as content and placement.

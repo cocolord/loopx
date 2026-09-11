@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 from collections.abc import Callable, Mapping
@@ -13,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ...chat_manager import MANAGER_AGENT_OBJECTIVE
+from .manager_routing import has_manager_binding
 from ..external_connector_runtime import (
     EFFECT_RECEIPT_SCHEMA_VERSION,
     ExternalEffectKind,
@@ -30,6 +33,10 @@ from .goal_channel_contracts import LarkTopicEventDecisionReason, bindings_for_g
 from .goal_channel_targets import goal_channel_target_for_name
 from .goal_topic_connections import decide_lark_topic_event
 from .inbox_reply import CommandRunner, reply_lark_event_inbox
+from .outbound import LarkOutboundTextError
+from .inbox_reactions import (
+    _create_reaction, _delete_reaction, ensure_lark_event_inbox_received_reaction,
+)
 
 Answer = Callable[[Mapping[str, Any], str], str | Mapping[str, Any]]
 SnapshotProvider = Callable[[], Mapping[str, Any]]
@@ -37,6 +44,34 @@ ProfilePoller = Callable[[str, threading.Event], None]
 SimpleRunner = Callable[[list[str]], Mapping[str, Any]]
 ProcessFactory = Callable[[list[str]], Any]
 HealthSink = Callable[[Mapping[str, Any]], None]
+
+
+class LarkGoalTopicTurnFailed(RuntimeError):
+    """A terminal runtime receipt, without copying arbitrary upstream details."""
+
+    def __init__(self, error_code: str, effect_receipt: Mapping[str, Any]) -> None:
+        super().__init__("Lark Goal Topic turn did not complete")
+        self.error_code = error_code
+        self.effect_receipt = effect_receipt
+
+
+def _manager_failure_reply(error: Exception) -> tuple[str, str]:
+    labels = {
+        "cyber_policy": "上游安全策略拦截",
+        "misalignment_policy_violation": "上游策略拦截",
+        "usage_limit_exceeded": "上游用量限制",
+        "rate_limit_exceeded": "上游请求频率限制",
+        "context_window_exceeded": "上下文超限",
+        "unauthorized": "上游身份验证失败",
+        "idle_timeout": "等待上游响应超时",
+        "hard_timeout": "处理超过时间限制",
+        "interrupted": "处理已中断",
+        "manager_authorization_unavailable": "当前连接的授权范围不可用",
+    }
+    raw_code = error.error_code if isinstance(error, LarkGoalTopicTurnFailed) else ""
+    code = raw_code if raw_code in labels else "processing_failed"
+    label = labels.get(code, "管家处理失败")
+    return code, f"已收到你的消息，但本次未能完成：{label}。没有生成完整答复，本次请求不会自动重放。"
 
 
 _EVENT_PROJECTION = (
@@ -55,11 +90,27 @@ _EVENT_PROJECTION = (
 
 _EVENT_READY_PREFIX = "[event] ready "
 _EVENT_DIAGNOSTIC_PREFIX = "[event] "
+_EVENT_EXIT_REASON = re.compile(r"\(reason: (limit|timeout|signal)\)$")
 
 
 def _opaque_digest(*values: Any) -> str:
     joined = "\0".join(str(value or "") for value in values)
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:32]
+
+
+def _session_turn_effect(route: Mapping[str, Any]) -> dict[str, Any]:
+    # Committed means the runtime has persisted a terminal receipt, not that
+    # the model succeeded. Response verification remains a separate ACK gate.
+    return {
+        "schema_version": EFFECT_RECEIPT_SCHEMA_VERSION,
+        "event_id": str(route.get("event_id") or route.get("message_id") or ""),
+        "effect_id": "session-turn-" + _opaque_digest(
+            route.get("session_id"), route.get("message_id"),
+            route.get("topic_root_message_id"),
+        ),
+        "effect_kind": ExternalEffectKind.WORKING_SESSION_TURN.value,
+        "status": "committed",
+    }
 
 
 def _active_profile_configs(snapshot: Mapping[str, Any]) -> dict[str, dict[str, str]]:
@@ -270,7 +321,9 @@ def poll_lark_goal_topic_profile_once(
         target_ref, _target = target_match
         routed_event = dict(event)
         root_id = str(routed_event.get("root_id") or "")
-        if not MESSAGE_ID_PATTERN.fullmatch(root_id):
+        if not MESSAGE_ID_PATTERN.fullmatch(root_id) and not has_manager_binding(
+            binding_payloads, target_ref
+        ):
             candidate_roots = _topic_roots_for_target(
                 binding_payloads,
                 target_ref=target_ref,
@@ -383,6 +436,7 @@ def stream_lark_goal_topic_profile(
     event_count = 0
     replied_count = 0
     provider_ready = False
+    exit_reason: str | None = None
     try:
         stdout = process.stdout
         if stdout is None:
@@ -400,6 +454,10 @@ def stream_lark_goal_topic_profile(
                 provider_ready = True
                 if health_sink is not None:
                     health_sink({"status": "listening", "error_code": None})
+                continue
+            if stripped.startswith("[event] exited "):
+                match = _EVENT_EXIT_REASON.search(stripped)
+                exit_reason = match.group(1) if match else None
                 continue
             if stripped.startswith(_EVENT_DIAGNOSTIC_PREFIX):
                 continue
@@ -465,11 +523,20 @@ def stream_lark_goal_topic_profile(
             returncode = process.wait(timeout=3)
         watcher.join(timeout=1)
     stopped = stop.is_set()
+    # A bus can die after registering the consumer and tell the CLI to exit
+    # successfully with reason=signal (e.g. a Feishu/Lark domain mismatch).
+    # Only our own stop or the requested bound is a planned stream ending.
+    unexpected_exit = provider_ready and not stopped and (
+        returncode != 0 or exit_reason not in {"limit", "timeout"}
+    )
     return {
-        "ok": stopped or (returncode == 0 and provider_ready),
+        "ok": stopped or (returncode == 0 and provider_ready and not unexpected_exit),
+        **({"error_code": "lark_event_source_disconnected"} if unexpected_exit else {}),
         "status": (
             "stopped"
             if stopped
+            else "source_disconnected"
+            if unexpected_exit
             else "stream_ended"
             if provider_ready
             else "stream_not_ready"
@@ -587,20 +654,7 @@ class LarkGoalTopicRuntimeService:
                     )
                     return {
                         "response_text": response_text,
-                        "effect_receipt": {
-                            "schema_version": EFFECT_RECEIPT_SCHEMA_VERSION,
-                            "event_id": str(
-                                route.get("event_id") or route.get("message_id") or ""
-                            ),
-                            "effect_id": "session-turn-"
-                            + _opaque_digest(
-                                route.get("session_id"),
-                                route.get("message_id"),
-                                route.get("topic_root_message_id"),
-                            ),
-                            "effect_kind": ExternalEffectKind.WORKING_SESSION_TURN.value,
-                            "status": "committed",
-                        },
+                        "effect_receipt": _session_turn_effect(route),
                     }
 
                 result = stream_lark_goal_topic_profile(
@@ -622,7 +676,7 @@ class LarkGoalTopicRuntimeService:
                     error_code=(
                         None
                         if result.get("ok") is True
-                        else "lark_event_listener_failed"
+                        else str(result.get("error_code") or "lark_event_listener_failed")
                     ),
                     restart_count=restart_count,
                 )
@@ -712,7 +766,9 @@ class LarkGoalTopicRuntimeService:
                             self.runtime_controller.resume_session_queue(
                                 session_id=session_id,
                                 work_dir=resolved_work_dir,
-                                objective=str(context.get("objective") or goal_id),
+                                objective=MANAGER_AGENT_OBJECTIVE
+                                if routing.get("conversation_kind") == "manager"
+                                else str(context.get("objective") or goal_id),
                             )
 
     def active_profiles(self) -> list[str]:
@@ -743,13 +799,25 @@ def answer_lark_goal_topic(
     goal_id = str(route.get("goal_id") or "")
     ingress_mode = str(route.get("ingress_mode") or "direct_session")
     session_id = str(route.get("session_id") or "")
-    agent_id = str(route.get("agent_id") or "codex")
-    resolved_work_dir = Path(work_dir).expanduser().resolve()
-    message = (
-        "这是来自已绑定 Lark Goal Topic 的用户消息。请直接回答当前问题；"
-        "任何 Goal、Todo 或其他持久状态修改只生成预览，等待用户在 LoopX 明确确认后应用。\n\n"
-        f"用户消息：{str(text or '').strip()}"
+    manager = route.get("conversation_kind") == "manager"
+    agent_id = (
+        str(route.get("executor_endpoint_id") or "codex")
+        if manager
+        else str(route.get("agent_id") or "codex")
     )
+    expected_channel = (
+        str(route.get("manager_channel_id") or "") if manager else f"goal.{goal_id}"
+    )
+    if manager:
+        objective = MANAGER_AGENT_OBJECTIVE
+    resolved_work_dir = Path(work_dir).expanduser().resolve()
+    instruction = (
+        "对已有授权的意图委托使用 context_handoff，直接交给目标 Agent 自主判断并推进，"
+        "不要添加确认或直接替它改优先级。"
+        if manager else
+        "任何 Goal、Todo 或其他持久状态修改只生成预览，等待用户在 LoopX 明确确认后应用。"
+    )
+    message = "这是来自已绑定 Lark Goal Topic 的用户消息。请直接回答当前问题；" + instruction + "\n\n用户消息：" + str(text or "").strip()
     client_turn_id = "lark." + _opaque_digest(
         route.get("message_id"),
         route.get("topic_root_message_id"),
@@ -758,9 +826,9 @@ def answer_lark_goal_topic(
         session = runtime_controller.store.load_session(session_id)
         if (
             session is None
-            or session.get("goal_id") != goal_id
+            or (not manager and session.get("goal_id") != goal_id)
             or session.get("agent_id") != agent_id
-            or session.get("channel_id") != f"goal.{goal_id}"
+            or session.get("channel_id") != expected_channel
             or session.get("status") == "closed"
         ):
             raise RuntimeError(
@@ -773,6 +841,13 @@ def answer_lark_goal_topic(
                 message=message,
             )
         else:
+            if manager and route.get("source_sender_id") and hasattr(runtime_controller.store, "root"):
+                from ...capabilities.manager_context import register_ingress
+                register_ingress(runtime_controller.store.root.parent,
+                                 session_id=session_id, client_turn_id=client_turn_id,
+                                 channel=expected_channel, sender_id=str(route["source_sender_id"]),
+                                 message=message, source_id="lark:" + str(route["message_id"]),
+                                 source_message=str(text or "").strip())
             turn, _created = runtime_controller.enqueue_turn(
                 session_id=session_id,
                 client_turn_id=client_turn_id,
@@ -810,7 +885,11 @@ def answer_lark_goal_topic(
         turn_id=str(turn["turn_id"]),
     )
     if completed.get("status") != "completed":
-        raise RuntimeError(str(completed.get("error") or "Lark Goal Topic turn failed"))
+        if completed.get("status") not in {"failed", "timed_out", "interrupted"}:
+            raise RuntimeError("Lark Goal Topic turn has no terminal receipt")
+        raise LarkGoalTopicTurnFailed(
+            str(completed.get("error_code") or ""), _session_turn_effect(route),
+        )
     response = completed.get("response")
     reply_text = (
         str(response.get("message") or "") if isinstance(response, Mapping) else ""
@@ -859,6 +938,9 @@ def _inbox_config(
             "chat_id": chat_id,
             "placement_policy": "source_context",
             "editorial_style": "bullet_points_preferred",
+            "received_reaction_policy": (
+                "retain" if route.get("conversation_kind") == "manager" else "transient"
+            ),
         },
     }
     config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -928,6 +1010,7 @@ def process_lark_goal_topic_event(
         "create_time": str(event.get("create_time") or ""),
         "content": str(event.get("content") or ""),
         "sender_type": str(event.get("sender_type") or ""),
+        "sender_id": str(event.get("sender_id") or ""),
         "root_id": str(event.get("root_id") or ""),
         "parent_id": str(event.get("parent_id") or ""),
         "mentions": event.get("mentions")
@@ -964,20 +1047,46 @@ def process_lark_goal_topic_event(
             "agent_id": route.get("agent_id"),
             "inbox_config_ref": config_ref,
         }
-    answer_result = answer(route, canonical["content"])
+    # Receipt ACK is visible while the synchronous manager is reasoning. The
+    # private reaction ledger makes retries idempotent. Manager received ACKs
+    # remain visible; final reply only clears transient processing indicators.
+    # A cosmetic reaction failure must not suppress the actual answer.
+    received_reaction = None
+    if route.get("conversation_kind") == "manager":
+        profile = str(route.get("app_ref") or "")
+        try:
+            received_reaction = ensure_lark_event_inbox_received_reaction(
+                project=root, config_path=config_path, event=canonical,
+                create_reaction=lambda mid, emoji: _create_reaction(
+                    runner=reply_runner, profile=profile, message_id=mid, emoji_type=emoji),
+                delete_reaction=lambda mid, rid: _delete_reaction(
+                    runner=reply_runner, profile=profile, message_id=mid, reaction_id=rid),
+            )
+        except (OSError, ValueError):
+            received_reaction = {"ok": False, "status": "reaction_state_unavailable"}
+        if not received_reaction.get("ok"):
+            logging.getLogger(__name__).warning("Lark manager received reaction was not verified")
+    # Sender provenance comes from the provider event, never the model response.
+    route = {**route, "source_sender_id": str(canonical.get("sender_id") or "")}
+    failure_code = None
+    try:
+        answer_result = answer(route, canonical["content"])
+    except LarkGoalTopicTurnFailed as exc:
+        if route.get("conversation_kind") != "manager":
+            raise
+        failure_code, failure_text = _manager_failure_reply(exc)
+        answer_result = {"response_text": failure_text, "effect_receipt": exc.effect_receipt}
     connector = route.get("connector")
     connector = connector if isinstance(connector, Mapping) else None
     effect_receipt: Mapping[str, Any] | None = None
     if isinstance(answer_result, Mapping):
-        reply_text = " ".join(str(answer_result.get("response_text") or "").split())[
-            :1200
-        ]
+        reply_text = str(answer_result.get("response_text") or "").strip()
         candidate_receipt = answer_result.get("effect_receipt")
         effect_receipt = (
             candidate_receipt if isinstance(candidate_receipt, Mapping) else None
         )
     else:
-        reply_text = " ".join(str(answer_result or "").split())[:1200]
+        reply_text = str(answer_result or "").strip()
     if not reply_text:
         return {
             "ok": False,
@@ -999,14 +1108,31 @@ def process_lark_goal_topic_event(
                 "inbox_config_ref": config_ref,
                 "ack_decision": effect_decision,
             }
-    reply = reply_lark_event_inbox(
-        project=root,
-        config_path=config_path,
-        message_id=message_id,
-        text=reply_text,
-        execute=True,
-        runner=reply_runner,
-    )
+    try:
+        reply = reply_lark_event_inbox(
+            project=root,
+            config_path=config_path,
+            message_id=message_id,
+            text=reply_text,
+            execute=True,
+            runner=reply_runner,
+        )
+    except LarkOutboundTextError:
+        if route.get("conversation_kind") != "manager":
+            raise
+        # The persisted answer remains intact. A format failure is not a model
+        # failure, and must not strand the source or silently truncate its reply.
+        failure_code = "reply_format_invalid"
+        reply = reply_lark_event_inbox(
+            project=root,
+            config_path=config_path,
+            message_id=message_id,
+            text=("回答已生成并保存，但长度或格式不符合飞书发送要求，正文尚未送达。"
+                  "请在 LoopX 前端同一管家会话查看完整回答。"
+                  "管家不会自动重新运行这条请求。"),
+            execute=True,
+            runner=reply_runner,
+        )
     if not reply.get("ok"):
         return {
             "ok": False,
@@ -1045,8 +1171,11 @@ def process_lark_goal_topic_event(
     )
 
     return {
-        "ok": True,
-        "status": "replied_and_acknowledged",
+        "ok": failure_code is None,
+        "status": "processing_failed" if failure_code else "replied_and_acknowledged",
+        **({"reason": failure_code, "failure_reply_verified": True,
+            "source_acknowledged": True} if failure_code else {}),
+        "received_reaction_status": (received_reaction or {}).get("status"),
         "goal_id": route["goal_id"],
         "inbox_config_ref": config_ref,
     }

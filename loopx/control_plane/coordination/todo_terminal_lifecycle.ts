@@ -33,7 +33,7 @@ import {
 import {
   evaluateCoordinationTodoTerminalDecision,
   type CoordinationTodoTerminalDecisionResult,
-} from "./todo_terminal_decision.ts";
+} from "./todo_lifecycle_decision.ts";
 import {
   reduceTodoCompletionTransaction,
   TODO_COMPLETION_TRANSACTION_REQUEST_SCHEMA,
@@ -46,6 +46,7 @@ import {
   normalizeWriteScopes,
 } from "../work_items/task_lease_acquire.ts";
 import { selectCoordinationTodoArchive } from "./todo_archive_selection.ts";
+import { userTodoScopeConflict, USER_TODO_TASK_CLASSES } from "../todos/authoring_scope.ts";
 import {
   deriveCoordinationTodoSuccessorProposals,
   TODO_SUCCESSOR_DERIVATION_REQUEST_SCHEMA,
@@ -68,7 +69,6 @@ const COMPLETION_IDENTITY_SOURCES = [
   "unscoped_completion",
   "lifecycle_reentry",
 ] as const;
-const USER_TODO_TASK_CLASSES = new Set(["user_action", "user_gate"]);
 
 type TerminalCommand = typeof TERMINAL_COMMANDS[number];
 type TodoRole = typeof TODO_ROLES[number];
@@ -109,6 +109,7 @@ export interface CoordinationTodoArchiveInput {
   readonly role: TodoRole;
   readonly max_active_done: number;
   readonly operation_id: string;
+  readonly expected_provider_revision?: string;
   readonly dry_run: boolean;
   readonly now: Date;
 }
@@ -257,39 +258,25 @@ function validateSuccessorSemantics(
         "generated User successor cannot carry claimed_by ownership",
       );
     }
-    if (boundAgent !== null && goalBound === true) {
-      throw new AuthorityStoreProtocolError(
-        "generated User successor cannot be both agent-bound and goal-bound",
-      );
+    const scopeConflict = userTodoScopeConflict(taskClass, {
+      bound_agent: boundAgent, goal_bound: goalBound, blocks_agent: blocksAgent, global_gate: globalGate,
+    }, registeredAgents.length);
+    // Preserve the terminal protocol's diagnostic vocabulary. The invariant is
+    // shared; a resolved successor never goes through draft authoring inference.
+    if (scopeConflict === "binding_conflict") {
+      throw new AuthorityStoreProtocolError("generated User successor cannot be both agent-bound and goal-bound");
     }
     if (taskClass === "user_action" && (blocksAgent !== null || globalGate === true)) {
-      throw new AuthorityStoreProtocolError(
-        "generated user_action successor cannot carry blocking gate scope",
-      );
+      throw new AuthorityStoreProtocolError("generated user_action successor cannot carry blocking gate scope");
     }
-    if (taskClass === "user_gate") {
-      if (globalGate === true &&
-          (blocksAgent !== null || boundAgent !== null || goalBound !== true)) {
-        throw new AuthorityStoreProtocolError(
-          "goal-wide User gate successor requires goal_bound and no Agent binding",
-        );
-      }
-      if (blocksAgent !== null &&
-          (goalBound === true || boundAgent !== blocksAgent)) {
-        throw new AuthorityStoreProtocolError(
-          "Agent-scoped User gate successor must bind to its blocks_agent",
-        );
-      }
-      if (registeredAgents.length > 1 && blocksAgent === null && globalGate !== true) {
-        throw new AuthorityStoreProtocolError(
-          "multi-agent User gate successor requires an explicit blocking scope",
-        );
-      }
-    }
-    if (registeredAgents.length > 1 && boundAgent === null && goalBound !== true) {
-      throw new AuthorityStoreProtocolError(
-        "multi-agent User successor requires an explicit Agent or Goal binding",
-      );
+    if (scopeConflict) {
+      throw new AuthorityStoreProtocolError({
+        gate_scope_conflict: "goal-wide User gate successor requires goal_bound and no Agent binding",
+        global_binding_conflict: "goal-wide User gate successor requires goal_bound and no Agent binding",
+        agent_binding_conflict: "Agent-scoped User gate successor must bind to its blocks_agent",
+        gate_scope_missing: "multi-agent User gate successor requires an explicit blocking scope",
+        binding_missing: "multi-agent User successor requires an explicit Agent or Goal binding",
+      }[scopeConflict]);
     }
   }
 }
@@ -1107,6 +1094,11 @@ function normalizeArchiveInput(raw: CoordinationTodoArchiveInput): CoordinationT
     goal_id: requireAuthorityStoreId(raw.goal_id, "goal id"),
     role: requireLiteral(raw.role, TODO_ROLES, "role"),
     operation_id: requireAuthorityStoreId(raw.operation_id, "operation id"),
+    ...(raw.expected_provider_revision === undefined ? {} : {
+      expected_provider_revision: requireAuthorityStoreId(
+        raw.expected_provider_revision, "expected provider revision",
+      ),
+    }),
     dry_run: requireBoolean(raw.dry_run, "dry_run"),
     now: requireDate(raw.now, "now"),
   };
@@ -1136,6 +1128,7 @@ function replayArchive(
   return {
     ...result,
     schema_version: COORDINATION_TODO_ARCHIVE_RESULT_SCHEMA,
+    operation_id: input.operation_id,
     status,
     changed: status !== "replayed" && result.changed === true,
     provider_revision: receipt.provider_revision,
@@ -1165,14 +1158,31 @@ export async function executeCoordinationTodoArchiveCompleted(
     role: input.role,
     max_active_done: input.max_active_done,
     dry_run: input.dry_run,
+    ...(input.expected_provider_revision === undefined ? {} : {
+      expected_provider_revision: input.expected_provider_revision,
+    }),
   });
-  const replay = replayArchive(
-    await store.readReceipt(input.operation_id), input, requestSha, "replayed",
-  );
-  if (replay !== null) return replay;
+  // Preview observes the current snapshot without consuming or replaying a
+  // durable operation identity. Historical receipts precede current-head CAS.
+  if (!input.dry_run) {
+    const replay = replayArchive(
+      await store.readReceipt(input.operation_id), input, requestSha, "replayed",
+    );
+    if (replay !== null) return replay;
+  }
   const head = await store.loadAuthority();
   if (head.status !== "loaded") {
     return {schema_version: COORDINATION_TODO_ARCHIVE_RESULT_SCHEMA, ...head, changed: false};
+  }
+  if (input.expected_provider_revision !== undefined &&
+      head.provider_revision !== input.expected_provider_revision) {
+    return {
+      schema_version: COORDINATION_TODO_ARCHIVE_RESULT_SCHEMA,
+      status: "conflict", changed: false,
+      conflict_kind: "provider_revision_mismatch",
+      current_provider_revision: head.provider_revision,
+      current_cursor: head.cursor,
+    };
   }
   let projection: ReturnType<typeof indexCoordinationProjection>;
   try {
@@ -1193,6 +1203,7 @@ export async function executeCoordinationTodoArchiveCompleted(
   const updatedAt = input.now.toISOString().replace(/\.\d{3}Z$/u, "Z");
   const result: JsonObject = {
     role: selection.role,
+    operation_id: input.operation_id,
     changed: moved.length > 0,
     active_done_before: selection.active_done_before,
     active_done_after: selection.active_done_after,

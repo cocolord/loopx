@@ -3,15 +3,22 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .capabilities.pr_review_queue import (
+    PullRequestSchedulingLane,
     build_agent_response_contract,
-    build_review_plan,
-    build_review_template,
+    build_scheduling_policy,
+    classify_scheduling_lane,
+    community_feedback_ready,
+    exact_head_key,
+    materialize_review_execution,
+    normalize_fresh_audit_exact_heads,
+    scheduling_sort_key,
+    scheduling_tier,
 )
 from .control_plane.runtime.time import now_utc_iso
 from .presentation.markdown import as_dict as _as_dict
@@ -44,7 +51,6 @@ AUTHOR_OWNED_REQUEST_CHANGES_FALLBACK_TITLE = (
     "Request changes conclusion (author-owned PR; GitHub blocks formal self-review)"
 )
 REVIEW_CONCLUSION_SCHEMA_VERSION = "pull_request_review_conclusion_v0"
-
 RUNTIME_OR_CLI_PREFIXES = (
     "src/",
     "lib/",
@@ -121,6 +127,8 @@ def _run_gh_json(args: list[str], *, cwd: Path | None = None) -> Any:
         cwd=cwd,
         check=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -189,6 +197,7 @@ def resolve_current_github_login(*, cwd: Path | None = None) -> str | None:
     if not isinstance(payload, dict):
         return None
     return str(payload.get("login") or "").strip() or None
+
 
 def _parse_timestamp(value: object) -> datetime | None:
     text = str(value or "").strip()
@@ -854,12 +863,18 @@ def _review_conclusion(
         key=lambda item: _parse_updated_epoch(item.get("submittedAt")),
         reverse=True,
     )
+    reviewer_owns_pr = bool(
+        reviewer_login
+        and pr_author
+        and reviewer_login.casefold() == pr_author.casefold()
+    )
     if not reviews:
         return {
             "schema_version": REVIEW_CONCLUSION_SCHEMA_VERSION,
             "status": "missing",
             "valid": False,
             "state": None,
+            "verdict": None,
             "reviewer": None,
             "submitted_at": None,
             "invalid_reasons": ["no_review_conclusion_available"],
@@ -871,17 +886,18 @@ def _review_conclusion(
         english_verdict = _english_review_verdict(body)
         review_author = str(_as_dict(review.get("author")).get("login") or "").strip()
         commit_oid = str(_as_dict(review.get("commit")).get("oid") or "").strip()
-        author_owned = bool(
+        review_is_by_pr_author = bool(
             review_author
             and pr_author
             and review_author.casefold() == pr_author.casefold()
         )
+        author_owned_fallback = review_is_by_pr_author and reviewer_owns_pr
         reasons: list[str] = []
         if not head_oid or commit_oid.casefold() != head_oid.casefold():
             reasons.append("review_not_bound_to_current_head")
         if not _review_body_has_required_format(body, head_oid=head_oid):
             reasons.append("review_body_missing_standalone_bilingual_format")
-        if author_owned:
+        if author_owned_fallback:
             expected_title = {
                 "APPROVE": AUTHOR_OWNED_APPROVAL_FALLBACK_TITLE,
                 "REQUEST_CHANGES": AUTHOR_OWNED_REQUEST_CHANGES_FALLBACK_TITLE,
@@ -903,6 +919,7 @@ def _review_conclusion(
             "status": "valid" if not reasons else "invalid",
             "valid": not reasons,
             "state": state or None,
+            "verdict": english_verdict,
             "reviewer": review_author or reviewer_login,
             "submitted_at": review.get("submittedAt"),
             "invalid_reasons": reasons,
@@ -920,45 +937,6 @@ def _review_conclusion(
     return latest_result
 
 
-def _review_action_kind(item: Mapping[str, Any]) -> str | None:
-    if item.get("is_draft") is True or str(item.get("state") or "").upper() != "OPEN":
-        return None
-    conclusion = _as_dict(item.get("review_conclusion"))
-    if conclusion.get("valid") is True:
-        if str(conclusion.get("state") or "").upper() == "APPROVED":
-            return "qualify_pull_request_merge_readiness"
-        return None
-    if str(item.get("review_decision") or "").upper() == "CHANGES_REQUESTED":
-        return "rereview_pull_request_exact_head"
-    return "review_pull_request_exact_head"
-
-
-def _review_priority(pr: dict[str, Any]) -> tuple[int, float, float, int]:
-    is_draft = bool(pr.get("isDraft") or pr.get("is_draft"))
-    state = str(pr.get("state") or "").upper()
-    action_kind = pr.get("review_action_kind")
-    author_owned = pr.get("author_owned") is True
-    age_hours = float(pr.get("review_ready_age_hours") or 0.0)
-    if is_draft:
-        bucket = 6
-    elif state == "MERGED":
-        bucket = 5
-    elif state == "CLOSED":
-        bucket = 7
-    elif action_kind is None:
-        bucket = 4
-    elif not author_owned or age_hours >= 48:
-        bucket = 0
-    elif age_hours >= 24:
-        bucket = 1
-    else:
-        bucket = 2
-    ready_epoch = _parse_updated_epoch(pr.get("review_ready_at"))
-    created_epoch = _parse_updated_epoch(pr.get("created_at"))
-    number = int(pr.get("number") or 0)
-    return (bucket, ready_epoch, created_epoch, number)
-
-
 def _review_sequence_entry(item: dict[str, Any], *, rank: int) -> dict[str, Any]:
     main_risk = _as_dict(item.get("main_regression_analysis"))
     return {
@@ -974,7 +952,9 @@ def _review_sequence_entry(item: dict[str, Any], *, rank: int) -> dict[str, Any]
         "review_ready_at": item.get("review_ready_at"),
         "review_ready_age_hours": item.get("review_ready_age_hours"),
         "author_owned": item.get("author_owned") is True,
+        "community_feedback_ready": item.get("community_feedback_ready") is True,
         "scheduling_lane": item.get("scheduling_lane"),
+        "scheduling_tier": item.get("scheduling_tier"),
         "review_action_kind": item.get("review_action_kind"),
         "review_conclusion_status": _as_dict(item.get("review_conclusion")).get(
             "status"
@@ -988,6 +968,7 @@ def _normalize_pr(
     *,
     reviewer_login: str | None,
     generated_at: datetime,
+    fresh_audit_exact_heads: set[str],
 ) -> dict[str, Any]:
     files = _files(pr)
     checks = _checks(pr)
@@ -1028,6 +1009,7 @@ def _normalize_pr(
         "author_owned": bool(
             reviewer_login and author.casefold() == reviewer_login.casefold()
         ),
+        "community_feedback_ready": False,
         "closed_at": pr.get("closedAt"),
         "merged_at": pr.get("mergedAt"),
         "merge_commit": _redact_text(merge_commit_oid, limit=80)
@@ -1056,28 +1038,19 @@ def _normalize_pr(
         "risk_notes": _risk_notes(pr, files),
         "metadata_risk_hint": _metadata_risk_hint(pr, files, checks),
         "main_regression_analysis": _main_regression_analysis(pr, files),
-        "review_goal": "Fill the five-block review template after reading the PR body and diff.",
-        "evidence_commands": [
-            f"gh pr view {number} --json title,body,files,commits,statusCheckRollup,headRefOid,updatedAt",
-            f"gh pr diff {number} --name-only",
-            f"gh pr diff {number} --patch",
-            f"gh pr view {number} --json headRefOid,updatedAt",
-        ]
-        if number
-        else [],
     }
-    item["review_action_kind"] = _review_action_kind(item)
-    if item["author_owned"]:
-        if ready_age_hours >= 48:
-            item["scheduling_lane"] = "author_owned_aged_48h"
-        elif ready_age_hours >= 24:
-            item["scheduling_lane"] = "author_owned_aged_24h"
-        else:
-            item["scheduling_lane"] = "author_owned_fallback"
-    else:
-        item["scheduling_lane"] = "community"
-    item["review_plan"] = build_review_plan(item)
-    item["review_template"] = build_review_template(item)
+    item.update(
+        materialize_review_execution(
+            item, fresh_audit_exact_heads=fresh_audit_exact_heads
+        )
+    )
+    item["community_feedback_ready"] = bool(
+        not item["author_owned"]
+        and item["review_action_kind"] == "rereview_pull_request_exact_head"
+        and community_feedback_ready(pr, review_ready_at=ready_at)
+    )
+    item["scheduling_lane"] = classify_scheduling_lane(item).value
+    item["scheduling_tier"] = scheduling_tier(item)
     return item
 
 
@@ -1091,15 +1064,18 @@ def build_pr_review_packet(
     since: str | None = None,
     source_scan: Mapping[str, Any] | None = None,
     reviewer_login: str | None = None,
+    fresh_audit_exact_heads: Sequence[str] = (),
 ) -> dict[str, Any]:
     normalized_state_filter = normalize_pr_state_filter(state_filter)
     generated_at_text = _now_iso()
     generated_at = _parse_timestamp(generated_at_text) or datetime.now(timezone.utc)
+    requested_fresh_audits = normalize_fresh_audit_exact_heads(fresh_audit_exact_heads)
     normalized_all = [
         _normalize_pr(
             item,
             reviewer_login=reviewer_login,
             generated_at=generated_at,
+            fresh_audit_exact_heads=requested_fresh_audits,
         )
         for item in pull_requests
     ]
@@ -1109,7 +1085,7 @@ def build_pr_review_packet(
         if (normalized_state_filter == "all" or str(item.get("state") or "").lower() == normalized_state_filter)
         and _include_pr_in_window(item, since=since)
     ]
-    normalized_all.sort(key=_review_priority)
+    normalized_all.sort(key=scheduling_sort_key)
     packet_limit = max(1, limit)
     unmerged_all = [item for item in normalized_all if str(item.get("state") or "").upper() != "MERGED"]
     merged_all = [item for item in normalized_all if str(item.get("state") or "").upper() == "MERGED"]
@@ -1121,6 +1097,15 @@ def build_pr_review_packet(
         normalized = normalized_all[:packet_limit]
         unmerged_items = [item for item in normalized if str(item.get("state") or "").upper() != "MERGED"]
         merged_items = [item for item in normalized if str(item.get("state") or "").upper() == "MERGED"]
+    observed_exact_heads = {
+        key for item in normalized if (key := exact_head_key(item))
+    }
+    missing_fresh_audits = requested_fresh_audits - observed_exact_heads
+    if missing_fresh_audits:
+        raise ValueError(
+            "fresh audit exact head is absent from the current result window: "
+            + ", ".join(sorted(missing_fresh_audits))
+        )
     source_scan_complete = (
         source_scan.get("complete") is True
         if isinstance(source_scan, Mapping)
@@ -1178,18 +1163,24 @@ def build_pr_review_packet(
         ),
         "source_scan": source_scan_summary,
     }
-    review_sequence = [_review_sequence_entry(item, rank=index) for index, item in enumerate(normalized, start=1)]
+    actionable_items = [item for item in normalized if item.get("review_action_kind")]
     open_review_required = [
         item
-        for item in normalized
+        for item in actionable_items
         if str(item.get("state") or "").upper() == "OPEN"
-        and not item.get("is_draft")
-        and item.get("review_action_kind")
-        in {"review_pull_request_exact_head", "rereview_pull_request_exact_head"}
+    ]
+    merged_review_required = [
+        item
+        for item in actionable_items
+        if str(item.get("state") or "").upper() == "MERGED"
+    ]
+    review_sequence = [
+        _review_sequence_entry(item, rank=index)
+        for index, item in enumerate(actionable_items, start=1)
     ]
     closed_items = [item for item in normalized if str(item.get("state") or "").upper() == "CLOSED"]
     first = review_sequence[0] if review_sequence else None
-    review_attention_count = len(open_review_required) + len(merged_items)
+    review_attention_count = len(actionable_items)
     open_items = [item for item in normalized if str(item.get("state") or "").upper() == "OPEN"]
     review_groups = {
         "unmerged": {
@@ -1202,9 +1193,11 @@ def build_pr_review_packet(
             "observed_count": group_observed_counts["unmerged"],
             "truncated": not group_completeness["unmerged"],
             "pr_numbers": [item.get("number") for item in unmerged_items],
+            "actionable_count": len(open_review_required),
+            "no_action_count": len(unmerged_items) - len(open_review_required),
             "review_sequence": [
                 _review_sequence_entry(item, rank=index)
-                for index, item in enumerate(unmerged_items, start=1)
+                for index, item in enumerate(open_review_required, start=1)
             ],
         },
         "merged": {
@@ -1217,9 +1210,11 @@ def build_pr_review_packet(
             "observed_count": group_observed_counts["merged"],
             "truncated": not group_completeness["merged"],
             "pr_numbers": [item.get("number") for item in merged_items],
+            "actionable_count": len(merged_review_required),
+            "no_action_count": len(merged_items) - len(merged_review_required),
             "review_sequence": [
                 _review_sequence_entry(item, rank=index)
-                for index, item in enumerate(merged_items, start=1)
+                for index, item in enumerate(merged_review_required, start=1)
             ],
         },
     }
@@ -1249,6 +1244,7 @@ def build_pr_review_packet(
             },
             "source": source,
             "reviewer_login": reviewer_login,
+            "fresh_audit_exact_heads": sorted(requested_fresh_audits),
             "include": [
                 "pull_request_list",
                 "result_completeness",
@@ -1262,6 +1258,7 @@ def build_pr_review_packet(
                 "main_regression_analysis",
                 "risk_notes",
                 "review_sequence",
+                "scheduling_policy",
             ],
             "privacy_mode": "public_safe_github_metadata",
             "dry_run": True,
@@ -1275,12 +1272,15 @@ def build_pr_review_packet(
             "closed_pr_count": len(closed_items),
             "review_attention_count": review_attention_count,
             "open_review_attention_count": len(open_review_required),
-            "post_merge_review_count": len(merged_items),
+            "post_merge_review_count": len(merged_review_required),
             "draft_count": sum(1 for item in normalized if item.get("is_draft")),
             "source_surfaces": SOURCE_SURFACES,
             "recommended_first_pr": first,
         },
         "result_completeness": result_completeness,
+        "scheduling_policy": build_scheduling_policy(
+            authenticated_developer_login=reviewer_login
+        ),
         "review_sequence": review_sequence,
         "review_groups": review_groups,
         "pull_requests": normalized,
@@ -1291,7 +1291,7 @@ def build_pr_review_packet(
                 "kind": "review",
                 "requires_user_approval": False,
                 "requires_maintainer_authority": False,
-                "preview": "Start with the first age-fair actionable PR in review_sequence, read its motivation, inspect key files, then decide approve/request changes/defer.",
+                "preview": "Start with the first capability-ranked actionable PR in review_sequence, read its motivation, inspect key files, then decide approve/request changes/defer.",
             },
             {
                 "action_id": "act_merge_after_review",
@@ -1310,9 +1310,11 @@ def build_pr_review_packet(
 
 
 def _review_why_now(item: dict[str, Any]) -> str:
+    if item.get("fresh_audit_requested") is True:
+        return "A caller explicitly requested a fresh audit of this unchanged exact head."
     state = str(item.get("state") or "").upper()
     if state == "MERGED":
-        return "Merged in the review window; audit outcome, validation, and follow-up quality."
+        return "Merged exact head lacks a valid conclusion; audit outcome, validation, and follow-up quality."
     if state == "CLOSED":
         return "Closed without a merge signal; check whether a replacement or cleanup is needed."
     if item.get("is_draft"):
@@ -1323,7 +1325,14 @@ def _review_why_now(item: dict[str, Any]) -> str:
             return "The current exact head has a complete approval; qualify merge readiness."
         return "The current exact head already has a complete standalone conclusion."
     if item.get("author_owned"):
-        return "Author-owned PR awaiting a complete titled COMMENTED fallback after community work."
+        return "Authenticated-developer-owned PR is in the first actionable scheduling tier."
+    if item.get("community_feedback_ready"):
+        return "A community contributor pushed a new exact head after an independent request-changes review."
+    if (
+        item.get("scheduling_lane")
+        == PullRequestSchedulingLane.COMMUNITY_AGED_BACKLOG.value
+    ):
+        return "Community exact head has waited at least 24 hours and is in the aged-backlog tier."
     decision = str(item.get("review_decision") or "").upper()
     if decision in {"REVIEW_REQUIRED", "UNKNOWN", ""}:
         return "Open and awaiting reviewer decision."
@@ -1359,8 +1368,8 @@ def render_pr_review_markdown(payload: dict[str, Any]) -> str:
         "",
         "- Do not stop at the queue/table summary.",
         "- Do not collapse this packet to `.summary` and `.review_sequence` only; preserve the paths named by `agent_response_contract.required_packet_fields_to_preserve`.",
-        "- For each selected PR, read PR body/files/diff/checks first, then return one review card.",
-        "- Execute each `pull_requests[].review_plan` against `agent_response_contract.review_execution_contract`; that capability-owned contract is the evidence and completeness authority.",
+        "- For each actionable selected PR, read PR body/files/diff/checks first, then return one review card.",
+        "- Execute each non-null `pull_requests[].review_plan` against `agent_response_contract.review_execution_contract`; inventory-only rows expose no execution artifacts.",
         "- Code-changing PRs must include a `关键代码讲解` subsection under `具体改动`, grounded in exact-head symbols and short excerpts or equivalent pseudocode.",
         "- Bind the verdict to the remote head SHA and recheck it before answering.",
         "- Required card headings: `动机`, `改动思路`, `具体改动`, `对主干的风险`, `我的整体评价`.",
@@ -1403,15 +1412,22 @@ def render_pr_review_markdown(payload: dict[str, Any]) -> str:
     for pr in [item for item in _as_list(payload.get("pull_requests")) if isinstance(item, dict)]:
         template = _as_dict(pr.get("review_template"))
         review_plan = _as_dict(pr.get("review_plan"))
+        action_kind = str(pr.get("review_action_kind") or "").strip()
+        row_instruction = (
+            "> Agentloop should fill the five-block review after reading the PR body and diff. The template below is intentionally blank."
+            if action_kind
+            else "> Inventory-only exact head: read back the existing conclusion; do not run a full evidence review."
+        )
         lines.extend(
             [
                 "",
                 f"## PR #{pr.get('number')}: {pr.get('title')}",
                 "",
-                "> Agentloop should fill the five-block review after reading the PR body and diff. The template below is intentionally blank.",
+                row_instruction,
                 "",
                 f"- url: {pr.get('url')}",
                 f"- state: `{pr.get('state')}`",
+                f"- review action: `{action_kind or 'none'}`",
                 f"- merged_at: `{pr.get('merged_at') or 'n/a'}`",
                 f"- branch: `{pr.get('head_ref')}` -> `{pr.get('base_ref')}`",
                 f"- status: review=`{pr.get('review_decision')}`, merge=`{pr.get('merge_state')}`, draft=`{pr.get('is_draft')}`",

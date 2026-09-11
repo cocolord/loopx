@@ -69,6 +69,10 @@ import { mergeScopedStatusProjections } from "../data/status-merge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
+import {
+  agentFamily,
+  presentedAgentFamily,
+} from "../features/personal-workspace/agent-family";
 import { PersonalWorkspacePage } from "../features/personal-workspace/personal-workspace-page";
 import { useWorkspaceI18n, type WorkspaceTranslate } from "../features/personal-workspace/i18n";
 import {
@@ -132,9 +136,10 @@ function semanticProtectedActionPreview(
   };
 }
 import type { StatusSourceControl } from "../features/personal-workspace/status-source-switcher";
-import { ensureSshSource } from "../data/ssh-host-catalog";
+import { applyRemoteGoalLifecycle, ensureSshSource } from "../data/ssh-host-catalog";
 import {
   addSshTunnelStatusSource,
+  bindConfiguredSshHostAliases,
   defaultLocalStatusSourceUrl,
   loadStatusSourceCatalog,
   localStatusSource,
@@ -485,6 +490,7 @@ type PersonalHomeModel = {
   workers?: WorkspaceWorker[];
 };
 type PersonalManagerMessage = {
+  sourceMessageId?: string;
   activity?: string[];
   agentLabel?: string;
   attachments?: WorkspaceImageAttachment[];
@@ -618,41 +624,43 @@ function isAgentResultMessage(role: string, text: string) {
   return ["agent", "assistant"].includes(role.trim().toLowerCase()) && text.trim().length > 0;
 }
 
+const PERSONAL_AGENT_FALLBACK_CAPABILITY = "已发现的项目 Agent";
+
 function personalAgentLabel(agentId: string) {
-  const normalized = agentId.toLowerCase();
-  if (normalized.includes("codex")) {
-    return "Codex";
+  switch (agentFamily(agentId)) {
+    case "codex":
+      return "Codex";
+    case "claude":
+      return "Claude Code";
+    case "kiro":
+      return "Kiro CLI";
+    case "trae":
+      return "Trae CLI Agent";
+    case "coco":
+      return "Coco Agent";
+    default:
+      return personalGoalTitle(agentId);
   }
-  if (normalized.includes("claude")) {
-    return "Claude Code";
-  }
-  if (normalized.includes("trae")) {
-    return "Trae CLI Agent";
-  }
-  if (normalized.includes("coco")) {
-    return "Coco Agent";
-  }
-  return personalGoalTitle(agentId);
 }
 
-function personalAgentCapability(agentId: string) {
-  const normalized = agentId.toLowerCase();
-  if (normalized.includes("codex")) {
-    return "代码与项目执行";
+function personalAgentCapability(agentId: string, adapterKind?: string | null) {
+  switch (presentedAgentFamily(agentId, adapterKind)) {
+    case "codex":
+      return "代码与项目执行";
+    case "claude":
+      return "复杂分析与长任务";
+    case "openai":
+    case "anthropic":
+      return "管家问答 · 无工具";
+    case "kiro":
+      return "终端编码 · 原生 /goal 循环";
+    case "trae":
+      return "前端与交互实现";
+    case "coco":
+      return "通用任务";
+    default:
+      return PERSONAL_AGENT_FALLBACK_CAPABILITY;
   }
-  if (normalized.includes("claude")) {
-    return "复杂分析与长任务";
-  }
-  if (normalized.includes("openai") || normalized.includes("anthropic")) {
-    return "管家问答 · 无工具";
-  }
-  if (normalized.includes("trae")) {
-    return "前端与交互实现";
-  }
-  if (normalized.includes("coco")) {
-    return "通用任务";
-  }
-  return "已发现的项目 Agent";
 }
 
 function personalVisibleAgentMessage(value: string) {
@@ -1019,20 +1027,7 @@ function personalManagerMatches(question: string, keywords: string[]) {
   return keywords.some((keyword) => question.includes(keyword));
 }
 
-function isManagerProjectionQuestion(question: string) {
-  return personalManagerMatches(question, [
-    "我现在该做什么",
-    "该做什么",
-    "下一步",
-    "哪些 Goal 在等我",
-    "哪些 Goal 正在等我",
-    "等我",
-    "优先处理",
-    "全局待办",
-    "Agent 在做什么",
-    "哪些 Goal 需要我",
-  ]);
-}
+
 
 function answerPersonalManagerQuestion(
   payload: StatusPayload,
@@ -1359,6 +1354,9 @@ function PersonalGoalHome({
   toggleTheme: () => void;
 }) {
   const readOnly = statusSourceControl.activeSource.readOnly;
+  const remoteGoalLifecycleHost = statusSourceControl.activeSource.kind === "ssh_tunnel"
+    ? statusSourceControl.activeSource.hostAlias
+    : undefined;
   const { t } = useWorkspaceI18n();
   const [runtimeAgents, setRuntimeAgents] = useState<Array<{
     adapter_kind: string;
@@ -1422,7 +1420,7 @@ function PersonalGoalHome({
         agentId: agent.agent_id,
         adapterKind: agent.adapter_kind,
         available: agent.available,
-        capability: personalAgentCapability(agent.agent_id),
+        capability: personalAgentCapability(agent.agent_id, agent.adapter_kind),
         interrupt: agent.interrupt,
         label: agent.display_name,
         location: agent.location,
@@ -1549,6 +1547,39 @@ function PersonalGoalHome({
     statusSourceControl.activeSource.statusUrl,
   ]);
 
+  // Worker returns are transcript messages, not new model turns. Keep an open
+  // manager conversation current without replacing in-flight user/agent text.
+  const managerReturnSessionId = selectedGoal ? undefined : runtimeBindings[contextId]?.sessionId;
+  useEffect(() => {
+    if (readOnly || !managerReturnSessionId) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const receive = async () => {
+      try {
+        const snapshot = await fetchChatSession(managerReturnSessionId);
+        if (cancelled) return;
+        const replies = snapshot.messages.filter((row) => row.origin === "manager_followup");
+        setMessagesByContext((current) => {
+          const previous = current[contextId] ?? [];
+          const seen = new Set(previous.map((row) => row.sourceMessageId));
+          const fresh = replies.filter((row) => !seen.has(row.message_id));
+          if (!fresh.length) return current;
+          return { ...current, [contextId]: [...previous, ...fresh.map((row) => ({
+            id: managerMessageId.current++, sourceMessageId: row.message_id,
+            role: "assistant" as const, agentLabel: selectedAgent.label,
+            sourceLabel: "管家交接回执", text: visibleAgentMessage(row.text), lines: [],
+          }))] };
+        });
+      } catch {
+        // The durable transcript is retried after reconnection; no model replay.
+      } finally {
+        if (!cancelled) timer = setTimeout(receive, 3000);
+      }
+    };
+    void receive();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [readOnly, managerReturnSessionId, contextId, selectedAgent.label]);
+
   function recordRuntimeBinding(targetContextId: string, binding: PersonalRuntimeBinding | null) {
     setRuntimeBindings((current) => {
       if (binding === null) {
@@ -1600,7 +1631,6 @@ function PersonalGoalHome({
     const sessionKey = `${targetContextId}:${selectedAgent.agentId}`;
     const contextKind = selectedGoal ? "goal" : "manager";
     const channelId = selectedGoal ? `goal.${selectedGoal.goalId}` : "manager";
-    const anchorGoalId = selectedGoal?.goalId ?? model.goals[0]?.goalId ?? "";
     let cancelled = false;
     let recoveryController: AbortController | null = null;
     let latestDiscoveredSessionId: string | null = null;
@@ -1617,6 +1647,7 @@ function PersonalGoalHome({
           return {
             ...current,
             [targetContextId]: history.messages.map((message) => ({
+              sourceMessageId: message.message_id,
               agentLabel: message.role === "user" ? undefined : selectedAgent.label,
               attachments: workspaceImageAttachments(message.attachments),
               id: managerMessageId.current++,
@@ -1644,8 +1675,8 @@ function PersonalGoalHome({
           });
           return;
         }
-        const sessionGoalId = latest?.goal_id ?? anchorGoalId;
-        if (!sessionGoalId) return;
+        const sessionGoalId = contextKind === "manager" ? "" : selectedGoal?.goalId ?? "";
+        if (contextKind === "goal" && !sessionGoalId) return;
         const created = await createChatSession(
           sessionGoalId,
           selectedAgent.agentId,
@@ -1964,7 +1995,7 @@ function PersonalGoalHome({
       ? route.goalId ?? "manager"
       : contextId;
     const targetGoal = targetContextId === "manager"
-      ? questionModel.goals[0] ?? model.goals[0] ?? null
+      ? null
       : model.goals.find((goal) => goal.goalId === targetContextId) ?? null;
     const selectedRoute = route?.agentId
       ? selectAvailableChatAgent(agentOptions, route.agentId, defaultAgentId)
@@ -1992,8 +2023,7 @@ function PersonalGoalHome({
     setManagerInput("");
     setSendingContextId(targetContextId);
 
-    const isProjectionQuickQuestion = targetContextId === "manager" && isManagerProjectionQuestion(question);
-    if (isProjectionQuickQuestion || selectedRoute.agentId === "status-only" || !targetGoal) {
+    if (selectedRoute.agentId === "status-only" || (!targetGoal && targetContextId !== "manager")) {
       const answer = answerPersonalManagerQuestion(selectedPayload, targetQuestionModel, question);
       const usesStatusOnlyRoute = selectedRoute.agentId === "status-only";
       appendManagerAssistantMessage(targetContextId, {
@@ -2021,7 +2051,7 @@ function PersonalGoalHome({
       if (!sessionId) {
         const mode = newSessionRequired.current.has(sessionKey) ? "new" : "resume_latest";
         const session = await createChatSession(
-          targetGoal.goalId,
+          targetContextId === "manager" ? "" : targetGoal!.goalId,
           selectedRoute.agentId,
           mode,
           targetContextId === "manager" ? "manager" : "goal",
@@ -2043,7 +2073,7 @@ function PersonalGoalHome({
         lines: [],
         pending: true,
         sourceLabel: targetContextId !== "manager"
-          ? `${selectedRoute.label} Agent · ${personalGoalTitle(targetGoal.goalId)}`
+          ? `${selectedRoute.label} Agent · ${personalGoalTitle(targetGoal!.goalId)}`
           : `${selectedRoute.label} 管家 · 跨 Goal`,
         text: "",
       });
@@ -2093,7 +2123,12 @@ function PersonalGoalHome({
         pending: false,
         text: visibleAgentMessage(response.message || streamedText.trim()) || `${selectedRoute.label} 已完成分析。`,
       });
-      if (response.proposals.length > 0) {
+      if (response.proposals.length > 0 && !targetGoal) {
+        updateManagerAssistantMessage(targetContextId, streamingMessageId, {
+          lines: ["请进入要修改的 Goal，预览并确认具体变更。"],
+        });
+      }
+      if (response.proposals.length > 0 && targetGoal) {
         const cards = response.proposals.map((proposal) => ({
           goalId: targetGoal.goalId,
           id: proposalId.current++,
@@ -2682,6 +2717,20 @@ function PersonalGoalHome({
             };
           },
           } : {}),
+          ...(remoteGoalLifecycleHost ? {
+            onExecuteGoalLifecycle: async ({ goalId, operation, reason }) => {
+              const result = await applyRemoteGoalLifecycle(
+                remoteGoalLifecycleHost,
+                goalId,
+                operation,
+                reason,
+              );
+              return {
+                activationState: result.activation_state,
+                projectionVerified: result.projection_verified,
+              };
+            },
+          } : {}),
           onGoalActivationStateChange,
           onGoalDeleted,
           onReconcileStatus,
@@ -2820,6 +2869,8 @@ export function DashboardPage() {
   const [statusSourceCatalog, setStatusSourceCatalog] = useState(() =>
     loadStatusSourceCatalog(window.localStorage, window.location.href)
   );
+  const statusSourceCatalogRef = useRef(statusSourceCatalog);
+  statusSourceCatalogRef.current = statusSourceCatalog;
   const [statusUrl, setStatusUrl] = useState(search.statusUrl);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -3035,6 +3086,7 @@ export function DashboardPage() {
   }
 
   function persistStatusSourceCatalog(nextCatalog: typeof statusSourceCatalog) {
+    statusSourceCatalogRef.current = nextCatalog;
     setStatusSourceCatalog(nextCatalog);
     try {
       saveStatusSourceCatalog(window.localStorage, nextCatalog);
@@ -3059,6 +3111,11 @@ export function DashboardPage() {
       persistStatusSourceCatalog(result.catalog);
       selectStatusSource(result.source, { ensureTunnel: input.ensureTunnel });
       return {};
+    },
+    onConfiguredHostsLoaded: (hostAliases) => {
+      const currentCatalog = statusSourceCatalogRef.current;
+      const nextCatalog = bindConfiguredSshHostAliases(currentCatalog, hostAliases);
+      if (nextCatalog !== currentCatalog) persistStatusSourceCatalog(nextCatalog);
     },
     onRemove: (sourceId) => {
       const nextCatalog = removeStatusSource(statusSourceCatalog, sourceId);

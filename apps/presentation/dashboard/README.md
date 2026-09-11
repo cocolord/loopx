@@ -105,6 +105,31 @@ URL and opens the browser/PWA route, then exits without starting a second
 server. The desktop shell reuses the same services in the opposite order, so
 the browser/PWA and native entry points can be started in either order.
 
+### Built-In Chat Agents
+
+The Agent picker is served by `/api/chat/capabilities`, so its rows come from
+the running LoopX process rather than from browser state. The built-ins are
+Codex (app-server), Claude Code, Kiro CLI, and the direct Claude/OpenAI API
+lanes; owner-registered ACP endpoints are appended after them. A row's
+`available` flag is a live probe, so an uninstalled host renders as needing
+configuration instead of failing when a session opens.
+
+Kiro CLI is reached through its own ACP agent (`kiro-cli acp`) using the same
+ACP stdio adapter as owner-registered endpoints. Override the executable when
+it is not on `PATH` under the documented name:
+
+```bash
+loopx dashboard --kiro-cli-bin /path/to/kiro-cli
+```
+
+The trust boundary is unchanged: LoopX Chat answers every ACP
+`session/request_permission` with `cancelled` and exposes no client host tools,
+so a Kiro tool call that needs approval is refused rather than auto-approved.
+LoopX passes no `--trust-all-tools`. Reaching the host this way drives one
+read-only Chat session; it is not the governed `/goal` loop, which is entered
+from a Kiro CLI session through the
+[Kiro CLI goal-mode adapter](../../../loopx/kiro_cli_goal_mode/README.md).
+
 Source-checkout development is a separate mode:
 
 ```bash
@@ -250,11 +275,13 @@ Wildcard hosts, negated patterns, `IdentityFile`, `ProxyCommand`, hostnames,
 credentials, and config paths are never projected to the browser. The manual
 loopback-URL path remains available for custom forwarding setups.
 
-The browser catalog stores only the selected alias label and loopback URL;
-LoopX does not store SSH credentials or open the tunnel. The active source
-reports its connection health. Local stays interactive, while every custom
-SSH-tunnel source is explicitly read-only even though its forwarded URL is
-loopback.
+The browser catalog stores the selected alias, label, and loopback URL; LoopX
+does not store SSH credentials or open the tunnel. The active source reports
+its connection health. Local stays interactive. A source bound to an exact
+configured alias may stop or resume a Goal through the same typed
+`goal-lifecycle` contract on that remote host. Manual URLs and all other
+remote controls stay read-only; remote lifecycle never falls back to a local
+Goal with the same id.
 
 The switcher intentionally has no synthetic **All** source. Independent status
 feeds do not yet share authority, identity, or deduplication semantics, so

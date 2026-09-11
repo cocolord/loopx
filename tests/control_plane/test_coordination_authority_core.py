@@ -21,7 +21,6 @@ from loopx.control_plane.coordination.authority_core import (
     LifecycleGrant,
     OtherLeaseSnapshot,
     OwnershipGate,
-    TerminalFenceCommand,
     TodoAction,
     TodoMutationCommand,
     TodoSnapshot,
@@ -93,6 +92,56 @@ def terminal(
     }
     values.update(overrides)
     return TodoMutationCommand(**values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("mode", list(HandoffMode))
+@pytest.mark.parametrize("ownership", [False, True])
+def test_update_authority_keeps_claim_neutral_edits_separate_from_ownership(
+    mode, ownership
+):
+    state = snapshot(handoff_mode=mode)
+    command = TodoMutationCommand(
+        action=TodoAction.UPDATE,
+        actor_agent_id=AGENT_A,
+        requested_claimed_by=AGENT_A if ownership else None,
+        ownership_mutation=ownership,
+    )
+    result = decide(state, command)
+    if mode is HandoffMode.HARD_LEASE and ownership:
+        assert result.code == "handoff_mode_requires_lease"
+        assert result.next_snapshot is None
+    else:
+        assert result.outcome is DecisionOutcome.APPLY
+        assert result.next_snapshot.todo.claimed_by == (AGENT_A if ownership else None)
+        assert result.next_snapshot.lease is None
+        assert result.authority_mode == "registered_peer_actor"
+
+
+@pytest.mark.parametrize("clear", [False, True])
+def test_delegated_update_requires_the_actual_action_and_never_releases_holder(clear):
+    state = snapshot(
+        handoff_mode=HandoffMode.HARD_LEASE,
+        todo=todo(claimed_by=AGENT_B),
+        lease=lease(owner=AGENT_B),
+        lifecycle_grants=(LifecycleGrant(AGENT_A, frozenset({"reassign"})),),
+    )
+    command = TodoMutationCommand(
+        action=TodoAction.UPDATE,
+        actor_agent_id=AGENT_A,
+        authority_action="reassign",
+        authority_reason="recover abandoned work",
+        ownership_mutation=True,
+        requested_claimed_by=AGENT_A,
+        clear_claim=clear,
+    )
+    result = decide(state, command)
+    assert result.outcome is DecisionOutcome.APPLY
+    assert result.ownership_gate is OwnershipGate.DELEGATED_OVERRIDE
+    assert result.next_snapshot.todo.claimed_by == (None if clear else AGENT_A)
+    assert result.next_snapshot.lease == state.lease
+    rejected = decide(state, replace(command, authority_action="update"))
+    assert rejected.code == "delegation_action_not_granted"
+    assert rejected.next_snapshot is None
 
 
 def test_decision_is_deterministic_and_target_scoped() -> None:
@@ -330,75 +379,6 @@ def test_exact_user_gate_can_plan_auto_acquire_but_never_displaces_a_live_lease(
     )
     assert foreign_live.outcome is DecisionOutcome.REJECTED
     assert foreign_live.code == "lease_fence_required"
-
-
-def test_terminal_entrypoints_share_user_gate_auto_acquire_policy() -> None:
-    state = snapshot(
-        handoff_mode=HandoffMode.HARD_LEASE,
-        registered_agents=(AGENT_A,),
-        todo=todo(role="user", task_class="user_gate"),
-    )
-    full = decide(
-        state,
-        terminal(
-            lease_idempotency_key="auto-turn-key",
-            allow_user_gate_auto_acquire=True,
-        ),
-    )
-    fence = decide(
-        state,
-        TerminalFenceCommand(
-            actor_agent_id=AGENT_A,
-            lease_idempotency_key="auto-turn-key",
-            allow_user_gate_auto_acquire=True,
-            require_active_when_fence_supplied=False,
-        ),
-    )
-
-    assert full.outcome is fence.outcome is DecisionOutcome.APPLY
-    assert full.lease_fence is fence.lease_fence is LeaseFence.AUTO_ACQUIRE
-    assert full.next_snapshot is not None and fence.next_snapshot is not None
-    assert full.next_snapshot.lease == fence.next_snapshot.lease
-
-
-def test_preauthorized_terminal_fence_preserves_mode_and_delegation_rules() -> None:
-    legacy = decide(
-        snapshot(),
-        TerminalFenceCommand(actor_agent_id=AGENT_A),
-    )
-    assert legacy.outcome is DecisionOutcome.APPLY
-    assert legacy.lease_fence is LeaseFence.NOT_REQUIRED
-
-    hard_missing = decide(
-        snapshot(handoff_mode=HandoffMode.HARD_LEASE),
-        TerminalFenceCommand(actor_agent_id=AGENT_A),
-    )
-    assert hard_missing.outcome is DecisionOutcome.REJECTED
-    assert hard_missing.code == "handoff_mode_requires_lease"
-
-    delegated = decide(
-        snapshot(handoff_mode=HandoffMode.HARD_LEASE),
-        TerminalFenceCommand(
-            actor_agent_id=ORCHESTRATOR,
-            delegated_authority=True,
-        ),
-    )
-    assert delegated.outcome is DecisionOutcome.APPLY
-    assert delegated.lease_fence is LeaseFence.DELEGATED_OVERRIDE
-
-    verified = decide(
-        snapshot(handoff_mode=HandoffMode.HARD_LEASE, lease=lease()),
-        TerminalFenceCommand(
-            actor_agent_id=AGENT_A,
-            lease_idempotency_key="execution-a",
-            lease_expected_version=3,
-        ),
-    )
-    assert verified.outcome is DecisionOutcome.APPLY
-    assert verified.lease_fence is LeaseFence.REQUIRED
-    assert verified.next_snapshot is not None
-    assert verified.next_snapshot.lease is not None
-    assert verified.next_snapshot.lease.status == "released"
 
 
 @pytest.mark.parametrize(
@@ -662,18 +642,6 @@ def test_contradictory_normalized_lease_state_fails_closed(
 
     assert plan.outcome is DecisionOutcome.REJECTED
     assert plan.code == "invalid_lease_snapshot"
-
-
-def test_active_terminal_fence_requires_current_version_after_key_match() -> None:
-    plan = decide(
-        snapshot(handoff_mode=HandoffMode.HARD_LEASE, lease=lease()),
-        TerminalFenceCommand(
-            actor_agent_id=AGENT_A,
-            lease_idempotency_key="execution-a",
-        ),
-    )
-    assert plan.outcome is DecisionOutcome.REJECTED
-    assert plan.code == "version_required"
 
 
 def test_soft_claim_forbids_lease_mutation_but_allows_release() -> None:

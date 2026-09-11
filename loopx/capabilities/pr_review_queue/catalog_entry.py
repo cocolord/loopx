@@ -23,7 +23,7 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
     "default_enabled": False,
     "real_world_anchor": "maintainer review of a changing public GitHub PR queue",
     "user_value": (
-        "Turn complete open-PR observations into age-fair exact-head review "
+        "Turn complete open-PR observations into policy-ranked exact-head review "
         "candidates without repeating handled work or granting external writes."
     ),
     "entry_command": (
@@ -31,6 +31,11 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
         "--autonomous-observation --format json"
     ),
     "commands": [
+        {
+            "command": "loopx pr-review --repo <owner/repo> --check-merge-readiness NUMBER@HEAD_OID --format json",
+            "purpose": "Fail closed on exact-head, approval-body, check, thread, or merge-state drift immediately before merge.",
+            "write_boundary": "live public GitHub read only; does not approve, merge, bypass policy, or grant merge authority",
+        },
         {
             "command": "loopx pr-review --check-result <result.json> --packet <packet.json> --format json",
             "purpose": "Reject a declared approval inconsistent with the saved exact head and required evidence.",
@@ -63,11 +68,16 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
                 "[--projected-exact-head NUMBER@HEAD_OID] "
                 "[--handled-exact-head NUMBER@HEAD_OID] --format json"
             ),
-            "purpose": "Atomically continue age-fair review scheduling across Codex tasks.",
+            "purpose": "Atomically continue policy-ranked review scheduling across Codex tasks.",
             "write_boundary": "writes only the explicit public-safe local checkpoint; grants no GitHub, Todo, push, or merge authority",
         },
     ],
     "implemented_protocols": [
+        {
+            "schema_version": "pull_request_merge_readiness_v0",
+            "module": "loopx.capabilities.pr_review_queue.merge_readiness",
+            "doc": "loopx/capabilities/pr_review_queue/README.md",
+        },
         {
             "schema_version": "pull_request_review_result_check_v0",
             "module": "loopx.capabilities.pr_review_queue.result_check",
@@ -91,6 +101,11 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
         {
             "schema_version": "pull_request_review_queue_observation_v1",
             "module": "loopx.capabilities.pr_review_queue.core",
+            "doc": "loopx/capabilities/pr_review_queue/README.md",
+        },
+        {
+            "schema_version": "pull_request_review_scheduling_policy_v0",
+            "module": "loopx.capabilities.pr_review_queue.scheduling",
             "doc": "loopx/capabilities/pr_review_queue/README.md",
         },
         {
@@ -123,8 +138,11 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
         "The shared execution contract owns review depth, evidence completeness, repository-reuse comparison, exact-head freshness, symbol-map, walkthrough, validation, failure, code-volume, change-proportionality, default-off isolation, and authority-semantics requirements; host skills only route and publish it.",
         "A queue is observed only when result_completeness.complete=true; partial or failed reads are not_observed and never count as unchanged.",
         "Fingerprints cover exact head, formal conclusion, next action, check state, draft state, and mergeability for every open PR.",
-        "Current-head review_ready_at, not updatedAt, owns age-fair ordering; one new head after REQUEST_CHANGES may use a bounded fast-feedback slot.",
+        "Actionable authenticated-developer-owned heads rank first; community response heads and 24-hour backlog share the next tier; remaining work keeps current-head review_ready_at ordering, and one new head after REQUEST_CHANGES may use a bounded fast-feedback slot.",
+        "Only rows with a non-null review_action_kind enter review_sequence and carry review plans, templates, or evidence commands; valid exact-head conclusions remain artifact-free inventory-only rows, and only --fresh-audit-exact-head NUMBER@HEAD_OID can explicitly reopen one.",
+        "Todo prose, monitor notes, and one-off author filters are not scheduling authority.",
         "A complete exact-head conclusion requires the five Chinese sections, a state-aligned English verdict, and formal state or the verdict-specific titled author-owned fallback.",
+        "Every merge must rerun the read-only merge-readiness gate for the reviewed exact head; admin bypass cannot override stale review text, red or pending checks, incomplete thread evidence, or head drift.",
         "One observation emits at most one exact-head advancement Todo preview; unchanged observations replay it until explicit durable Todo-projection ACK, then rotate across acknowledged exact heads.",
         "The capability reuses the existing pr-review GitHub scan and normalized packet; review bodies are inspected for format but never emitted or checkpointed.",
         "Candidate selection grants no GitHub review, comment, push, merge, quota, or Todo-write authority; those remain with their existing policy surfaces.",

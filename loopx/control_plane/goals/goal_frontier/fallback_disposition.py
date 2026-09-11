@@ -13,10 +13,7 @@ from ...todos.contract import (
     normalize_todo_resume_when,
     normalize_todo_status,
 )
-from ...todos.deferred_resume import (
-    todo_resume_condition_is_non_monitor_wait,
-    todo_summary_blocked_successor_items,
-)
+from ...todos.resume_planning import project_todo_resume_planning
 from ...todos.projection import (
     agent_scoped_selectable_advancement_todo_ids,
     todo_item_claimed_by_agent_or_unclaimed,
@@ -155,10 +152,10 @@ def _blocked_successor_todo_ids(
         todo_id
         for todo_id in (
             normalize_todo_id(item.get("todo_id"))
-            for item in todo_summary_blocked_successor_items(
+            for item in project_todo_resume_planning(
                 agent_todo_summary,
                 agent_id=agent_id,
-            )
+            )["blocked_successor_items"]
             if isinstance(item, dict)
         )
         if todo_id
@@ -178,10 +175,10 @@ def _blocked_primary_waiting(
     if isinstance(blocker_items, list) and blocker_items:
         return True
     return bool(
-        todo_summary_blocked_successor_items(
+        project_todo_resume_planning(
             agent_todo_summary,
             agent_id=agent_id,
-        )
+        )["blocked_successor_items"]
     )
 
 
@@ -240,6 +237,27 @@ def _authoritative_fallback_disposition_ids(
         if resume_items
         else {}
     )
+    evaluated_source_items: list[dict[str, Any]] = []
+    for source_item in agent_todo_source_items:
+        evaluated_item = dict(source_item)
+        source_todo_id = normalize_todo_id(source_item.get("todo_id"))
+        condition = resume_conditions.get(source_todo_id or "")
+        if isinstance(condition, dict):
+            evaluated_item["resume_condition"] = condition
+            evaluated_item["resume_ready"] = condition.get("satisfied") is True
+        evaluated_source_items.append(evaluated_item)
+    ordinary_waiting_ids = {
+        todo_id
+        for todo_id in (
+            normalize_todo_id(item.get("todo_id"))
+            for item in project_todo_resume_planning(
+                {"items": evaluated_source_items},
+                agent_id=agent_id,
+            )["blocked_successor_items"]
+            if isinstance(item, dict)
+        )
+        if todo_id
+    }
 
     runnable_ids: set[str] = set()
     waiting_ids: set[str] = set()
@@ -290,7 +308,7 @@ def _authoritative_fallback_disposition_ids(
                         == TODO_TASK_CLASS_MONITOR
                     ):
                         waiting_ids.add(todo_id)
-                elif todo_resume_condition_is_non_monitor_wait(condition):
+                elif todo_id in ordinary_waiting_ids:
                     waiting_ids.add(todo_id)
             continue
 

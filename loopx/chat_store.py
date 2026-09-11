@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -196,10 +197,16 @@ class ChatSessionStore:
         executor_endpoint_id: str | None = None,
         host_surface: str | None = None,
         attached_capabilities: dict[str, bool] | None = None,
+        codex_home: str | None = None,
     ) -> dict[str, Any]:
         now = utc_now()
         token = _opaque_id(session_id or uuid.uuid4().hex, field="session_id")
         normalized_mode = _opaque_id(session_mode, field="session_mode")
+        if codex_home is not None and (
+            not Path(codex_home).is_absolute() or agent_id != "codex"
+            or normalized_mode != CHAT_SESSION_MODE_MANAGED
+        ):
+            raise ValueError("codex_home must be an absolute managed Codex home")
         if normalized_mode not in {
             CHAT_SESSION_MODE_MANAGED,
             CHAT_SESSION_MODE_ATTACHED,
@@ -241,6 +248,7 @@ class ChatSessionStore:
             "adapter_kind": normalized_adapter_kind,
             "upstream_thread_id": normalized_upstream_thread_id,
             "upstream_mode": normalized_upstream_mode,
+            "codex_home": codex_home,
             "session_mode": normalized_mode,
             "host_surface": normalized_host_surface,
             "attached_capabilities": capabilities,
@@ -278,14 +286,35 @@ class ChatSessionStore:
                     "last_error_code",
                     "upstream_thread_id",
                     "upstream_mode",
+                    "codex_home",
+                    "manager_context_version",
+                    "manager_authorization_scope_id",
+                    "goal_id",
                 }
                 unknown = set(changes) - allowed
                 if unknown:
                     raise ValueError(f"unsupported chat session fields: {sorted(unknown)}")
+                if "goal_id" in changes:
+                    from .chat_manager import MANAGER_AGENT_GOAL_ID
+                    if _session_channel(payload) != "manager" or changes["goal_id"] != MANAGER_AGENT_GOAL_ID:
+                        raise ValueError("only the owner manager may migrate to global identity")
                 if "upstream_thread_id" in changes:
                     changes["upstream_thread_id"] = _upstream_id(changes["upstream_thread_id"])
                 if "upstream_mode" in changes:
                     changes["upstream_mode"] = _opaque_id(changes["upstream_mode"], field="upstream_mode")
+                if "manager_authorization_scope_id" in changes:
+                    changes["manager_authorization_scope_id"] = _opaque_id(
+                        changes["manager_authorization_scope_id"],
+                        field="manager_authorization_scope_id",
+                    )
+                if "codex_home" in changes:
+                    home = changes["codex_home"]
+                    if (not isinstance(home, str) or not Path(home).is_absolute()
+                            or payload.get("agent_id") != "codex"
+                            or payload.get("session_mode") != CHAT_SESSION_MODE_MANAGED):
+                        raise ValueError("codex_home must be an absolute managed Codex home")
+                    if payload.get("codex_home") not in (None, home):
+                        raise ValueError("cannot rebind a managed Codex home")
                 payload.update(changes)
                 payload["updated_at"] = utc_now()
                 _atomic_write_json(path, payload, preserve_mode=True)
@@ -489,9 +518,10 @@ class ChatSessionStore:
             "created_at": utc_now(),
         }
         with exclusive_file_lock(path, agent_id="loopx-chat", operation="append_chat_message"):
-            for existing in _read_jsonl(path):
-                if existing.get("message_id") == payload["message_id"]:
-                    return existing
+            if message_id:
+                for existing in _read_jsonl(path):
+                    if existing.get("message_id") == payload["message_id"]:
+                        return existing
             _append_jsonl(path, payload)
         return payload
 
@@ -1318,14 +1348,19 @@ class ChatSessionStore:
         with self._event_lock:
             cached = self._event_cache.get(key)
             rows = (
-                list(cached)
+                cached
                 if cached is not None and self._event_cache_revision.get(key) == revision
                 else None
             )
         if rows is None:
             with exclusive_file_lock(path, agent_id="loopx-chat", operation="read_chat_events"):
-                rows = list(self._event_rows_locked(session_id, turn_id))
-        return [row for row in rows if int(row.get("sequence") or 0) > after]
+                rows = self._event_rows_locked(session_id, turn_id)
+        start = bisect_right(
+            rows,
+            after,
+            key=lambda row: int(row.get("sequence") or 0),
+        )
+        return rows[start:]
 
     def compact_completed_events(self, *, older_than_hours: float = 24.0) -> int:
         """Drop replay-only deltas after the durable final message is old enough."""

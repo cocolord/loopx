@@ -3,6 +3,10 @@
 
 DEFAULT_MATERIAL_QUEUE_RULE = "Do not consume the learning material queue unless the user explicitly asks."
 DEFAULT_PERMISSION_RULE = "Do not ask for permissions when the current Codex session is already trusted."
+SCOPE_BOUNDED_WORK_RULE = (
+    "授权/预算内推进可验证结果；按任务/证据/风险定规模，不按操作/文件数/心跳间隔。"
+    "操作/写回不自动结束；遵守停止/重规划。"
+)
 USER_TODO_FINAL_MESSAGE_RULE = (
     "`interaction_contract.user_channel.notify` controls output: `NOTIFY` -> concrete "
     "action; otherwise quiet. `should_run`/due monitor and other-agent scoped todos "
@@ -12,16 +16,10 @@ USER_TODO_FINAL_MESSAGE_RULE = (
 )
 HEARTBEAT_NOTIFICATION_RULE_SHORT = (
     "`user_channel.notify` controls OUTPUT only: NOTIFY=向用户输出动作; "
-    "DONT_NOTIFY=安静输出。执行义务看 `heartbeat_recommendation.agent_must_attempt`/"
-    "`execution_obligation.must_attempt_work`：true 时必须执行 bounded slice 并写回，"
-    "quiet no-op 仅当 false。"
-    "Due/peer gate != prompt; missing NOTIFY action->"
-    "具体user todo未投影，需修复LoopX状态投影."
-)
-HEARTBEAT_NOTIFICATION_RULE_THIN = (
-    "`user_channel.notify` controls OUTPUT only: NOTIFY=向用户输出动作; "
-    "DONT_NOTIFY=安静输出。执行义务看 `agent_must_attempt`/`must_attempt_work`。"
-    "Due/peer gate != prompt; missing NOTIFY action->具体user todo未投影."
+    "DONT_NOTIFY=安静输出。见 `heartbeat_recommendation.agent_must_attempt`/"
+    "`execution_obligation.must_attempt_work`：true须推进并写回，false才可no-op。"
+    "Due/peer非用户动作；NOTIFY缺动作→"
+    "具体user todo未投影，需修复LoopX状态投影；静默时内部修复。"
 )
 HEARTBEAT_VISION_WRITEBACK_RULE_SHORT = (
     "writeback: no-change=`surface_only`/no spend; "
@@ -46,13 +44,25 @@ SCHEDULER_HINT_THIN_RULE = (
 RUNTIME_CAPABILITY_PROJECTION_THIN_RULE = (
     "Observed capabilities -> `--available-capability`; never user gates."
 )
-RUNTIME_EXECUTION_ROUTING_RULE = (
-    "Normal turns use CLI `interaction_contract`; use `loopx-project` for "
+RUNTIME_REPAIR_ROUTING_RULE = (
+    "use `loopx-project` for "
     "lifecycle/registry and `loopx-self-repair` for runtime/projection drift."
 )
+RUNTIME_EXECUTION_ROUTING_RULE = (
+    "Normal turns use CLI `interaction_contract`; " + RUNTIME_REPAIR_ROUTING_RULE
+)
+HOST_LOOP_SAFETY_RULE = (
+    "Follow user authority and repository rules. Protect credentials/private material; "
+    "publish public-safe evidence. Destructive Git/production requires explicit authorization. "
+    "Gate only the affected path; continue independent allowed work."
+)
+HEARTBEAT_TURN_BOOTSTRAP_RULE = (
+    "Per wake, replace `<current_time_iso>` once. Run assignment and guard as separate "
+    "statements in one shell, not a command-prefix assignment; reuse the value on retries."
+)
 HOST_LOOP_QUOTA_DISPATCH_RULE = (
-    "After quota, use selection_command when required; otherwise run "
-    "next_cli_actions[0]."
+    "Quota: use selection_command when required; "
+    "先按指令重新进入，完成获准工作并验证后，再按 next_cli_actions 写回和记账。"
 )
 HOST_LOOP_TODO_CLOSEOUT_RULE = (
     "Done -> successor first; final -> accountable refresh, spend, then "

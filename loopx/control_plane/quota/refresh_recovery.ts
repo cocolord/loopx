@@ -5,7 +5,10 @@ import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import { jsonObject, requireJsonObject } from "../runtime_decode.ts";
 import { normalizeDeliveryWorkspaceSnapshot } from "../agents/delivery_workspace.ts";
 
+import { decodeExternalDelivery, type ExternalDeliveryRequest } from "./refresh_external_delivery.ts";
+
 export interface RefreshRetryRequest {
+  external_delivery?: ExternalDeliveryRequest | null;
   vision: JsonObject | null;
   unchanged_reason: string | null;
   merge_patch: boolean;
@@ -34,6 +37,7 @@ export function decodeRefreshRetry(value: unknown): RefreshRetryRequest | null {
     return value;
   };
   return {
+    external_delivery: decodeExternalDelivery(input.external_delivery),
     vision: input.vision === null ? null : requireJsonObject(input.vision, "refresh_retry.vision"),
     unchanged_reason: nullableString("unchanged_reason"),
     merge_patch: input.merge_patch === true,
@@ -55,6 +59,11 @@ function canonical(value: unknown): string {
 }
 
 type Decision = "append" | "replay" | "repair_receipt" | "supplement_checkpoint" | "supplement_workspace" | "reject";
+
+export function isMaterialMonitorPoll(run: JsonObject | null): boolean {
+  if (run?.classification !== "quota_monitor_poll") return false;
+  return run.material_change === true;
+}
 
 export function refreshRecovery(
   request: RefreshRetryRequest,
@@ -97,8 +106,8 @@ export function refreshRecovery(
   // A material poll is not a completed refresh: its receipt-bound first
   // workspace supplement may author next-action/vision through normal refresh
   // validation. Once appended, the recovery digests restore strict replay.
-  const firstMonitorCloseout = missingWorkspace && prior.classification === "quota_monitor_poll" &&
-    prior.material_change === true && prior.refresh_recovery == null && checkpoint === null;
+  const firstMonitorCloseout = missingWorkspace && isMaterialMonitorPoll(prior) &&
+    prior.refresh_recovery == null && checkpoint === null;
   if (firstMonitorCloseout) {
     const unrelatedMutation = Object.entries(request.mutation).some(([key, value]) =>
       key !== "next_action" && value !== null && value !== false &&

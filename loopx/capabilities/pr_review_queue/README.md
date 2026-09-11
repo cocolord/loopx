@@ -22,10 +22,11 @@ authority.
 
 The capability also owns the review-depth contract. The shared
 `agent_response_contract.review_execution_contract` defines required evidence,
-completion, freshness, finding, and verdict rules. Each PR carries a compact
-`review_plan` that binds those rules to one exact head and marks code-symbol and
-negative-walkthrough applicability. Host skills route and publish this packet;
-they must not maintain a second explanation checklist.
+completion, freshness, finding, and verdict rules. Each actionable PR carries a
+compact `review_plan` that binds those rules to one exact head and marks
+code-symbol and negative-walkthrough applicability. Inventory-only rows expose
+no executable review artifacts. Host skills route and publish this packet; they
+must not maintain a second explanation checklist.
 
 Codex agents should use the dedicated `loopx-pr-review` skill for this slash
 command. Do not route `/loopx-pr-review` through the broader `loopx-project`
@@ -35,13 +36,15 @@ workflow or the merge-focused `loopx-pr-merge` skill.
 
 | Command | CLI reference | Intent |
 | --- | --- | --- |
-| `/loopx-pr-review` | `loopx pr-review [--repo owner/repo] [--state open\|merged\|all] [--since ISO]` | List open and merged PRs for the current project or explicit repository, provide concrete main-regression analysis for each PR, and include a blank five-block template that agentloop fills after reading the selected PR body/diff. |
+| `/loopx-pr-review` | `loopx pr-review [--repo owner/repo] [--state open\|merged\|all] [--since ISO] [--fresh-audit-exact-head NUMBER@HEAD_OID]` | List open and merged PRs for the current project or explicit repository, provide concrete main-regression analysis for each actionable PR, and include a blank five-block template that agentloop fills after reading the selected PR body/diff. A typed exact-head option is required to re-audit an unchanged concluded head. |
+| pre-merge readback | `loopx pr-review --repo owner/repo --check-merge-readiness NUMBER@HEAD_OID` | Immediately before merge, fail closed unless the remote PR is still open at the reviewed head, its standalone conclusion approves that head, all checks are successful or skipped, review-thread pagination is complete with no unresolved thread, and merge state is compatible. This read grants no merge authority. |
 
 The slash command must run the CLI first. Agentloop must not reconstruct the
 review window by manually calling `gh pr view` / `gh pr list` for every PR. The
 CLI packet's `review_groups.unmerged`, `review_groups.merged`, and
-`pull_requests[].review_template` are the authoritative queue. The packet's
-`evidence_commands` are for the second step: reading one selected PR deeply.
+`review_sequence` are the authoritative executable queue. Non-null
+`pull_requests[].review_template` and `evidence_commands` are for the second
+step: reading one selected actionable PR deeply.
 Use the JSON form for the first pass so the response contract and per-PR blank
 templates enter the model context:
 
@@ -114,7 +117,7 @@ the cursor as evidence that a review happened.
 `projected_candidate_exact_heads` persists every candidate whose durable Todo
 projection has been explicitly acknowledged but not yet completed. An unchanged
 poll skips those acknowledged exact heads and selects the next unprojected,
-unhandled PR in the age-fair review sequence. Legacy v0 observations treated
+unhandled PR in the capability-ranked review sequence. Legacy v0 observations treated
 emission as projection; v1 deliberately replays their candidates so stale
 emission cursors cannot strand unreviewed PRs. Todo target-key deduplication
 keeps this recovery idempotent.
@@ -149,13 +152,38 @@ states:
 
 The repository-scoped fingerprint contains only compact public PR metadata.
 Persisted `items` carry the PR number, fingerprint, exact head, decision, and
-next action; they never carry review bodies. One community response head after
-`REQUEST_CHANGES` may take the fast-feedback lane, then community work is
-oldest-first by the current head's `review_ready_at`. Author-owned fallback
-reviews follow community work, with 24-hour and 48-hour aging lanes preventing
-starvation. `updatedAt` does not define readiness because comments and checks
-must not make old code look new. Projected candidates remain skipped until
-handled or their exact head materially changes.
+next action; they never carry review bodies.
+`pull_request_review_scheduling_policy_v0` owns the stable queue order:
+
+1. actionable PRs authored by the authenticated developer (`reviewer_login`);
+2. community response heads pushed after an independent `REQUEST_CHANGES`
+   review and community exact heads waiting at least 24 hours;
+3. remaining actionable work in current-head `review_ready_at`, creation-time,
+   and PR-number order;
+4. current heads that already have a conclusion, followed by merged, draft,
+   and closed rows.
+
+Community feedback and aged backlog share one age-fair tier. On a material
+transition, at most one newly pushed community response head may take a bounded
+fast-feedback slot after all unprojected owner-authored work. `updatedAt` does
+not define readiness because comments and checks must not make old code look
+new. Only an explicit PR selection in the current user request may override the
+next item's ordering for that request; it does not override the selected row's
+`review_action_kind` or exact-head idempotency. Todo text, monitor notes, and
+one-off author filters must not replace the capability policy. Projected
+candidates remain skipped until handled or their exact head materially changes.
+
+The command packet keeps inventory and execution queues distinct.
+`pull_requests` and each group's `pr_numbers` retain every row in the requested
+window for compact conclusion readback. Top-level and group `review_sequence`
+contain only rows whose `review_action_kind` is non-null. A merged exact head
+without a valid conclusion receives `audit_merged_pull_request_exact_head`; a
+merged or open exact head with a valid non-action conclusion remains
+inventory-only and cannot become the recommended first PR. The summary's
+attention counts are derived from this same actionable set. Inventory-only rows
+set `review_plan` and `review_template` to null and `evidence_commands` to an
+empty list so hosts cannot mistake readback metadata for execution authority.
+
 It emits a
 `pull_request_review_todo_preview_v0` bound to its exact head. The preview may
 route to initial review, re-review after changes, or merge-readiness
@@ -165,10 +193,10 @@ authority; callers must use normal LoopX Todo authority, `loopx-pr-review`, and
 
 Do not pipe that first packet through `jq` or another projection that only
 keeps `.summary` and `.review_sequence`; that drops
-`agent_response_contract`, `review_groups`, `pull_requests[].review_template`,
-`pull_requests[].review_plan`, and `pull_requests[].evidence_commands`, which
-are the fields that make the command a guided review instead of a statistics
-table.
+`agent_response_contract`, `scheduling_policy`, `review_groups`, and the
+non-null `pull_requests[].review_template`, `pull_requests[].review_plan`, and
+`pull_requests[].evidence_commands`, which are the fields that make an
+actionable row a guided review instead of a statistics table.
 
 ## Capability-Owned Review Execution
 
@@ -247,8 +275,8 @@ progress toward approval by themselves; the reviewer should request the
 smallest viable fix, deletion, split, or hold when the benefit does not justify
 the accumulated mechanism.
 
-The per-PR `pull_request_review_plan_v1` records the exact target, applicability,
-required evidence ids, and an initially `unverified`
+The per-actionable-PR `pull_request_review_plan_v1` records the exact target,
+applicability, required evidence ids, and an initially `unverified`
 `pull_request_review_result_v1` skeleton. Metadata, labels, file counts, risk
 hints, and green CI cannot upgrade evidence to `verified`. A stale-head verdict
 is prohibited. Missing evidence remains `unverified` with a reason instead of
@@ -322,7 +350,16 @@ state transition, author-owned conclusions use `COMMENTED` plus one exact title:
 `Approval conclusion (author-owned PR; GitHub blocks formal self-approval)` or
 `Request changes conclusion (author-owned PR; GitHub blocks formal self-review)`.
 The compact result is versioned as `pull_request_review_conclusion_v0` and
-reports typed invalid-reason codes.
+reports a typed verdict and invalid-reason codes.
+
+`pull_request_merge_readiness_v0` is a separate, read-only last-mile gate. It
+re-reads the named PR instead of trusting a saved review packet. In particular,
+GitHub may retain or reassociate an approval after an update-from-base commit;
+the gate still requires the public review body to name the observed exact head.
+It also rejects missing, pending, failed, or unknown checks and incomplete or
+unresolved review threads. An admin bypass may satisfy GitHub's author-owned
+self-review limitation, but it never overrides this capability gate or supplies
+user merge authority.
 
 They must not include raw logs, private connector payloads, credentials, local
 absolute paths, private source bodies, or hidden CI artifacts.
@@ -356,6 +393,17 @@ absolute paths, private source bodies, or hidden CI artifacts.
     "recommended_limit": null,
     "rerun_cli_args": []
   },
+  "scheduling_policy": {
+    "schema_version": "pull_request_review_scheduling_policy_v0",
+    "identity_basis": "request.reviewer_login",
+    "owner_first_active": true,
+    "community_backlog_age_hours": 24.0,
+    "ordered_tiers": [
+      {"tier": 0, "id": "authenticated_developer_owned"},
+      {"tier": 1, "id": "community_feedback_and_aged_backlog"},
+      {"tier": 2, "id": "composite_remaining"}
+    ]
+  },
   "summary": {
     "headline": "8 PR(s) in review window: 3 open, 5 merged; 8 need review attention.",
     "total_pr_count": 8,
@@ -380,6 +428,8 @@ absolute paths, private source bodies, or hidden CI artifacts.
       "review_depth": "docs_and_smoke_review",
       "risk_hint_level": "low",
       "main_risk_level": "low",
+      "scheduling_lane": "authenticated_developer_owned",
+      "scheduling_tier": 0,
       "why_now": "Open and awaiting reviewer decision."
     }
   ],
@@ -490,9 +540,9 @@ absolute paths, private source bodies, or hidden CI artifacts.
       "agent_response_contract.review_execution_contract",
       "result_completeness",
       "review_groups",
-      "pull_requests[].review_plan",
-      "pull_requests[].review_template",
-      "pull_requests[].evidence_commands"
+      "pull_requests[review_action_kind!=null].review_plan",
+      "pull_requests[review_action_kind!=null].review_template",
+      "pull_requests[review_action_kind!=null].evidence_commands"
     ],
     "required_final_sections": [
       "动机",
@@ -523,6 +573,15 @@ challenge whether the design should ship, falsify its strongest material claim,
 inspect the whole implementation, then reconcile the verdict. The goal is justified
 acceptance, not more rejections. Read the target repository's architecture rules;
 do not export LoopX-specific kernel/provider or TypeScript placement to other repos.
+
+Before those evidence steps, apply
+`pr_review_selection_execution_contract_v0`. A generic `re-review`,
+`重新review`, or `复审` request selects and orders the named PR but does not force
+a duplicate audit. When `review_action_kind` is null, perform only a compact
+exact-head conclusion readback. A fresh audit despite a null action requires an
+explicit request or concrete new concern/evidence invalidation encoded as
+`--fresh-audit-exact-head NUMBER@HEAD_OID`; the regenerated actionable row must
+still satisfy the complete execution contract.
 
 A re-review has two scopes: the latest corrective diff and the complete base-to-head
 PR. Reuse observations only after checking their revisions and assumptions against
@@ -558,8 +617,12 @@ Keeping a legacy storage writer does not justify keeping its independent
 eligibility, retention, ordering or successor rules. Name actual retired rules
 and justified compatibility/effect code, not a net-deletion quota. A positive
 twin with shared decisions and necessary extra adapter code must remain
-approvable. Verified evidence rows must fill their declared fields; the checker
-validates this completeness only, never the truth of their contents.
+approvable. Verified evidence rows must fill their declared fields and structured
+shapes. `symbol_map.items` obeys the declared count and item fields;
+`walkthroughs.positive` plus any applicable `walkthroughs.negative` fill their
+declared fields; `validation_matrix.items[].case_id` proves coverage of the
+packet's typed required cases. The checker validates this completeness only,
+never the truth of their contents.
 
 Behavioral qualification lives in `tests/capabilities/test_pr_review_behavior.py`:
 paired synthetic cases include valid designs as well as counterexamples. The optional
@@ -581,9 +644,10 @@ The packet should let a reviewer move through PRs in order:
 1. Start from `review_groups.unmerged` for PRs that can still affect merge
    decisions.
 2. Then use `review_groups.merged` for post-merge audit and follow-up quality.
-3. Use `evidence_commands`, key files, changed-file scale, and checks to open
-   the actual PR body and diff.
-4. Execute the PR's `review_plan` against
+3. For a non-null action, use `evidence_commands`, key files, changed-file
+   scale, and checks to open the actual PR body and diff. For a null action,
+   stop after compact exact-head conclusion readback.
+4. Execute the actionable PR's `review_plan` against
    `agent_response_contract.review_execution_contract`; keep unavailable
    evidence explicitly unverified.
 5. Read `main_regression_analysis` before filling risk prose. It is the CLI's
@@ -596,7 +660,8 @@ The packet should let a reviewer move through PRs in order:
 7. Treat `metadata_risk_hint` only as queue-ordering metadata. It must not be
    copied as the final risk judgement.
 8. Recheck the exact head, then decide `approve`, `request changes`, `defer`, or
-   `merge after checks`.
+   `merge after checks`. Immediately before merge, require
+   `--check-merge-readiness NUMBER@HEAD_OID` to return `ready=true`.
 
 A response that only lists `Open` and `Merged` PRs, scale, and recommended next
 order is incomplete for `/loopx-pr-review`; it should continue into the
@@ -619,6 +684,16 @@ A first implementation is acceptable when:
   lifecycle group, and keeps `review_groups.merged` non-empty when merged PRs
   exist in the requested window; `--state open` preserves the old open-only
   review queue;
+- `pull_requests` remains the full bounded inventory while every
+  `review_sequence` contains only rows with a non-null `review_action_kind`;
+  valid concluded exact heads are never recommended for duplicate work and
+  carry null plan/template plus empty evidence commands;
+- `--fresh-audit-exact-head NUMBER@HEAD_OID` is the only packet-level way to
+  turn an unchanged valid conclusion into an actionable fresh audit, and
+  malformed, absent, or already-actionable targets fail closed;
+- `--check-merge-readiness NUMBER@HEAD_OID` rejects head drift, stale review
+  prose, non-approval conclusions, red/pending/unknown checks, incomplete or
+  unresolved review-thread evidence, and incompatible merge state;
 - the default limit is 100, and exhaustive requests only proceed when
   `result_completeness.complete=true`; truncated packets provide a larger
   `recommended_limit` for the next read;
@@ -630,26 +705,29 @@ A first implementation is acceptable when:
   `review_groups.unmerged` / `review_groups.merged`, and a blank five-block
   review template;
 - the shared `pull_request_review_execution_contract_v2` owns typed evidence,
-  completion, freshness, findings-first, and verdict policy, while every PR has
-  a compact exact-head `pull_request_review_plan_v1` with an unverified result
-  skeleton;
+  completion, freshness, findings-first, and verdict policy, while every
+  actionable PR has a compact exact-head `pull_request_review_plan_v1` with an
+  unverified result skeleton;
 - the packet includes `agent_response_contract.table_only_response_allowed=false`
   and `agent_response_contract.required_packet_fields_to_preserve` so
   slash-command agents know a table-only chat answer is incomplete;
 - the slash-command catalog marks `/loopx-pr-review` as `must_run_cli_first`
   and `slash_prefix_dominates_intent`, and says manual `gh` calls are only
   per-PR deep-read commands after the CLI packet selects a PR;
-- each PR includes `review_template.sections` for `动机`, `改动思路`,
-  `具体改动`, `对主干的风险`, and `我的整体评价`;
+- each actionable PR includes `review_template.sections` for `动机`, `改动思路`,
+  `具体改动`, `对主干的风险`, and `我的整体评价`; inventory-only rows do not;
 - each review template section carries a section-specific depth range, and the
   packet's explanation-depth contract requires problem, architecture,
   implementation, validation, necessity, and risk evidence instead of a generic
   long answer;
 - live packets expose and recheck `headRefOid` so a review verdict is bound to
   the remote revision actually inspected;
-- autonomous packets order community work by current-head `review_ready_at`,
-  bound response preemption to one slot, age author-owned fallbacks, and ignore
-  check-only activity for priority;
+- autonomous packets rank authenticated-developer-owned actionable work first,
+  then community response and 24-hour backlog, then remaining work by
+  current-head `review_ready_at`; response preemption is bound to one slot and
+  check-only activity does not change readiness priority;
+- `scheduling_policy` is preserved as packet authority; Todo/monitor prose and
+  one-off author filters cannot replace it;
 - `--observation-state-file` atomically carries observation and handled cursors
   across Codex tasks without returning a local path or granting external writes;
 - template sections must leave `content` empty so agentloop reads the real PR

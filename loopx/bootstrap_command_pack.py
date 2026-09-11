@@ -73,6 +73,7 @@ START_GOAL_HOST_SURFACES = (
     "cursor-agent",
     "zcode",
     "agy",
+    "kiro-cli",
     "deepseek-harness",
     "deepseek-harness-native",
     "ark-managed-agent",
@@ -360,6 +361,7 @@ def build_start_goal_host_surface_selection_packet(
         "cursor-agent": "cursor-agent driving its own loop through the LoopX skill facade and MCP server",
         "zcode": "ZCode loop via the LoopX skill facade",
         "agy": "agy session loop via the LoopX skill facade; native /goal + schedule wakes while the session lives",
+        "kiro-cli": "Kiro CLI loop via the LoopX skill facade; native /goal iteration budget",
         "deepseek-harness": "DeepSeek Harness automation loop through loopx.dsh_goal_mode (compat: scripts/dsh_turn_host_adapter.py)",
         "deepseek-harness-native": "DeepSeek Harness same-session LoopX skill and plugin driver",
         "ark-managed-agent": "Ark Managed Agent with one-shot Goal submission",
@@ -1527,6 +1529,7 @@ def build_start_goal_guided_packet(
             project_connection,
             resolved_goal_id=str(command_pack.get("goal_id") or ""),
             effective_agent_id=str(command_pack.get("agent_id") or "") or None,
+            runtime_root_arg=runtime_root_arg,
         )
         if isinstance(project_connection, dict)
         and not isinstance(identity_selection_gate, dict)

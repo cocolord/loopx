@@ -5,6 +5,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..control_plane.scheduler.provider_monitor_poll import (
+    require_monitor_poll_source_available,
+)
 from ..control_plane.quota.error_codes import QuotaCommandValidationError
 from ..control_plane.runtime.status_projection_cache import (
     load_status_projection_cache,
@@ -221,6 +224,12 @@ def prepare_quota_command_context(
         registry_path=registry_path,
         runtime_root_override=runtime_root_arg,
     )
+    if command == "monitor-poll" and args.execute and (args.todo_id or args.target_key):
+        # Canonical availability precedes unrelated status/quota preparation.
+        # The eventual transaction repeats its fence check under the writer lock.
+        require_monitor_poll_source_available(
+            runtime_root=runtime_root, goal_id=args.goal_id,
+        )
     status_goal_id = args.goal_id if command not in {"status", "plan"} else None
     projection_cache_ttl_seconds = int(
         getattr(args, "projection_cache_ttl_seconds", 120)

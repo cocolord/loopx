@@ -253,6 +253,101 @@ def test_projection_creates_archive_region_for_archived_records() -> None:
     assert replay.changed is False
 
 
+@pytest.mark.parametrize("corrupt_scope", [False, True])
+def test_optional_scope_version_is_display_only_not_permission_to_change_scope(monkeypatch, corrupt_scope):
+    from loopx.control_plane.todos import machine_section_projection as module
+
+    records = _records()
+    records[1]["decision_scope"].pop("schema_version")
+    before = deepcopy(records)
+    original = module._render_record
+
+    def render(record, **kwargs):
+        if corrupt_scope and record.get("decision_scope"):
+            record = {**record, "decision_scope": {**record["decision_scope"], "scope_key": "different_scope"}}
+        return original(record, **kwargs)
+
+    monkeypatch.setattr(module, "_render_record", render)
+    if corrupt_scope:
+        with pytest.raises(TodoSectionProjectionError, match="parity mismatch"):
+            render_canonical_todo_sections(SOURCE, records, provider_revision="scope-version")
+    else:
+        rendered = render_canonical_todo_sections(SOURCE, records, provider_revision="scope-version")
+        assert "direction:action:authority_cutover" in rendered.markdown
+    assert records == before
+
+
+@pytest.mark.parametrize("schema_version", ["decision_scope_v1", "", None, 7])
+def test_projection_rejects_explicit_invalid_scope_version_without_mutation(
+    schema_version: object,
+) -> None:
+    records = _records()
+    records[1]["decision_scope"]["schema_version"] = schema_version
+    before = deepcopy(records)
+
+    with pytest.raises(
+        TodoSectionProjectionError,
+        match=r"decision_scope\.schema_version must be 'decision_scope_v0'",
+    ):
+        render_canonical_todo_sections(
+            SOURCE,
+            records,
+            provider_revision="scope-version",
+        )
+
+    assert records == before
+
+
+@pytest.mark.parametrize(
+    ("decision_id", "message"),
+    [
+        ("todo_bad!", "must be a public-safe Todo id"),
+        ("", "must be a public-safe Todo id"),
+        (None, "must be a public-safe Todo id"),
+        (7, "must be a public-safe Todo id"),
+        ("todo_decision", "cannot be represented by the current Markdown projection"),
+    ],
+)
+def test_projection_rejects_unrepresentable_decision_id_without_mutation(
+    decision_id: object,
+    message: str,
+) -> None:
+    records = _records()
+    records[1]["decision_scope"]["decision_id"] = decision_id
+    before = deepcopy(records)
+
+    with pytest.raises(TodoSectionProjectionError, match=message):
+        render_canonical_todo_sections(
+            SOURCE,
+            records,
+            provider_revision="scope-decision-id",
+        )
+
+    assert records == before
+
+
+def test_projection_rejects_non_object_or_unknown_scope_shape() -> None:
+    for value, message in (
+        ("direction:action:authority_cutover", "must be an object"),
+        (
+            {**_records()[1]["decision_scope"], "future_field": "value"},
+            "unsupported fields",
+        ),
+    ):
+        records = _records()
+        records[1]["decision_scope"] = value
+        before = deepcopy(records)
+
+        with pytest.raises(TodoSectionProjectionError, match=message):
+            render_canonical_todo_sections(
+                SOURCE,
+                records,
+                provider_revision="scope-shape",
+            )
+
+        assert records == before
+
+
 def test_projection_rejects_duplicate_sections_and_unsafe_revision() -> None:
     duplicate = SOURCE + "\n## Agent Todo\n\n- [ ] duplicate\n"
     with pytest.raises(TodoSectionProjectionError, match="multiple agent"):

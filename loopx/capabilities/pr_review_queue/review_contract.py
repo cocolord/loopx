@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 # Increment when review requirements change without changing the packet shape.
-REVIEW_POLICY_REVISION = 1
+REVIEW_POLICY_REVISION = 3
 
 REQUIRED_FINAL_SECTIONS = [
     "动机",
@@ -115,7 +115,12 @@ def build_review_execution_contract() -> dict[str, Any]:
         ),
         "evidence_status_values": ["verified", "unverified", "not_applicable"],
         "decision_procedure": {
-            "order": ["challenge_design", "falsify_claims", "inspect_implementation", "reconcile_verdict"],
+            "order": [
+                "challenge_design",
+                "falsify_claims",
+                "inspect_implementation",
+                "reconcile_verdict",
+            ],
             "challenge_design": (
                 "Before explaining how the patch works, make the strongest evidence-backed "
                 "case for not shipping it. Compare doing nothing, a smaller fix in the existing "
@@ -186,25 +191,40 @@ def build_review_execution_contract() -> dict[str, Any]:
                 "evidence_id": "repository_reuse",
                 "required_when": "behavior_bearing_change",
                 "verdict_values": [
-                    "reused", "separation_justified", "no_existing_candidate",
-                    "unjustified_duplication", "not_yet_proven",
+                    "reused",
+                    "separation_justified",
+                    "no_existing_candidate",
+                    "unjustified_duplication",
+                    "not_yet_proven",
                 ],
                 "fields": [
-                    "searched_revisions", "queries_and_paths", "existing_candidates",
-                    "semantic_comparison", "reuse_or_separation_reason",
-                    "state_model_assessment", "rule_ownership", "validation_evidence", "verdict",
+                    "searched_revisions",
+                    "queries_and_paths",
+                    "existing_candidates",
+                    "semantic_comparison",
+                    "reuse_or_separation_reason",
+                    "state_model_assessment",
+                    "rule_ownership",
+                    "validation_evidence",
+                    "verdict",
                 ],
                 "comparison_dimensions": [
-                    "resource_and_caller", "data_scope_and_filters",
-                    "ordering_and_pagination", "authority_and_sanitization",
+                    "resource_and_caller",
+                    "data_scope_and_filters",
+                    "ordering_and_pagination",
+                    "authority_and_sanitization",
                     "state_retry_and_failure_owner",
                 ],
                 "rule_ownership": {
                     "required_when": "retained_or_parallel_implementations",
                     "row_fields": [
-                        "business_rule", "baseline_owner", "head_owner",
-                        "retained_path_and_caller", "retention_reason",
-                        "deleted_rule_or_exit_condition", "validation",
+                        "business_rule",
+                        "baseline_owner",
+                        "head_owner",
+                        "retained_path_and_caller",
+                        "retention_reason",
+                        "deleted_rule_or_exit_condition",
+                        "validation",
                     ],
                     "rule": (
                         "For migrations, fallback paths, dual providers or old/new entrypoints, "
@@ -225,15 +245,23 @@ def build_review_execution_contract() -> dict[str, Any]:
                 "state_model_assessment": {
                     "required_when": "introduced_or_newly_enforced_state",
                     "classification_values": [
-                        "authoritative_fact", "irreducible_intent",
-                        "derived_projection", "diagnostic_hint",
+                        "authoritative_fact",
+                        "irreducible_intent",
+                        "derived_projection",
+                        "diagnostic_hint",
                     ],
                     "item_fields": [
-                        "field_or_relation", "classification", "existing_canonical_sources",
-                        "derivation_or_irreducibility_evidence", "producer_and_trigger",
-                        "authoring_discovery_path", "update_retire_and_replay_owner",
-                        "missing_stale_or_conflicting_value_behavior", "source_completeness",
-                        "counterfactual_validation", "decision",
+                        "field_or_relation",
+                        "classification",
+                        "existing_canonical_sources",
+                        "derivation_or_irreducibility_evidence",
+                        "producer_and_trigger",
+                        "authoring_discovery_path",
+                        "update_retire_and_replay_owner",
+                        "missing_stale_or_conflicting_value_behavior",
+                        "source_completeness",
+                        "counterfactual_validation",
+                        "decision",
                     ],
                     "rule": (
                         "Before accepting each added or newly enforced declaration, flag, "
@@ -437,6 +465,7 @@ def build_review_execution_contract() -> dict[str, Any]:
             {
                 "evidence_id": "symbol_map",
                 "required_when": "code_change",
+                "items_field": "items",
                 "item_count": {"minimum": 2, "maximum": 5},
                 "item_fields": [
                     "path",
@@ -459,6 +488,8 @@ def build_review_execution_contract() -> dict[str, Any]:
             {
                 "evidence_id": "walkthroughs",
                 "required_when": "always",
+                "positive_field": "positive",
+                "negative_field": "negative",
                 "positive_fields": [
                     "trigger",
                     "ordered_symbols_or_steps",
@@ -479,7 +510,9 @@ def build_review_execution_contract() -> dict[str, Any]:
             {
                 "evidence_id": "validation_matrix",
                 "required_when": "always",
+                "items_field": "items",
                 "item_fields": [
+                    "case_id",
                     "invariant_or_case",
                     "command_or_check",
                     "status",
@@ -488,9 +521,18 @@ def build_review_execution_contract() -> dict[str, Any]:
                     "skip_or_failure_reason",
                 ],
                 "required_cases": [
-                    "changed invariant positive case",
-                    "material negative or failure case when applicable",
-                    "repository-required checks",
+                    {
+                        "case_id": "changed_invariant_positive",
+                        "required_when": "always",
+                    },
+                    {
+                        "case_id": "material_negative_or_failure",
+                        "required_when": "negative_walkthrough_required",
+                    },
+                    {
+                        "case_id": "repository_required_checks",
+                        "required_when": "always",
+                    },
                 ],
             },
             {
@@ -874,7 +916,11 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
             required_evidence.append("scope_fit")
         required_evidence.append("default_off_isolation")
         required_evidence.append("behavior_change_disclosure")
-    if areas & {"product_runtime", "public_entry_or_policy", "agent_instruction_surface"}:
+    if areas & {
+        "product_runtime",
+        "public_entry_or_policy",
+        "agent_instruction_surface",
+    }:
         required_evidence.append("domain_neutrality")
         required_evidence.append("guidance_vs_obligation")
     if smoke_or_example_only:
@@ -909,11 +955,19 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
             "behavior_change_disclosure_required": behavior_bearing_change,
             "domain_neutrality_required": bool(
                 areas
-                & {"product_runtime", "public_entry_or_policy", "agent_instruction_surface"}
+                & {
+                    "product_runtime",
+                    "public_entry_or_policy",
+                    "agent_instruction_surface",
+                }
             ),
             "guidance_vs_obligation_required": bool(
                 areas
-                & {"product_runtime", "public_entry_or_policy", "agent_instruction_surface"}
+                & {
+                    "product_runtime",
+                    "public_entry_or_policy",
+                    "agent_instruction_surface",
+                }
             ),
             "smoke_or_example_only": smoke_or_example_only,
             "durable_smoke_value_required": smoke_or_example_only,
@@ -944,17 +998,34 @@ def build_agent_response_contract() -> dict[str, Any]:
         "stats_only_requires_explicit_opt_out": True,
         "queue_table_role": "preface_only",
         "default_review_scope": (
-            "Review PRs in review_groups.unmerged first, then review_groups.merged, "
-            "bounded by the requested limit."
+            "Follow scheduling_policy and its ranked actionable review_sequence. An explicit "
+            "request-scoped PR selection may override ordering only; it does not override "
+            "the selected row's review_action_kind or exact-head idempotency."
         ),
+        "selection_execution_contract": {
+            "schema_version": "pr_review_selection_execution_contract_v0",
+            "explicit_selection_scope": "ordering_only",
+            "review_action_authority": "pull_requests[].review_action_kind",
+            "review_sequence_membership": "review_action_kind_non_null_only",
+            "no_action_inventory_location": "pull_requests",
+            "generic_rereview_terms_force_fresh_audit": False,
+            "no_action_behavior": "compact_exact_head_conclusion_readback_only",
+            "no_action_execution_artifacts": "plan_and_template_null_commands_empty",
+            "force_fresh_audit_requires": (
+                "An explicit request to rerun evidence despite the unchanged/no-action "
+                "exact head, or a concrete new concern or evidence invalidation, encoded "
+                "as --fresh-audit-exact-head NUMBER@HEAD_OID."
+            ),
+        },
         "required_packet_fields_to_preserve": [
             "agent_response_contract",
             "agent_response_contract.review_execution_contract",
             "result_completeness",
+            "scheduling_policy",
             "review_groups",
-            "pull_requests[].review_plan",
-            "pull_requests[].review_template",
-            "pull_requests[].evidence_commands",
+            "pull_requests[review_action_kind!=null].review_plan",
+            "pull_requests[review_action_kind!=null].review_template",
+            "pull_requests[review_action_kind!=null].evidence_commands",
         ],
         "stats_only_opt_out_examples": [
             "只统计",
@@ -974,11 +1045,13 @@ def build_agent_response_contract() -> dict[str, Any]:
             "freshness": "Record and recheck the remote head SHA; do not publish a stale verdict.",
         },
         "instructions": [
-            "Use review_groups as the queue and require result_completeness.complete=true for exhaustive review.",
+            "Use scheduling_policy plus review_groups as the queue and require result_completeness.complete=true for exhaustive review.",
             "Start with review_execution_contract.decision_procedure, before implementation narration or prior-comment closure.",
-            "Execute each pull_requests[].review_plan against the shared review_execution_contract before drafting prose.",
+            "Follow the capability-ranked actionable review_sequence; an explicit request-scoped PR selection may override ordering only, while Todo or monitor prose must not replace the stable policy.",
+            "Before evidence commands, obey pull_requests[].review_action_kind. A null action stays in pull_requests inventory but is excluded from review_sequence, carries no execution artifacts, and remains readback-only; generic re-review wording selects the PR but does not force duplicate evidence for an already concluded or merged no-action row.",
+            "Execute each non-null pull_requests[].review_plan against the shared review_execution_contract before drafting prose.",
             "Do not infer verified evidence from title, labels, changed-file counts, metadata_risk_hint, or green CI alone.",
             "Recheck the exact remote head before verdict and publication.",
-            "Render the verified result through pull_requests[].review_template; host skills must not maintain a competing depth checklist.",
+            "Render the verified result through a non-null pull_requests[].review_template; host skills must not maintain a competing depth checklist.",
         ],
     }

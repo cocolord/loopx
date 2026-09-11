@@ -144,6 +144,10 @@ Before moving `stable`, maintainers should:
 - bump `loopx.__version__` and `pyproject.toml` together when user-visible
   release behavior changes;
 - create or verify the matching Git tag, for example `v0.1.3`;
+- for host Goal/prompt changes, explicitly run the
+  [release-only native Goal regression](../development/testing-and-quality.md#release-only-native-goal-regression--仅发布前的原生-goal-回归)
+  in a supported Codex environment; record an unavailable environment as
+  `skipped`, not a live pass. Never enable paid model execution in default PR CI;
 - fast-forward `stable` to that tagged commit after the release canary passes;
 - confirm `release.json`, `loopx doctor`, and `loopx update check` report the
   same package version and tag;
@@ -550,6 +554,14 @@ path, and canary route rather than as a user-facing release baseline.
   and frozen bundles install the same version-bound workflow skills as package
   distributions. The exact-tag Python, PyPI, macOS, Windows, signed-update,
   public-smoke, and live-model gates passed before `stable` fast-forwarded.
+- `v1.0.2` on 2026-09-09 11:22 +08:00: single-owner Todo authority and
+  recovery release at the matching `v1.0.2` tag (`a5374d5b`). Promoted Todo
+  terminal transitions commit through one TypeScript-owned provider
+  transaction; missing generated Todo projections recover without making
+  Markdown authoritative; and long-history, Desktop, DSH, and managed-skill
+  paths gain bounded reads and clearer recovery diagnostics. The published
+  wheel, source distribution, macOS, Windows, checksum, update, and PyPI
+  artifacts were verified against the exact release source before promotion.
 
 When a new public release is promoted, add it here only after the matching tag,
 release note, stable ref, update path, and focused release canary agree.

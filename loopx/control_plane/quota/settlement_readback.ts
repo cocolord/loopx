@@ -29,7 +29,14 @@ import {
   receiptBoundReplayPhase,
 } from "./settlement_phase.ts";
 import { isTurnScopedSettlementOutcome } from "../work_items/delivery_outcome.ts";
-import { decodeRefreshRetry, refreshRecovery, type RefreshRetryRequest } from "./refresh_recovery.ts";
+import {
+  decodeRefreshRetry,
+  isMaterialMonitorPoll,
+  refreshRecovery,
+  type RefreshRetryRequest,
+} from "./refresh_recovery.ts";
+
+import { refreshExternalDelivery } from "./refresh_external_delivery.ts";
 
 export const QUOTA_SETTLEMENT_READBACK_REQUEST_SCHEMA =
   "loopx_quota_settlement_readback_request_v0";
@@ -427,7 +434,7 @@ function inferPersistedIdentity(
     if (
       classification === "quota_slot_voided" ||
       classification === "quota_scheduler_ack" ||
-      (classification === "quota_monitor_poll" && run.material_change !== true) ||
+      (classification === "quota_monitor_poll" && !isMaterialMonitorPoll(run)) ||
       (classification === "state_refreshed" &&
         !isTurnScopedSettlementOutcome(
           run.delivery_outcome,
@@ -758,6 +765,15 @@ export async function readQuotaSettlement(value: unknown): Promise<JsonObject> {
     normalizeDeliveryWorkspaceCausality(nestedCausality, identity.todo_id) ??
     normalizeDeliveryWorkspaceCausality(flatCausality, identity.todo_id);
 
+  const recovery = request.refresh_retry === null ? null : refreshRecovery(
+    request.refresh_retry, writebackRun, writeback.failure === null,
+    workspaceCausality?.requirement,
+    writebackRun !== null && runs.slice(runs.indexOf(writebackRun) + 1).some((run) =>
+      run.goal_id === identity.goal_id && run.agent_id === identity.agent_id &&
+      (jsonObject(run.agent_vision) !== null || jsonObject(run.vision_checkpoint)?.required === true)
+    ),
+  );
+
   return {
     schema_version: QUOTA_SETTLEMENT_READBACK_RESULT_SCHEMA,
     found: true,
@@ -771,13 +787,10 @@ export async function readQuotaSettlement(value: unknown): Promise<JsonObject> {
     workspace_causality: workspaceCausality,
     semantic_replan_guard: projectSemanticReplanGuard(receiptDetails),
     writeback_run: writebackRun,
-    refresh_recovery: request.refresh_retry === null ? null : refreshRecovery(
-      request.refresh_retry, writebackRun, writeback.failure === null,
-      workspaceCausality?.requirement,
-      writebackRun !== null && runs.slice(runs.indexOf(writebackRun) + 1).some((run) =>
-        run.goal_id === identity.goal_id && run.agent_id === identity.agent_id &&
-        (jsonObject(run.agent_vision) !== null || jsonObject(run.vision_checkpoint)?.required === true)
-      ),
+    refresh_recovery: recovery,
+    external_delivery: request.refresh_retry === null ? null : refreshExternalDelivery(
+      request.refresh_retry.external_delivery ?? null, identity, events,
+      recovery?.decision !== "reject" && recovery?.decision !== "repair_receipt",
     ),
     spend_run: spendRun,
     heartbeat_receipt: heartbeatReceipt,
@@ -786,7 +799,7 @@ export async function readQuotaSettlement(value: unknown): Promise<JsonObject> {
     completion_event: completionEvent,
     monitor_phase: receiptBoundMonitorPhase({
       poll_present: monitorPoll !== null,
-      material_change: monitorPoll?.material_change === true,
+      material_change: isMaterialMonitorPoll(monitorPoll),
       durable_writeback_present: writeback.failure === null,
       quota_spend_present: spend.failure === null,
     }),

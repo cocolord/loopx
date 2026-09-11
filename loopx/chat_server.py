@@ -30,7 +30,11 @@ from .chat_goal_subagent_api import (
 )
 from .chat_status_api import ChatStatusRequestMixin
 from .chat_runtime import ChatRuntimeController, TERMINAL_TURN_STATES
-from .chat_ssh_source_api import SSH_SOURCE_ENSURE_PATH, SshSourceRequestMixin
+from .chat_manager import (
+    MANAGER_AGENT_GOAL_ID, MANAGER_AGENT_OBJECTIVE, is_manager_channel,
+    manager_workspace, manager_model_config,
+)
+from .chat_ssh_source_api import SshSourceRequestMixin
 from .chat_store import ChatSessionStore
 from .control_plane.status.ssh_host_catalog import (
     SSH_HOST_CATALOG_PATH,
@@ -58,6 +62,7 @@ from .extensions.lark.goal_channel import (
 )
 from .extensions.lark.goal_topic_connections import list_lark_apps
 from .extensions.lark.goal_topic_runtime import LarkGoalTopicRuntimeService
+from .extensions.lark.manager_routing import authorized_manager_goal_ids
 from .extensions.lark.presentation.kanban import (
     CommandRunner,
 )
@@ -67,6 +72,7 @@ from .extensions.runtime import (
 )
 from .history import load_registry
 from .chat_completed_todos import CompletedTodoPages, CompletedTodoRequestMixin
+from .kiro_cli_goal_mode import KIRO_CLI_BIN
 from .paths import resolve_runtime_root
 from .release_manifest import release_runtime_identity
 from .registry import registry_goals, resolve_state_file
@@ -75,6 +81,7 @@ from .status_server import (
     cors_response_headers,
     is_loopback_host,
     is_loopback_origin,
+    parse_strict_json_object,
 )
 
 
@@ -87,15 +94,6 @@ CHAT_ENDPOINTS_PATH = "/api/chat/endpoints"
 CHAT_SESSIONS_PATH = "/api/chat/sessions"
 CHAT_ATTACH_SESSION_PATH = f"{CHAT_SESSIONS_PATH}/attach"
 CHAT_PROJECTION_MESSAGES_PATH = "/api/chat/projection-messages"
-MANAGER_AGENT_GOAL_ID = "loopx-manager"
-MANAGER_AGENT_OBJECTIVE = (
-    "Serve as the user's LoopX Goal manager. Answer only the current user message in concise Chinese. "
-    "Summarize and clarify Goal state, and convert requested durable changes into bounded proposals. "
-    "Do not inspect repositories, modify files, run commands, or mutate LoopX state in this Chat Turn. "
-    "Goal, Todo, Agent, heartbeat, monitor, gate, and correction changes must be presented through "
-    "the typed preview and explicit apply control plane. Never claim that a durable change happened "
-    "until the control plane returns a verified receipt."
-)
 CHAT_TODO_DRY_RUN_PATH = "/api/chat/todo/dry-run"
 CHAT_TODO_APPLY_PATH = "/api/chat/todo/apply"
 CHAT_GOAL_CHANNEL_TARGETS_PATH = "/api/chat/goal-channel/targets"
@@ -430,6 +428,8 @@ class ChatHTTPServer(ThreadingHTTPServer):
     def server_close(self) -> None:
         if hasattr(self, "lark_app_setup_manager"):
             self.lark_app_setup_manager.close()
+        if hasattr(self, "manager_return_service"):
+            self.manager_return_service.close()
         if hasattr(self, "lark_goal_topic_runtime"):
             self.lark_goal_topic_runtime.close()
         if hasattr(self, "runtime_controller"):
@@ -491,10 +491,7 @@ class ChatRequestHandler(
             raise ValueError("request body is empty")
         if length > 64_000:
             raise ValueError("request body is too large")
-        payload = json.loads(self.rfile.read(length).decode("utf-8"))
-        if not isinstance(payload, dict):
-            raise ValueError("request body must be a JSON object")
-        return payload
+        return parse_strict_json_object(self.rfile.read(length))
 
     def _require_loopback_origin(self) -> bool:
         if is_loopback_origin(self.headers.get("Origin")):
@@ -521,6 +518,13 @@ class ChatRequestHandler(
         if goal is None:
             raise ValueError("goal_id was not found in the active LoopX registry")
         return registry, goal
+
+    def _session_context(self, session: dict[str, object]) -> dict[str, object]:
+        if is_manager_channel(session.get("channel_id")):
+            return {"project": manager_workspace(self.server.chat_store.root, str(session["channel_id"])),
+                    "objective": MANAGER_AGENT_OBJECTIVE, "title": "LoopX global manager"}
+        registry, goal = self._registry_and_goal(str(session["goal_id"]))
+        return _goal_public_context(registry, goal)
 
     def _serve_asset(self, path: str) -> None:
         relative = "index.html" if path in {"/chat", "/chat/"} else path.removeprefix("/chat/")
@@ -556,20 +560,18 @@ class ChatRequestHandler(
             if unknown:
                 raise ValueError("unknown session field")
             goal_id = _compact_text(body.get("goal_id"), limit=160) or self.server.selected_goal_id or ""
-            if not goal_id:
-                raise ValueError("goal_id is required when multiple Goals are available")
             agent_id = _compact_text(body.get("agent_id"), limit=80) or "codex"
             mode = _compact_text(body.get("mode"), limit=40) or "resume_latest"
             context_kind = _compact_text(body.get("context_kind"), limit=40) or "goal"
             if context_kind not in {"goal", "manager"}:
                 raise ValueError("context_kind must be goal or manager")
-            registry, goal = self._registry_and_goal(goal_id)
-            context = _goal_public_context(registry, goal)
-            runtime_objective = (
-                MANAGER_AGENT_OBJECTIVE
-                if context_kind == "manager"
-                else str(context["objective"] or context["title"])
-            )
+            if context_kind == "manager":
+                goal_id = MANAGER_AGENT_GOAL_ID
+                context = self._session_context({"channel_id": "manager"})
+            else:
+                registry, goal = self._registry_and_goal(goal_id)
+                context = _goal_public_context(registry, goal)
+            runtime_objective = str(context["objective"] or context["title"])
             project = context["project"]
             if not project.is_dir():
                 raise CodexChatAgentError(
@@ -679,13 +681,8 @@ class ChatRequestHandler(
                 raise ValueError("message is required")
             attachments = normalize_chat_image_attachments(body.get("attachments"))
             client_turn_id = _compact_text(body.get("client_turn_id"), limit=160) or uuid.uuid4().hex
-            registry, goal = self._registry_and_goal(str(session["goal_id"]))
-            context = _goal_public_context(registry, goal)
-            runtime_objective = (
-                MANAGER_AGENT_OBJECTIVE
-                if session.get("channel_id") == "manager"
-                else str(context["objective"] or context["title"])
-            )
+            context = self._session_context(session)
+            runtime_objective = str(context["objective"] or context["title"])
             turn, created = self.server.runtime_controller.submit_turn(
                 session_id=session_id,
                 client_turn_id=client_turn_id,
@@ -853,13 +850,8 @@ class ChatRequestHandler(
             session = self.server.chat_store.load_session(session_id)
             if session is None:
                 raise KeyError("chat session was not found")
-            registry, goal = self._registry_and_goal(str(session["goal_id"]))
-            context = _goal_public_context(registry, goal)
-            objective = (
-                MANAGER_AGENT_OBJECTIVE
-                if session.get("channel_id") == "manager"
-                else str(context["objective"] or context["title"])
-            )
+            context = self._session_context(session)
+            objective = str(context["objective"] or context["title"])
             restored = self.server.runtime_controller.resume_session(
                 session_id=session_id,
                 work_dir=context["project"],
@@ -1275,6 +1267,7 @@ class ChatRequestHandler(
             capabilities = {
                 "ok": True,
                 "schema_version": "loopx_chat_capabilities_v1",
+                "manager": {"scope": "owner_global", **manager_model_config()},
                 "runtime_identity": release_runtime_identity(),
                 "agent_backend": "multi_adapter",
                 "sandbox": "read-only",
@@ -1351,7 +1344,7 @@ class ChatRequestHandler(
             CHAT_LARK_APP_SETUPS_PATH: self._lark_setup_start,
             CHAT_LARK_CONNECTIONS_PATH: self._lark_connect,
             **self._configuration_post_routes(),
-            SSH_SOURCE_ENSURE_PATH: self._ssh_source_ensure,
+            **self._ssh_source_post_routes(),
         }
         add_goal_subagent_routes(post_dispatch, handler=self)
         if path in post_dispatch:
@@ -1412,6 +1405,7 @@ def serve_chat(
     goal_id: str | None = None,
     codex_bin: str = "codex",
     claude_bin: str = "claude",
+    kiro_cli_bin: str = KIRO_CLI_BIN,
     lark_cli_bin: str | None = None,
     startup_timeout_sec: float = 30.0,
     idle_timeout_sec: float = 180.0,
@@ -1469,8 +1463,15 @@ def serve_chat(
     server.action_store = ChatActionStore(runtime_root / "chat" / "actions")
     server.runtime_controller = ChatRuntimeController(
         store=server.chat_store,
+        registry_path=resolved_registry_path,
+        manager_scope_resolver=lambda session: authorized_manager_goal_ids(
+            build_lark_goal_topic_runtime_snapshot(
+                registry_path=server.registry_path, runtime_root_override=server.runtime_root_override,
+            ), session, runtime_root=runtime_root,
+        ),
         codex_bin=codex_bin,
         claude_bin=claude_bin,
+        kiro_cli_bin=kiro_cli_bin,
         startup_timeout_sec=startup_timeout_sec,
         idle_timeout_sec=idle_timeout_sec,
         hard_timeout_sec=hard_timeout_sec,
@@ -1491,6 +1492,8 @@ def serve_chat(
         runtime_controller=server.runtime_controller,
     )
     server.lark_goal_topic_runtime.start()
+    from .extensions.lark.manager_returns import start_return_service
+    server.manager_return_service = start_return_service(server, runtime_root)
     url = f"http://{host}:{port}{DEFAULT_CHAT_PATH}"
     print(f"Serving LoopX Chat at {url}", flush=True)
     print("Agent boundary: local adapters, read-only sandbox, approval policy never", flush=True)

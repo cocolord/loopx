@@ -37,7 +37,6 @@ from .control_plane.todos.contract import (
     normalize_todo_required_decision_scopes,
     normalize_todo_replan_obligation_id,
     normalize_todo_resume_when,
-    normalize_supported_todo_resume_when,
     normalize_todo_status,
     normalize_todo_task_domain,
     normalize_todo_task_repository,
@@ -93,7 +92,6 @@ from .control_plane.todos.goal_todo_projection import (
     todo_summaries_from_fields,
 )
 from .control_plane.todos import monitor_metadata as todo_monitor_metadata
-from .control_plane.todos.external_wait_writeback import plan_todo_external_wait_update
 from .control_plane.todos.mutation_authority import authorize_todo_lifecycle_mutation, todo_update_authority_action
 from .control_plane.todos.succession_warning import build_open_parent_successor_advisory
 from .control_plane.todos.successor_derivation import (
@@ -111,11 +109,9 @@ from .control_plane.todos.unblock_resume import (
 from .control_plane.todos.write_correctness import (
     attach_todo_write_correctness_dry_run_packet as _attach_todo_write_correctness_dry_run_packet,
 )
-from .control_plane.todos.write_policy import (
-    require_user_gate_scope,
-    require_user_todo_binding,
+from .control_plane.todos.authoring_scope import (
+    plan_todo_authoring_scope,
     require_user_todo_task_class,
-    resolve_user_gate_global_gate_update,
 )
 from .control_plane.coordination.legacy_writer_fence import legacy_todo_write_transaction
 from .control_plane.coordination.local_authority import (
@@ -124,7 +120,7 @@ from .control_plane.coordination.local_authority import (
     local_authority_is_promoted,
     read_canonical_todos_if_promoted,
 )
-from .control_plane.todos.provider_compatibility_edit import edit_canonical_todo_if_promoted
+from .control_plane.todos.provider_update import update_canonical_todo_if_promoted
 from .control_plane.todos.provider_create import create_canonical_todo_if_promoted
 from .control_plane.todos.path_resolution import resolve_todo_state_path
 from .control_plane.todos.provider_terminal_lifecycle import provider_first_terminal_lifecycle
@@ -774,50 +770,23 @@ def add_goal_todo(
         ) if agent_id else None
     )
     registered_agents = registered_agent_ids_from_registry(registry_path, goal_id)
-    inferred_blocks_agent = blocks_agent
-    if (
-        effective_agent_id and not inferred_blocks_agent and role == "user"
-        and task_class == TODO_TASK_CLASS_USER_GATE
-    ):
-        inferred_blocks_agent = effective_agent_id
-    effective_blocks_agent = (
-        require_registered_agent_id(
-            registry_path=registry_path, goal_id=goal_id,
-            agent_id=inferred_blocks_agent, field="blocks_agent",
-        ) if inferred_blocks_agent else None
-    )
-    inferred_bound_agent = bound_agent
-    if role == "user" and not inferred_bound_agent and not goal_bound:
-        if effective_agent_id:
-            inferred_bound_agent = effective_agent_id
-        elif task_class == TODO_TASK_CLASS_USER_GATE and effective_blocks_agent:
-            inferred_bound_agent = effective_blocks_agent
-        elif len(registered_agents) == 1:
-            inferred_bound_agent = registered_agents[0]
-    effective_bound_agent = (
-        require_registered_agent_id(
-            registry_path=registry_path, goal_id=goal_id,
-            agent_id=inferred_bound_agent, field="bound_agent",
-        ) if inferred_bound_agent else None
-    )
-    effective_goal_bound = bool(goal_bound or global_gate)
     effective_excluded_agents = require_registered_todo_excluded_agents(
-        registry_path=registry_path, goal_id=goal_id,
-        excluded_agents=excluded_agents,
+        registry_path=registry_path, goal_id=goal_id, excluded_agents=excluded_agents,
     )
-    if role != "agent" and effective_excluded_agents:
-        raise ValueError("excluded_agents is only valid for agent todos")
-    require_user_gate_scope(
-        registry_path=registry_path, goal_id=goal_id, role=role,
-        task_class=task_class, blocks_agent=effective_blocks_agent,
-        global_gate=True if global_gate else None,
+    authoring_scope = plan_todo_authoring_scope(
+        command="create", role=role, goal_id=goal_id, registered_agents=registered_agents,
+        intent={
+            "task_class": task_class, "status": status, "actor_agent_id": effective_agent_id,
+            "claimed_by": effective_claimed_by, "bound_agent": bound_agent, "goal_bound": goal_bound,
+            "blocks_agent": blocks_agent, "global_gate": global_gate,
+            "excluded_agents": effective_excluded_agents, "resume_when": resume_when,
+            "task_repository": task_repository, "task_domain": task_domain,
+            "capability_binding_ref": capability_binding_ref,
+        },
     )
-    require_user_todo_binding(
-        registry_path=registry_path, goal_id=goal_id, role=role,
-        task_class=task_class, bound_agent=effective_bound_agent,
-        goal_bound=effective_goal_bound, blocks_agent=effective_blocks_agent,
-        global_gate=True if global_gate else None,
-    )
+    effective_blocks_agent = authoring_scope["blocks_agent"]
+    effective_bound_agent = authoring_scope["bound_agent"]
+    effective_goal_bound = authoring_scope["goal_bound"]
     normalized_unblocks_todo_id = normalize_todo_id(unblocks_todo_id) if unblocks_todo_id else None
     if unblocks_todo_id and not normalized_unblocks_todo_id:
         raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
@@ -827,11 +796,8 @@ def add_goal_todo(
     updated_at = now_local()
     normalized_monitor_metadata = todo_monitor_metadata.require_monitor_metadata_scope(
         monitor_metadata=monitor_metadata, role=role, task_class=task_class,
-        generated_at=updated_at,
-    )
-    todo_monitor_metadata.require_continuous_monitor_boundedness(
-        task_class=task_class, resume_when=normalized_resume_when,
-        monitor_metadata=normalized_monitor_metadata,
+        generated_at=updated_at, resume_when=normalized_resume_when,
+        enforce_boundedness=True,
     )
     canonical_create = create_canonical_todo_if_promoted(
         registry_path=registry_path,
@@ -1070,6 +1036,7 @@ def update_goal_todo(
     clear_claim: bool = False,
     claim_only: bool = False,
     claim_operation_id: str | None = None,
+    update_operation_id: str | None = None,
     task_lease_idempotency_key: str | None = None,
     task_lease_expected_version: int | None = None,
     project: Path | None = None,
@@ -1101,7 +1068,7 @@ def update_goal_todo(
         raise ValueError(
             "--task-lease-expected-version requires --task-lease-idempotency-key"
         )
-    if task_lease_idempotency_key is not None and not promoted_claim:
+    if task_lease_idempotency_key is not None and claim_only and not promoted_claim:
         raise ValueError(
             "--task-lease-idempotency-key on todo claim requires promoted canonical authority; no legacy write attempted"
         )
@@ -1145,28 +1112,41 @@ def update_goal_todo(
         )
         if canonical_claim is not None:
             return canonical_claim
-    # A narrow compatibility editor is admitted through provider CAS. All
-    # other legacy writes still encounter the existing promotion fence.
-    if not claim_only and (text is not None or note is not None) and not any((
+    # Transport explicit planning intent; TS owns its meaning at the canonical
+    # commit revision. Unsupported fields still encounter the promotion fence.
+    planning_intent = {key: value for key, value in {
+        "status": status, "evidence": evidence, "reason": reason,
+        "resume_when": resume_when, "clear_resume_when": clear_resume_when or None,
+        "unblocks_todo_id": unblocks_todo_id, "successor_todo_ids": successor_todo_ids,
+        "no_followup": no_followup,
+    }.items() if value is not None}
+    if not claim_only and (text is not None or note is not None or planning_intent) and not any((
         monitor_metadata,
         goal_bound, clear_blocks_agent, clear_excluded_agents, global_gate,
-        clear_global_gate, clear_resume_when, clear_claim, authority_reason,
+        clear_global_gate, clear_claim, authority_reason,
     )) and all(value is None for value in (
-        status, evidence, reason, task_class, action_kind, task_domain,
+        task_class, action_kind, task_domain,
         task_repository, continuation_policy, required_write_scopes,
         required_capabilities, target_capabilities, explore_result_node_refs,
         decision_scope, required_decision_scopes, claimed_by, bound_agent,
-        blocks_agent, excluded_agents, unblocks_todo_id, successor_todo_ids,
-        resume_when, no_followup, authority_reason,
+        blocks_agent, excluded_agents, authority_reason,
     )):
-        canonical_edit = edit_canonical_todo_if_promoted(
+        canonical_edit = update_canonical_todo_if_promoted(
             registry_path=registry_path, runtime_root=shadow_runtime_root,
             goal_id=goal_id, todo_id=normalize_todo_id(todo_id) or todo_id,
             actor_agent_id=agent_id, role=role, text=text, note=note, dry_run=dry_run,
             project=project, state_file=state_file,
+            operation_id=update_operation_id,
+            task_lease_idempotency_key=task_lease_idempotency_key,
+            task_lease_expected_version=task_lease_expected_version,
+            planning_intent=planning_intent,
         )
         if canonical_edit is not None:
             return canonical_edit
+    if update_operation_id is not None or (not claim_only and (
+        task_lease_idempotency_key is not None or task_lease_expected_version is not None
+    )):
+        raise ValueError("update operation id and lease proof require a supported promoted update; no legacy write attempted")
     resolved_project, resolved_state_file = resolve_todo_state_path(
         registry_path=registry_path,
         goal_id=goal_id,
@@ -1193,8 +1173,6 @@ def update_goal_todo(
         validation_failure = completion_validation_gate.get("failure")
         if validation_failure is not None:
             return validation_failure
-    external_wait_transition: dict[str, Any] | None = None
-    resume_monitor_generation: int | None = None
     with legacy_todo_write_transaction(
         registry_path, goal_id, resolved_state_file, agent_id or claimed_by, "todo_update", dry_run,
         runtime_root=shadow_runtime_root,
@@ -1252,12 +1230,7 @@ def update_goal_todo(
             raise ValueError(f"todo_id {normalized_todo_id!r} was not found in active user or agent todos")
         existing_role, _section, _start, _end, existing_block = existing_block_match
         target_role = role or existing_role
-        monitor_metadata_input, monitor_poll_transition = (
-            todo_monitor_metadata.resolve_monitor_metadata_input(
-                existing=existing_block,
-                monitor_metadata=monitor_metadata,
-            )
-        )
+        monitor_intent = todo_monitor_metadata.monitor_metadata_intent(monitor_metadata)
         authority_todo = dict(existing_block)
         authority_todo["role"] = target_role
         authority_action = todo_update_authority_action(
@@ -1277,7 +1250,7 @@ def update_goal_todo(
                 clear_global_gate, unblocks_todo_id, successor_todo_ids,
                 resume_when, clear_resume_when, no_followup,
             ),
-            monitor_metadata=monitor_metadata_input,
+            monitor_metadata=monitor_intent["observation"] or monitor_intent["metadata"],
         )
         mutation_authority = authorize_todo_lifecycle_mutation(
             registry_path=registry_path,
@@ -1300,56 +1273,11 @@ def update_goal_todo(
             ownership_mutation=(claimed_by is not None or clear_claim) and target_role == "agent",
             runtime_root=shadow_runtime_root,
         )
-        target_task_class = task_class or str(existing_block.get("task_class") or "")
-        if target_role == "user" and claimed_by:
-            raise ValueError(
-                "claimed_by is execution ownership for agent todos, not a user-todo "
-                "binding; use --bound-agent or --goal-bound"
-            )
-        if target_role == "agent" and blocks_agent:
-            raise ValueError(
-                "blocks_agent is only valid for user gates; use excluded_agents for "
-                "agent executor constraints"
-            )
-        if task_repository and target_role != "agent":
-            raise ValueError("task_repository is only valid for agent todos")
-        if task_domain and target_role != "agent":
-            raise ValueError("task_domain is only valid for agent todos")
         effective_excluded_agents = (
-            []
-            if clear_excluded_agents
-            else require_registered_todo_excluded_agents(
-                registry_path=registry_path,
-                goal_id=goal_id,
-                excluded_agents=excluded_agents,
-            )
-            if excluded_agents is not None
-            else None
+            [] if clear_excluded_agents else require_registered_todo_excluded_agents(
+                registry_path=registry_path, goal_id=goal_id, excluded_agents=excluded_agents,
+            ) if excluded_agents is not None else None
         )
-        existing_excluded_agents = normalize_todo_excluded_agents(
-            existing_block.get("excluded_agents")
-        )
-        target_excluded_agents = (
-            effective_excluded_agents
-            if effective_excluded_agents is not None
-            else existing_excluded_agents
-        )
-        if target_role != "agent" and target_excluded_agents:
-            raise ValueError(
-                "excluded_agents is only valid for agent todos; clear exclusions before "
-                "moving this todo to a user role"
-            )
-        target_status = (
-            normalize_todo_status(status)
-            if status
-            else str(existing_block.get("status") or TODO_STATUS_OPEN)
-        )
-        if status and target_role == "agent" and target_status == TODO_STATUS_DONE:
-            raise ValueError(
-                "agent todo completion must use complete_goal_todo "
-                "(CLI: `loopx todo complete`) so completion policy, successor, "
-                "and no-follow-up contracts are enforced"
-            )
         completion_metadata_updates_override = None
         if completion_validation_gate is not None:
             locked_completion = locked_todo_completion_transaction(
@@ -1372,101 +1300,10 @@ def update_goal_todo(
                     ),
                 )
             )
-        existing_blocks_agent = normalize_todo_blocks_agent(existing_block.get("blocks_agent"))
-        existing_global_gate = normalize_todo_global_gate(existing_block.get("global_gate"))
-        existing_bound_agent = normalize_todo_bound_agent(existing_block.get("bound_agent"))
-        existing_goal_bound = normalize_todo_goal_bound(existing_block.get("goal_bound"))
-        target_blocks_agent = None if clear_blocks_agent else effective_blocks_agent or existing_blocks_agent
-        target_global_gate = resolve_user_gate_global_gate_update(
-            role=target_role,
-            task_class=target_task_class,
-            existing_global_gate=existing_global_gate,
-            global_gate=global_gate,
-            clear_global_gate=clear_global_gate,
-        )
-        target_bound_agent = (
-            effective_bound_agent
-            if bound_agent
-            else None
-            if goal_bound
-            else existing_bound_agent
-        )
-        target_goal_bound = True if goal_bound else False if bound_agent else existing_goal_bound
-        registered_agents = registered_agent_ids_from_registry(registry_path, goal_id)
-        if target_role != "user":
-            target_bound_agent = None
-            target_goal_bound = None
-        elif target_task_class == TODO_TASK_CLASS_USER_GATE and target_global_gate:
-            target_bound_agent = None
-            target_goal_bound = True
-        elif target_task_class == TODO_TASK_CLASS_USER_GATE and target_blocks_agent:
-            target_bound_agent = target_blocks_agent
-            target_goal_bound = False
-        elif not target_bound_agent and not target_goal_bound:
-            if len(registered_agents) == 1:
-                target_bound_agent = registered_agents[0]
-        if target_status != TODO_STATUS_DONE:
-            require_user_todo_task_class(
-                role=target_role,
-                task_class=target_task_class,
-                blocks_agent=target_blocks_agent,
-                global_gate=target_global_gate,
-            )
-            require_user_todo_binding(
-                registry_path=registry_path,
-                goal_id=goal_id,
-                role=target_role,
-                task_class=target_task_class,
-                bound_agent=target_bound_agent,
-                goal_bound=target_goal_bound,
-                blocks_agent=target_blocks_agent,
-                global_gate=target_global_gate,
-            )
-            require_user_gate_scope(
-                registry_path=registry_path,
-                goal_id=goal_id,
-                role=target_role,
-                task_class=target_task_class,
-                blocks_agent=target_blocks_agent,
-                global_gate=target_global_gate,
-            )
         normalized_unblocks_todo_id = normalize_todo_id(unblocks_todo_id) if unblocks_todo_id else None
         if unblocks_todo_id and not normalized_unblocks_todo_id:
             raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
         normalized_successor_todo_ids = requested_successor_todo_ids
-        normalized_resume_when = require_supported_todo_resume_when(resume_when)
-        effective_resume_when = (
-            None
-            if clear_resume_when
-            else normalized_resume_when
-            or normalize_supported_todo_resume_when(existing_block.get("resume_when"))
-        )
-        if target_status == TODO_STATUS_DEFERRED and not effective_resume_when:
-            raise ValueError("transition to deferred requires --resume-when with a supported condition")
-        external_wait_transition, resume_monitor_generation = (
-            plan_todo_external_wait_update(
-                lines=lines,
-                todo_id=todo_id,
-                resume_when=normalized_resume_when,
-                successor_todo_ids=(
-                    normalized_successor_todo_ids
-                    if successor_todo_ids is not None
-                    else None
-                ),
-                existing_successor_todo_ids=existing_block.get("successor_todo_ids"),
-                role=target_role,
-                status=target_status,
-                task_class=target_task_class,
-            )
-        )
-        normalized_monitor_metadata = todo_monitor_metadata.validate_monitor_metadata_update(
-            monitor_metadata=monitor_metadata_input,
-            existing=existing_block,
-            role=target_role,
-            task_class=target_task_class, generated_at=updated_at,
-            resume_when=effective_resume_when,
-            enforce_boundedness=enforce_monitor_boundedness,
-        )
         update_result = apply_todo_update_to_lines(
             lines,
             todo_id=todo_id,
@@ -1488,16 +1325,8 @@ def update_goal_todo(
             decision_scope=decision_scope,
             required_decision_scopes=required_decision_scopes,
             claimed_by=effective_claimed_by,
-            bound_agent=target_bound_agent if target_role == "user" else None,
-            goal_bound=(
-                True
-                if target_role == "user" and target_goal_bound
-                else None
-            ),
-            clear_user_binding=(
-                target_role != "user"
-                and bool(existing_bound_agent or existing_goal_bound is not None)
-            ),
+            bound_agent=effective_bound_agent,
+            goal_bound=goal_bound,
             blocks_agent=effective_blocks_agent,
             clear_blocks_agent=clear_blocks_agent,
             excluded_agents=effective_excluded_agents,
@@ -1505,14 +1334,20 @@ def update_goal_todo(
             clear_global_gate=clear_global_gate,
             unblocks_todo_id=normalized_unblocks_todo_id,
             successor_todo_ids=normalized_successor_todo_ids if successor_todo_ids is not None else None,
-            resume_when=normalized_resume_when,
-            resume_monitor_generation=resume_monitor_generation,
+            resume_when=resume_when,
             clear_resume_when=clear_resume_when,
             no_followup=no_followup,
             completion_metadata_updates_override=(
                 completion_metadata_updates_override
             ),
-            monitor_metadata=normalized_monitor_metadata,
+            monitor_metadata=monitor_intent["metadata"],
+            public_context={
+                "goal_id": goal_id, "role": target_role,
+                "actor_agent_id": effective_agent_id,
+                "registered_agents": registered_agent_ids_from_registry(registry_path, goal_id),
+                "monitor_observation": monitor_intent["observation"],
+                "enforce_monitor_boundedness": enforce_monitor_boundedness,
+            },
             clear_claim=clear_claim,
             claim_only=claim_only,
             updated_at=updated_at,
@@ -1546,10 +1381,6 @@ def update_goal_todo(
         )
         if parent_successor_advisory:
             payload["parent_successor_advisory"] = parent_successor_advisory
-    if external_wait_transition is not None:
-        payload["external_wait_transition"] = external_wait_transition
-    if monitor_poll_transition is not None:
-        payload["monitor_poll_transition"] = monitor_poll_transition
     payload = _attach_todo_write_correctness_dry_run_packet(
         payload,
         goal_id=goal_id,

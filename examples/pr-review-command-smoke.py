@@ -61,14 +61,16 @@ def main() -> int:
         "This skill is a thin host adapter",
         "loopx --format json pr-review --state all",
         "agent_response_contract.review_execution_contract",
-        "pull_requests[].review_plan",
-        "pull_requests[].review_template",
-        "pull_requests[].evidence_commands",
+        "pull_requests[review_action_kind!=null].review_plan",
+        "pull_requests[review_action_kind!=null].review_template",
+        "pull_requests[review_action_kind!=null].evidence_commands",
         "Apply `completion_gate` literally",
         "Re-read the remote head immediately before verdict and publication",
         "formal `REQUEST_CHANGES`",
         "Read the published review back",
         "Route approval, merge, self-merge, and admin bypass to `loopx-pr-merge`",
+        "--check-merge-readiness NUMBER@HEAD_OID",
+        "admin bypass never overrides this gate",
         "Full PR Review And Bilingual Format",
         "findings-only or blocker-only body is incomplete",
         "Cover every changed surface and key symbols",
@@ -80,6 +82,8 @@ def main() -> int:
         "Treat `candidate` as a preview, not a durable projection",
         "durable Todo target-key readback -> `--projected-exact-head` -> exact-head review/comment readback -> `--handled-exact-head`",
         "Never send the projection ACK before the Todo exists",
+        "Generic `re-review`, `重新review`, and `复审` wording selects the named PR; it is not a force-refresh token.",
+        "the row stays in `pull_requests` inventory but must not appear in `review_sequence`",
     ):
         assert phrase in skill_text, phrase
     assert len(skill_source.splitlines()) <= 180, len(skill_source.splitlines())
@@ -191,7 +195,19 @@ def main() -> int:
     assert request["repository"] == "owner/repo", request
     assert request["state_filter"] == "all", request
     assert "result_completeness" in request["include"], request
+    assert "scheduling_policy" in request["include"], request
     assert payload["result_completeness"]["complete"] is True, payload
+    scheduling_policy = payload["scheduling_policy"]
+    assert (
+        scheduling_policy["schema_version"]
+        == "pull_request_review_scheduling_policy_v0"
+    ), scheduling_policy
+    assert [item["id"] for item in scheduling_policy["ordered_tiers"][:3]] == [
+        "authenticated_developer_owned",
+        "community_feedback_and_aged_backlog",
+        "composite_remaining",
+    ], scheduling_policy
+    assert "one-off author filters" in scheduling_policy["manual_override_rule"]
     assert payload["summary"]["total_pr_count"] == 4, payload["summary"]
     assert payload["summary"]["open_pr_count"] == 3, payload["summary"]
     assert payload["summary"]["merged_pr_count"] == 1, payload["summary"]
@@ -208,17 +224,132 @@ def main() -> int:
     assert groups["merged"]["pr_numbers"] == [770], groups
     assert groups["unmerged"]["review_sequence"][0]["number"] == 771, groups
     assert groups["merged"]["review_sequence"][0]["number"] == 770, groups
+    assert groups["unmerged"]["actionable_count"] == 2, groups
+    assert groups["unmerged"]["no_action_count"] == 1, groups
+    assert groups["merged"]["actionable_count"] == 1, groups
+    assert groups["merged"]["no_action_count"] == 0, groups
     sequence = payload["review_sequence"]
+    assert all(item["review_action_kind"] is not None for item in sequence), sequence
+    for item in payload["pull_requests"]:
+        if item["review_action_kind"] is None:
+            assert item["review_plan"] is None, item
+            assert item["review_template"] is None, item
+            assert item["evidence_commands"] == [], item
+        else:
+            assert item["review_plan"], item
+            assert item["review_template"], item
+            assert item["evidence_commands"], item
     assert sequence[0]["number"] == 771, sequence
-    assert any(item["number"] == 775 for item in sequence), sequence
+    assert any(item["number"] == 775 for item in payload["pull_requests"]), payload[
+        "pull_requests"
+    ]
+    assert all(item["number"] != 775 for item in sequence), sequence
     assert any(
         item["number"] == 770 and item["state"] == "MERGED" for item in sequence
     ), sequence
+
+    merge_head = "e" * 40
+    with tempfile.TemporaryDirectory() as temp_dir:
+        merge_fixture_path = Path(temp_dir) / "merge-readiness.json"
+        merge_fixture = {
+            "repository": "owner/repo",
+            "pull_requests": [
+                {
+                    "number": 4110,
+                    "title": "Exact-head merge gate fixture",
+                    "url": "https://github.com/owner/repo/pull/4110",
+                    "state": "OPEN",
+                    "author": {"login": "contributor"},
+                    "headRefOid": merge_head,
+                    "baseRefName": "main",
+                    "isDraft": False,
+                    "reviewDecision": "APPROVED",
+                    "mergeStateStatus": "CLEAN",
+                    "files": [
+                        {"path": "src/runtime.py", "additions": 1, "deletions": 1}
+                    ],
+                    "reviews": [
+                        {
+                            "state": "APPROVED",
+                            "body": (
+                                "## 动机\n动机。\n\n## 改动思路\n思路。\n\n"
+                                "## 具体改动\n改动。\n\n## 对主干的风险\n风险。\n\n"
+                                "## 我的整体评价\n通过。\n\n"
+                                f"English verdict: APPROVE at exact head {merge_head}."
+                            ),
+                            "author": {"login": "maintainer"},
+                            "commit": {"oid": merge_head},
+                            "submittedAt": "2026-09-09T11:14:01Z",
+                        }
+                    ],
+                    "statusCheckRollup": [
+                        {
+                            "name": "Sign-off",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS",
+                        },
+                        {
+                            "name": "merge-gate",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS",
+                        },
+                    ],
+                    "review_thread_summary": {
+                        "schema_version": "github_review_thread_summary_v0",
+                        "complete": True,
+                        "total_count": 0,
+                        "unresolved_count": 0,
+                    },
+                }
+            ],
+        }
+        merge_fixture_path.write_text(json.dumps(merge_fixture), encoding="utf-8")
+        ready = json.loads(
+            run_cli(
+                "--format",
+                "json",
+                "pr-review",
+                "--fixture",
+                str(merge_fixture_path),
+                "--check-merge-readiness",
+                f"4110@{merge_head}",
+            ).stdout
+        )
+        assert ready["ready"] is True, ready
+        assert ready["blocking_reasons"] == [], ready
+
+        merge_fixture["pull_requests"][0]["reviews"][0]["body"] = merge_fixture[
+            "pull_requests"
+        ][0]["reviews"][0]["body"].replace(merge_head, "d" * 40)
+        merge_fixture["pull_requests"][0]["statusCheckRollup"][0]["conclusion"] = (
+            "FAILURE"
+        )
+        merge_fixture_path.write_text(json.dumps(merge_fixture), encoding="utf-8")
+        blocked_run = run_cli(
+            "--format",
+            "json",
+            "pr-review",
+            "--fixture",
+            str(merge_fixture_path),
+            "--check-merge-readiness",
+            f"4110@{merge_head}",
+            check=False,
+        )
+        assert blocked_run.returncode == 1, blocked_run
+        blocked = json.loads(blocked_run.stdout)
+        assert (
+            "current_head_review_missing_or_invalid" in blocked["blocking_reasons"]
+        ), blocked
+        assert "status_checks_failed" in blocked["blocking_reasons"], blocked
     assert sequence[0]["risk_hint_level"] == "medium", sequence[0]
     assert sequence[0]["main_risk_level"] == "medium", sequence[0]
     merged_sequence = next(item for item in sequence if item["number"] == 770)
     assert merged_sequence["risk_hint_level"] == "medium", merged_sequence
     assert merged_sequence["main_risk_level"] == "high", merged_sequence
+    assert (
+        merged_sequence["review_action_kind"]
+        == "audit_merged_pull_request_exact_head"
+    ), merged_sequence
     first = next(item for item in payload["pull_requests"] if item["number"] == 773)
     assert "newcomer command path" in first["motivation"], first
     template = first["review_template"]
@@ -310,7 +441,7 @@ def main() -> int:
         (
             p
             for p in payload.get("pull_requests", [])
-            if p.get("review_plan", {}).get("applicability", {}).get("code_change")
+            if (p.get("review_plan") or {}).get("applicability", {}).get("code_change")
         ),
         None,
     )
@@ -349,7 +480,8 @@ def main() -> int:
         (
             p
             for p in payload.get("pull_requests", [])
-            if not p.get("review_plan", {}).get("applicability", {}).get("code_change")
+            if p.get("review_plan")
+            and not p["review_plan"].get("applicability", {}).get("code_change")
         ),
         None,
     )
@@ -667,14 +799,30 @@ def main() -> int:
         response_contract
     )
     assert response_contract["queue_table_role"] == "preface_only", response_contract
+    assert response_contract["selection_execution_contract"] == {
+        "schema_version": "pr_review_selection_execution_contract_v0",
+        "explicit_selection_scope": "ordering_only",
+        "review_action_authority": "pull_requests[].review_action_kind",
+        "review_sequence_membership": "review_action_kind_non_null_only",
+        "no_action_inventory_location": "pull_requests",
+        "generic_rereview_terms_force_fresh_audit": False,
+        "no_action_behavior": "compact_exact_head_conclusion_readback_only",
+        "no_action_execution_artifacts": "plan_and_template_null_commands_empty",
+        "force_fresh_audit_requires": (
+            "An explicit request to rerun evidence despite the unchanged/no-action "
+            "exact head, or a concrete new concern or evidence invalidation, encoded "
+            "as --fresh-audit-exact-head NUMBER@HEAD_OID."
+        ),
+    }, response_contract
     assert response_contract["required_packet_fields_to_preserve"] == [
         "agent_response_contract",
         "agent_response_contract.review_execution_contract",
         "result_completeness",
+        "scheduling_policy",
         "review_groups",
-        "pull_requests[].review_plan",
-        "pull_requests[].review_template",
-        "pull_requests[].evidence_commands",
+        "pull_requests[review_action_kind!=null].review_plan",
+        "pull_requests[review_action_kind!=null].review_template",
+        "pull_requests[review_action_kind!=null].evidence_commands",
     ], response_contract
     assert response_contract["required_final_sections"] == [
         "动机",
