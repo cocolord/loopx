@@ -63,13 +63,20 @@ plugins:
 hooks:
   - docs/rewrite_capability_links.py
 
+extra_javascript:
+  - javascripts/mermaid.js
+
 markdown_extensions:
   - attr_list
   - def_list
   - md_in_html
   - admonition
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.highlight:
