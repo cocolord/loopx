@@ -338,6 +338,13 @@ def main() -> int:
     assert "mermaid@11.12.0/dist/mermaid.esm.min.mjs" in mermaid_runtime
     assert "document$.subscribe(renderMermaid)" in mermaid_runtime
     assert '.mermaid:not([data-processed])' in mermaid_runtime
+    chinese_state_machines = read(BOOK / "chapters" / "core-state-machines.md")
+    english_state_machines = read(BOOK / "en" / "chapters" / "core-state-machines.md")
+    for chapter in (chinese_state_machines, english_state_machines):
+        assert "must_attempt_work" in chapter
+        assert "selection_command" in chapter
+        assert "next_cli_actions[0]" in chapter
+        assert "turn_instance_id" in chapter
     docs_home = read(REPO_ROOT / "docs" / "index.md")
     docs_readme = read(REPO_ROOT / "docs" / "README.md")
     assert "Developer Book](/loopx/docs/book/)" in docs_home

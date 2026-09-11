@@ -385,7 +385,10 @@ flowchart LR
 
 Quota state 不是单独的授权。`interaction_contract` 还会给出 user、agent、CLI channel、workspace
 guard、capability gate、selected Todo、execution obligation 和 scheduler hint。Agent 必须执行的是
-`must_attempt_work` 指向的 bounded action，而不是看到 `NOTIFY` 或 `should_run` 就自行推断。
+`must_attempt_work` 是布尔 obligation：为 `true` 时，本轮必须尝试 bounded work 并写回；它本身不选择
+动作。需要选择 Todo 时先执行 `selection_command`，否则执行 capability packet 或
+`next_cli_actions[0]` 指定的动作。Quota guard、选择、refresh、spend 和 scheduler settlement 必须复用
+同一个 `turn_instance_id`；不能从 `NOTIFY`（只控制用户输出）或孤立的 `should_run` 自行推断动作。
 
 ### Settlement：成功必须按事务顺序落地
 

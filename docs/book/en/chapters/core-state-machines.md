@@ -412,8 +412,11 @@ facts.
 
 A quota state alone is not authorization. The `interaction_contract` also supplies user, Agent, and CLI
 channels, workspace guards, capability gates, the selected Todo, execution obligations, and a scheduler
-hint. An Agent follows the bounded action named by `must_attempt_work`; it does not infer execution from
-`NOTIFY` or `should_run`.
+hint. `must_attempt_work` is a boolean obligation: when it is `true`, the Agent must attempt bounded work
+and write back in this turn; it does not select the action. Run `selection_command` when Todo selection is
+required; otherwise follow the capability packet or `next_cli_actions[0]`. Reuse the same
+`turn_instance_id` across the quota guard, selection, refresh, spend, and scheduler settlement. Do not
+infer the action from `NOTIFY` (which controls user output only) or from `should_run` in isolation.
 
 ### Settlement: success lands in transaction order
 
