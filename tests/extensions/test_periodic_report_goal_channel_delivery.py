@@ -35,11 +35,18 @@ from loopx.capabilities.periodic_report.incremental import (
     write_periodic_report_publication_candidate,
 )
 from loopx.extensions.lark import periodic_report_cli
+from loopx.extensions.manifest import load_extension_manifest
 from loopx.presentation.renderers.periodic_report_markdown import (
     periodic_report_markdown_renderer_adapter,
 )
 
 
+ROOT = Path(__file__).resolve().parents[2]
+LARK_EXTENSION_VERSION = str(
+    load_extension_manifest(ROOT / "loopx/extensions/lark/extension.toml")["provider"][
+        "version"
+    ]
+)
 GOAL_ID = "goal-public-fixture"
 CHAT_ID = "oc_public_fixture"
 APP_ID = "cli_public_fixture"
@@ -141,7 +148,7 @@ def _extension_activation() -> dict[str, Any]:
     return {
         "schema_version": "loopx_extension_activation_v0",
         "extension_id": "loopx-lark",
-        "provider_version": "1.6.0",
+        "provider_version": LARK_EXTENSION_VERSION,
         "revision": "publicfixture123",
         "enabled": True,
         "doctor_verified": True,
