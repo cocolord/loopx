@@ -668,7 +668,7 @@ def apply_scheduler_execution_context(
         "ack_needed": False,
         "acknowledged": False,
         "completion_reason": (
-            "selected scheduler owner requires no App automation apply or ACK"
+            "selected scheduler owner requires no Codex App apply or ACK"
         ),
     }
     if goal_runtime_continuation is not None:

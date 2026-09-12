@@ -20,6 +20,7 @@ def build_codex_app_compatibility_projection(
     agent_id: Any,
     available_capabilities: Any,
     scheduler_host_facts: Mapping[str, Any] | None,
+    observed_host_rrule: Any,
     scheduler_before: Mapping[str, Any],
     automation_id: Any,
     build_ack_hint: Callable[..., dict[str, Any]],
@@ -29,6 +30,7 @@ def build_codex_app_compatibility_projection(
     """Translate the canonical App packet to the exact legacy Codex shape."""
 
     legacy = copy.deepcopy(app_automation)
+    legacy["applicability"] = "applicable"
     legacy["rrule_source"] = (
         "scheduler_hint.codex_app.recommended_rrule"
         if legacy.get("recommended_rrule")
@@ -48,15 +50,26 @@ def build_codex_app_compatibility_projection(
         else None
     )
     if isinstance(legacy.get("failure_hint"), dict):
+        failure_facts = (
+            {
+                **legacy_facts,
+                "operation": "host_failure",
+                "applied_rrule": observed_host_rrule,
+                "observed_host_rrule": observed_host_rrule,
+                "failure_kind": "host_tool_failure",
+                "source": "quota_scheduler_host_update_failure",
+                "host_match_observed": False,
+            }
+            if legacy_facts is not None
+            else None
+        )
         legacy["failure_hint"] = build_failure_hint(
             goal_id=goal_id,
             agent_id=agent_id,
             failed_rrule=legacy.get("recommended_rrule"),
-            observed_host_rrule=(
-                legacy_facts.get("observed_host_rrule") if legacy_facts else None
-            ),
+            observed_host_rrule=observed_host_rrule,
             available_capabilities=available_capabilities,
-            scheduler_host_facts=legacy_facts,
+            scheduler_host_facts=failure_facts,
             scheduler_before=scheduler_before,
         )
         legacy["fallback_hint"] = build_fallback_hint(
@@ -80,7 +93,20 @@ def build_codex_app_compatibility_projection(
             available_capabilities=available_capabilities,
             after=canonical_ack.get("after", "automation_update_rrule_success"),
             host_match_observed=canonical_args.get("host_match_observed") is True,
-            scheduler_host_facts=legacy_facts,
+            scheduler_host_facts=(
+                {
+                    **legacy_facts,
+                    "operation": "ack",
+                    "applied_rrule": canonical_args.get("applied_rrule"),
+                    "observed_host_rrule": observed_host_rrule,
+                    "source": "quota_scheduler_ack",
+                    "host_match_observed": (
+                        canonical_args.get("host_match_observed") is True
+                    ),
+                }
+                if legacy_facts is not None
+                else None
+            ),
             scheduler_before=scheduler_before,
         )
     return legacy

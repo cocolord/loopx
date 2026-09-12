@@ -139,6 +139,59 @@ def _dict_or_empty(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _scheduler_profile_digest_snapshot(
+    profile_snapshot: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep the persisted v0 reset identity stable across the App rename.
+
+    These legacy key names are part of the reset-token hash protocol, not the
+    public scheduler projection. Changing them would reset an existing Codex
+    App backoff even when the cadence semantics are unchanged.
+    """
+
+    key_aliases = {
+        "app_automation_initial_interval_minutes": (
+            "codex_app_initial_interval_minutes"
+        ),
+        "app_automation_initial_rrule": "codex_app_initial_rrule",
+        "app_automation_max_interval_minutes": (
+            "codex_app_max_interval_minutes"
+        ),
+        "app_automation_progression_minutes": (
+            "codex_app_progression_minutes"
+        ),
+    }
+    return {key_aliases.get(key, key): value for key, value in profile_snapshot.items()}
+
+
+def _scheduler_reset_identity_digests(
+    *,
+    action: str,
+    identity_snapshot: Mapping[str, Any],
+    profile_snapshot: Mapping[str, Any],
+    reset_profile_snapshot: Mapping[str, Any],
+) -> tuple[str, str, str, str]:
+    """Build the stable v0 reset token and its component signatures."""
+
+    profile_digest_snapshot = _scheduler_profile_digest_snapshot(profile_snapshot)
+    reset_profile_digest_snapshot = _scheduler_profile_digest_snapshot(
+        reset_profile_snapshot
+    )
+    return (
+        _stable_digest(
+            {
+                "action": action,
+                "identity_snapshot": identity_snapshot,
+                "profile_snapshot": reset_profile_digest_snapshot,
+            },
+            length=16,
+        ),
+        _stable_digest(identity_snapshot, length=12),
+        _stable_digest(profile_digest_snapshot, length=12),
+        _stable_digest(reset_profile_digest_snapshot, length=12),
+    )
+
+
 def _scheduler_identity_keys(
     *,
     cadence_class: str,
@@ -656,17 +709,17 @@ class _SchedulerHintBuilder:
             "claude_code_loop_unchanged_poll_limit": claude_limit,
         }
         reset_profile_snapshot = reset_profile_snapshot_override or profile_snapshot
-        reset_token = _stable_digest(
-            {
-                "action": action,
-                "identity_snapshot": identity_snapshot,
-                "profile_snapshot": reset_profile_snapshot,
-            },
-            length=16,
+        (
+            reset_token,
+            identity_signature,
+            profile_signature,
+            reset_profile_signature,
+        ) = _scheduler_reset_identity_digests(
+            action=action,
+            identity_snapshot=identity_snapshot,
+            profile_snapshot=profile_snapshot,
+            reset_profile_snapshot=reset_profile_snapshot,
         )
-        identity_signature = _stable_digest(identity_snapshot, length=12)
-        profile_signature = _stable_digest(profile_snapshot, length=12)
-        reset_profile_signature = _stable_digest(reset_profile_snapshot, length=12)
         reset_policy_detail = {
             "schema_version": SCHEDULER_RESET_POLICY_SCHEMA_VERSION,
             "source": "quota.should-run",
@@ -987,6 +1040,7 @@ class _SchedulerHintBuilder:
                 agent_id=agent_id,
                 available_capabilities=self.scheduler_ack_capabilities,
                 scheduler_host_facts=scheduler_host_facts,
+                observed_host_rrule=effective_host_rrule,
                 scheduler_before=self.payload,
                 automation_id=self.codex_app_automation_id,
                 build_ack_hint=build_codex_app_scheduler_ack_hint,

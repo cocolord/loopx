@@ -286,6 +286,7 @@ def test_codex_app_runtime_profile_preserves_host_backoff() -> None:
     canonical = hint["app_automation"]
     legacy = hint["codex_app"]
     assert canonical is not legacy
+    assert legacy["applicability"] == "applicable"
     assert canonical["stateful_backoff"]["schema_version"] == (
         "app_automation_stateful_backoff_v0"
     )
@@ -307,6 +308,7 @@ def test_codex_app_runtime_profile_preserves_host_backoff() -> None:
     assert legacy["rrule_source"] == "scheduler_hint.codex_app.recommended_rrule"
     assert legacy["stateful_backoff"]["apply_needed"] is True
     assert legacy["recommended_interval_minutes"] == 3
+    assert hint["reset_policy"]["reset_token"] == "3e649fb65bf246f9"
     assert hint["cold_path_detail"]["execution_phase"]["apply_needed"] is True
 
 
@@ -340,6 +342,23 @@ def test_trae_app_runtime_profile_preserves_host_backoff_and_identity() -> None:
     assert hint["cold_path_detail"]["execution_phase"]["host_surface"] == (
         "trae_app"
     )
+
+
+def test_codex_app_monitor_reset_token_preserves_v0_profile_identity() -> None:
+    context = scheduler_execution_context_for_runtime_profile(
+        SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
+    )
+
+    hint = build_scheduler_hint(
+        _monitor_wait_payload(),
+        include_detail=True,
+        scheduler_execution_context=context,
+    )
+
+    assert hint["reset_policy"]["reset_token"] == "704ba9bb4bd17d43"
+    reset_detail = hint["cold_path_detail"]["reset_policy_detail"]
+    assert reset_detail["profile_signature"] == "d8601294ac8d"
+    assert reset_detail["reset_profile_signature"] == "d8601294ac8d"
 
 
 @pytest.mark.parametrize(

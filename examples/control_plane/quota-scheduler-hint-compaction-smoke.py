@@ -99,11 +99,16 @@ def scheduler_host_fact_chunks(args: list[str]) -> list[str]:
             chunks.append(chunk)
             index += 1
             continue
-        assert token == SCHEDULER_HOST_FACTS_CHUNK_FLAG, args
+        if token == SCHEDULER_HOST_FACTS_CHUNK_FLAG:
+            assert index + 1 < len(args), args
+            chunk = args[index + 1]
+            assert chunk and not chunk.startswith("-"), args
+            chunks.append(chunk)
+            index += 2
+            continue
+        assert token in {"--surface", "--state-key"}, args
         assert index + 1 < len(args), args
-        chunk = args[index + 1]
-        assert chunk and not chunk.startswith("-"), args
-        chunks.append(chunk)
+        assert args[index + 1] and not args[index + 1].startswith("-"), args
         index += 2
     return chunks
 
