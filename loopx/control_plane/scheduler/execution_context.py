@@ -182,6 +182,9 @@ class SchedulerExecutionContext:
             "execution_mode": self.execution_mode.value,
             "source": self.source,
             "valid": True,
+            "app_automation_applicability": (
+                "applicable" if self.app_automation_applicable else "not_applicable"
+            ),
             "codex_app_applicability": (
                 "applicable" if self.codex_app_applicable else "not_applicable"
             ),
@@ -209,6 +212,7 @@ class SchedulerExecutionContextResolution:
             "execution_mode": supplied.get("execution_mode"),
             "source": supplied.get("source") or "explicit",
             "valid": False,
+            "app_automation_applicability": "blocked_invalid_context",
             "codex_app_applicability": "blocked_invalid_context",
             "errors": list(self.errors),
         }
@@ -495,7 +499,9 @@ def build_goal_runtime_continuation(
             continuation["recheck_after_seconds"] = frontier_recheck_after_seconds
             continuation["recheck_source"] = "frontier_earliest_material_transition"
         else:
-            host_cadence = scheduler_hint.get("codex_app")
+            host_cadence = scheduler_hint.get("app_automation")
+            if not isinstance(host_cadence, Mapping):
+                host_cadence = scheduler_hint.get("codex_app")
             host_cadence = host_cadence if isinstance(host_cadence, Mapping) else {}
             recommended_interval = host_cadence.get("recommended_interval_minutes")
             if not isinstance(recommended_interval, int) or recommended_interval <= 0:
@@ -519,22 +525,57 @@ def apply_scheduler_execution_context(
         raise ValueError("cannot apply an invalid scheduler execution context")
     context = resolution.context
 
-    codex_app = (
-        result.get("codex_app") if isinstance(result.get("codex_app"), dict) else {}
+    app_automation = (
+        result.get("app_automation")
+        if isinstance(result.get("app_automation"), dict)
+        else {}
     )
     if context.app_automation_applicable:
-        codex_app["applicability"] = "applicable"
+        app_automation["applicability"] = "applicable"
+        app_automation["host_surface"] = context.host_surface.value
         backoff = (
-            codex_app.get("stateful_backoff")
-            if isinstance(codex_app.get("stateful_backoff"), dict)
+            app_automation.get("stateful_backoff")
+            if isinstance(app_automation.get("stateful_backoff"), dict)
             else {}
         )
         apply_needed = (
             backoff.get("apply_needed") is True
-            or codex_app.get("host_action_required") is True
+            or app_automation.get("host_action_required") is True
         )
         ack_needed = backoff.get("ack_needed") is True
-        result["codex_app"] = codex_app
+        result["app_automation"] = app_automation
+        if context.host_surface is HostSurface.CODEX_APP:
+            result["codex_app"] = app_automation
+            reset_policy = result.get("reset_policy")
+            if isinstance(reset_policy, dict):
+                reset_policy["codex_app_initial_interval_minutes"] = (
+                    reset_policy.get("app_automation_initial_interval_minutes")
+                )
+                reset_policy["codex_app_initial_rrule"] = reset_policy.get(
+                    "app_automation_initial_rrule"
+                )
+            cold_path = result.get("cold_path_detail")
+            reset_detail = (
+                cold_path.get("reset_policy_detail")
+                if isinstance(cold_path, dict)
+                and isinstance(cold_path.get("reset_policy_detail"), dict)
+                else None
+            )
+            if reset_detail is not None:
+                reset_detail["codex_app_initial_interval_minutes"] = (
+                    reset_detail.get("app_automation_initial_interval_minutes")
+                )
+                reset_detail["codex_app_initial_rrule"] = reset_detail.get(
+                    "app_automation_initial_rrule"
+                )
+                reset_detail["codex_app_tool"] = reset_detail.get(
+                    "app_automation_tool"
+                )
+                reset_detail["codex_app_apply"] = reset_detail.get(
+                    "app_automation_apply"
+                )
+        else:
+            result.pop("codex_app", None)
         execution_phase = {
             "schema_version": "scheduler_execution_phase_v0",
             "host_surface": context.host_surface.value,
@@ -563,18 +604,25 @@ def apply_scheduler_execution_context(
     )
 
     result["execution_context"] = resolution.projection()
-    result["codex_app"] = {
+    result["app_automation"] = {
         "applicability": "not_applicable",
+        "host_surface": context.host_surface.value,
         "reason_code": f"cadence_owned_by_{context.scheduler_owner.value}",
         "apply": "none",
         "host_action": "none",
         "ack_required": False,
         "no_spend_for_cadence_change": True,
     }
+    # Keep the historical packet only outside Trae App. Trae must never derive
+    # scheduler authority through a Codex-labelled compatibility projection.
+    if context.host_surface is not HostSurface.TRAE_APP:
+        result["codex_app"] = result["app_automation"]
+    else:
+        result.pop("codex_app", None)
     reset_policy = result.get("reset_policy")
     if isinstance(reset_policy, dict):
         for key in tuple(reset_policy):
-            if key.startswith("codex_app_"):
+            if key.startswith(("app_automation_", "codex_app_")):
                 reset_policy.pop(key, None)
     cold_path = result.get("cold_path_detail")
     if isinstance(cold_path, dict):
@@ -582,7 +630,7 @@ def apply_scheduler_execution_context(
         reset_detail = cold_path.get("reset_policy_detail")
         if isinstance(reset_detail, dict):
             for key in tuple(reset_detail):
-                if key.startswith("codex_app_"):
+                if key.startswith(("app_automation_", "codex_app_")):
                     reset_detail.pop(key, None)
     owner = context.scheduler_owner.value
     result["execution_phase"] = {
@@ -595,7 +643,7 @@ def apply_scheduler_execution_context(
         "ack_needed": False,
         "acknowledged": False,
         "completion_reason": (
-            "selected scheduler owner requires no Codex App apply or ACK"
+            "selected scheduler owner requires no App automation apply or ACK"
         ),
     }
     if goal_runtime_continuation is not None:

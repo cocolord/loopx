@@ -225,7 +225,7 @@ def register_quota_command(
     )
     quota_parser.add_argument(
         "--state-key",
-        default="scheduler_hint.codex_app.stateful_backoff",
+        default="scheduler_hint.app_automation.stateful_backoff",
         help="Scheduler state key for scheduler ACK/failure commands.",
     )
     quota_parser.add_argument(

@@ -254,11 +254,11 @@ def bind_scheduler_followup_cli_routes(
     scheduler_hint = payload.get("scheduler_hint")
     if not isinstance(scheduler_hint, dict):
         return
-    codex_app = scheduler_hint.get("codex_app")
-    if not isinstance(codex_app, dict):
+    app_automation = scheduler_hint.get("app_automation")
+    if not isinstance(app_automation, dict):
         return
     for hint_name in ("ack_hint", "failure_hint", "fallback_hint"):
-        followup_hint = codex_app.get(hint_name)
+        followup_hint = app_automation.get(hint_name)
         if not isinstance(followup_hint, dict):
             continue
         cli_args = followup_hint.get("cli_args")

@@ -1482,7 +1482,7 @@ def build_start_goal_guided_packet(
             {
                 "id": "scheduler_ack_when_needed",
                 "kind": "scheduler_state",
-                "command_source": "quota.should-run.scheduler_hint.codex_app.ack_hint.cli_args",
+                "command_source": "quota.should-run.scheduler_hint.app_automation.ack_hint.cli_args",
                 "purpose": "ack an applied App automation RRULE without spending quota",
             }
         ]

@@ -30,7 +30,9 @@ def _scheduler_packet(
         if isinstance(before.get("scheduler_hint"), dict)
         else {}
     )
-    packet_key = "codex_app" if surface in {"codex_app", "trae_app"} else surface
+    packet_key = (
+        "app_automation" if surface in {"codex_app", "trae_app"} else surface
+    )
     surface_packet = (
         scheduler_hint.get(packet_key)
         if isinstance(scheduler_hint.get(packet_key), dict)
@@ -100,7 +102,7 @@ def _host_facts(
     )
     if not stateful_backoff:
         raise ValueError(
-            "current quota decision has no Codex App stateful scheduler packet"
+            "current quota decision has no App automation stateful scheduler packet"
         )
     if str(stateful_backoff.get("state_key") or "") != state_key:
         raise ValueError("--state-key does not match the current scheduler hint")

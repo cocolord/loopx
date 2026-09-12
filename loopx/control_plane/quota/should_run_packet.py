@@ -88,8 +88,7 @@ from ..scheduler.external_evidence_observation import (
 )
 from ..scheduler.scheduler_hint import build_scheduler_hint
 from ..scheduler.state import (
-    CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
-    load_scheduler_state,
+    load_app_automation_scheduler_state,
 )
 from ..todos.contract import (
     normalize_todo_claimed_by,
@@ -213,12 +212,11 @@ def _load_app_automation_scheduler_state(
     safe_agent_id = normalize_todo_claimed_by(agent_id)
     if not raw_runtime_root or not safe_agent_id:
         return None
-    return load_scheduler_state(
+    return load_app_automation_scheduler_state(
         Path(str(raw_runtime_root)).expanduser(),
         goal_id=goal_id,
         agent_id=safe_agent_id,
         surface=surface,
-        state_key=CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
     )
 
 
