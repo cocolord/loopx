@@ -21,11 +21,13 @@ SCHEDULER_STATE_STORE_RESULT_SCHEMA = "loopx_scheduler_state_store_result_v0"
 APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY = (
     "scheduler_hint.app_automation.stateful_backoff"
 )
-# Import compatibility for callers using the historical constant name. The
-# shared App automation state contract now uses the provider-neutral key.
-CODEX_APP_STATEFUL_BACKOFF_STATE_KEY = APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY
 LEGACY_CODEX_APP_STATEFUL_BACKOFF_STATE_KEY = (
     "scheduler_hint.codex_app.stateful_backoff"
+)
+# Historical Codex callers continue to default to their legacy key. Canonical
+# App packets pass APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY explicitly.
+CODEX_APP_STATEFUL_BACKOFF_STATE_KEY = (
+    LEGACY_CODEX_APP_STATEFUL_BACKOFF_STATE_KEY
 )
 CODEX_APP_SURFACE = "codex_app"
 

@@ -18,6 +18,11 @@ from .arbitration import (
     SchedulerDisposition,
     build_scheduler_arbitration,
 )
+from .app_automation_compat import (
+    CODEX_APP_SCHEDULER_ACK_HINT_SCHEMA_VERSION,
+    CODEX_APP_SCHEDULER_FAILURE_HINT_SCHEMA_VERSION,
+    build_codex_app_compatibility_projection,
+)
 from .execution_context import (
     SchedulerExecutionContextResolution,
     SchedulerOwner,
@@ -451,7 +456,7 @@ def build_app_automation_scheduler_failure_hint(
         ]
     )
     if safe_observed_rrule:
-        cli_args.extend(["--codex-app-current-rrule", safe_observed_rrule])
+        cli_args.extend(["--app-automation-current-rrule", safe_observed_rrule])
     cli_args.append("--execute")
     cli_args = _bounded_scheduler_followup_cli_args(cli_args, native_args=native_args)
     return {
@@ -460,10 +465,32 @@ def build_app_automation_scheduler_failure_hint(
     }
 
 
-# Public import compatibility. The builders now emit provider-neutral schemas
-# and are used by both Codex App and Trae App.
-build_codex_app_scheduler_ack_hint = build_app_automation_scheduler_ack_hint
-build_codex_app_scheduler_failure_hint = build_app_automation_scheduler_failure_hint
+def build_codex_app_scheduler_ack_hint(**kwargs: Any) -> dict[str, Any]:
+    """Build the historical Codex packet while the neutral packet coexists."""
+
+    kwargs.setdefault("surface", CODEX_APP_SURFACE)
+    kwargs.setdefault("state_key", CODEX_APP_STATEFUL_BACKOFF_STATE_KEY)
+    hint = build_app_automation_scheduler_ack_hint(**kwargs)
+    hint["schema_version"] = CODEX_APP_SCHEDULER_ACK_HINT_SCHEMA_VERSION
+    return hint
+
+
+def build_codex_app_scheduler_failure_hint(**kwargs: Any) -> dict[str, Any]:
+    """Build the historical Codex packet while the neutral packet coexists."""
+
+    kwargs.setdefault("surface", CODEX_APP_SURFACE)
+    kwargs.setdefault("state_key", CODEX_APP_STATEFUL_BACKOFF_STATE_KEY)
+    hint = build_app_automation_scheduler_failure_hint(**kwargs)
+    hint["schema_version"] = CODEX_APP_SCHEDULER_FAILURE_HINT_SCHEMA_VERSION
+    cli_args = hint.get("cli_args")
+    if isinstance(cli_args, list):
+        hint["cli_args"] = [
+            "--codex-app-current-rrule"
+            if item == "--app-automation-current-rrule"
+            else item
+            for item in cli_args
+        ]
+    return hint
 
 
 def build_codex_app_scheduler_fallback_hint(
@@ -953,6 +980,19 @@ class _SchedulerHintBuilder:
                 "contains": detail_contains,
             },
         }
+        if app_surface == CODEX_APP_SURFACE:
+            scheduler_hint["codex_app"] = build_codex_app_compatibility_projection(
+                app_automation,
+                goal_id=goal_id,
+                agent_id=agent_id,
+                available_capabilities=self.scheduler_ack_capabilities,
+                scheduler_host_facts=scheduler_host_facts,
+                scheduler_before=self.payload,
+                automation_id=self.codex_app_automation_id,
+                build_ack_hint=build_codex_app_scheduler_ack_hint,
+                build_failure_hint=build_codex_app_scheduler_failure_hint,
+                build_fallback_hint=build_codex_app_scheduler_fallback_hint,
+            )
         notification_cooldown = _user_gate_notification_cooldown(
             cadence_class=cadence_class,
             host_failure_suppressed=host_failure_suppressed,

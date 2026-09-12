@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -91,6 +92,18 @@ GUIDED_START_TURN_RUNTIME_PROFILES = frozenset(
         SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT,
         SchedulerRuntimeProfile.TRAE_APP,
         SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE,
+    }
+)
+
+
+# Hosted App runtimes share the receipt-bound settlement lifecycle while
+# retaining independent host, state, and provider identities. Keep this set as
+# the typed owner so downstream work-item code does not drift through repeated
+# Codex-only profile checks.
+APP_HEARTBEAT_SETTLEMENT_RUNTIME_PROFILES = frozenset(
+    {
+        SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT,
+        SchedulerRuntimeProfile.TRAE_APP,
     }
 )
 
@@ -553,7 +566,12 @@ def apply_scheduler_execution_context(
         ack_needed = backoff.get("ack_needed") is True
         result["app_automation"] = app_automation
         if context.host_surface is HostSurface.CODEX_APP:
-            result["codex_app"] = app_automation
+            codex_app = result.get("codex_app")
+            if not isinstance(codex_app, dict):
+                # Stateless stop/pause packets do not pass through the stateful
+                # compatibility builder. Keep their legacy view independent so
+                # later route binding cannot mutate the canonical packet.
+                result["codex_app"] = copy.deepcopy(app_automation)
             reset_policy = result.get("reset_policy")
             if isinstance(reset_policy, dict):
                 reset_policy["codex_app_initial_interval_minutes"] = (

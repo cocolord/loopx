@@ -585,7 +585,7 @@ def handle_quota_command(
                     "agent-todos" in detail_sections
                     and not bool(getattr(args, "turn_envelope", False))
                 ),
-                codex_app_current_rrule=args.codex_app_current_rrule,
+                codex_app_current_rrule=args.app_automation_current_rrule,
                 registry_path=registry_path,
                 runtime_root=runtime_root,
                 host_observation_resolver=resolve_codex_app_automation_rrule,
@@ -676,7 +676,7 @@ def handle_quota_command(
                                 "agent-todos" in detail_sections
                                 and not bool(getattr(args, "turn_envelope", False))
                             ),
-                            codex_app_current_rrule=args.codex_app_current_rrule,
+                            codex_app_current_rrule=args.app_automation_current_rrule,
                             registry_path=registry_path,
                             runtime_root=runtime_root,
                             host_observation_resolver=resolve_codex_app_automation_rrule,

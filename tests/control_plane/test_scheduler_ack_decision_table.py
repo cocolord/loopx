@@ -98,7 +98,7 @@ def test_scheduler_ack_hint_preserves_public_contract_and_runtime_capabilities()
         "uses_current_hint": hint["uses_current_hint"],
         "no_spend": hint["no_spend"],
     } == {
-        "schema_version": "app_automation_scheduler_ack_hint_v0",
+        "schema_version": "codex_app_scheduler_ack_hint_v0",
         "command": "quota scheduler-ack-current",
         "execute": True,
         "uses_current_hint": True,

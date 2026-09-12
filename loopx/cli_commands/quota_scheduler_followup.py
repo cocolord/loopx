@@ -129,7 +129,11 @@ def build_scheduler_followup_payload(
             "delivery_outcome": "surface_only",
         }
 
-    observed_rrule = str(args.codex_app_current_rrule or "").strip()
+    observed_rrule = str(
+        getattr(args, "app_automation_current_rrule", None)
+        or getattr(args, "codex_app_current_rrule", None)
+        or ""
+    ).strip()
     resolved_context = resolve_scheduler_execution_context(scheduler_context)
     codex_app_host = bool(
         resolved_context.ok

@@ -90,11 +90,20 @@ def register_quota_command(
         help=argparse.SUPPRESS,
     )
     quota_parser.add_argument(
+        "--app-automation-current-rrule",
+        help=(
+            "Current RRULE observed from the selected hosted App heartbeat. "
+            "This provider-neutral input reconciles host reality with LoopX's "
+            "last scheduler ACK."
+        ),
+    )
+    quota_parser.add_argument(
         "--codex-app-current-rrule",
         help=(
             "Current RRULE observed from the active Codex App heartbeat. For "
             "`quota should-run`, this reconciles host reality with LoopX's last "
-            "scheduler ACK so a stale ACK cannot suppress a required update."
+            "scheduler ACK so a stale ACK cannot suppress a required update. "
+            "Deprecated compatibility alias for --app-automation-current-rrule."
         ),
     )
     quota_parser.add_argument(
@@ -220,13 +229,17 @@ def register_quota_command(
     register_quota_monitor_poll_request_arguments(quota_parser)
     quota_parser.add_argument(
         "--surface",
-        default="codex_app",
-        help="Scheduler surface for scheduler ACK/failure commands; defaults to codex_app.",
+        help=(
+            "Scheduler surface for scheduler ACK/failure commands; derived from "
+            "the selected App runtime, or codex_app for a legacy unscoped call."
+        ),
     )
     quota_parser.add_argument(
         "--state-key",
-        default="scheduler_hint.app_automation.stateful_backoff",
-        help="Scheduler state key for scheduler ACK/failure commands.",
+        help=(
+            "Scheduler state key for scheduler ACK/failure commands; derived from "
+            "the selected App runtime when omitted."
+        ),
     )
     quota_parser.add_argument(
         "--applied-rrule",

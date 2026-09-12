@@ -31,10 +31,10 @@ export const SCHEDULER_STATE_STORE_RESULT_SCHEMA =
 
 export const APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY =
   "scheduler_hint.app_automation.stateful_backoff";
-export const CODEX_APP_STATEFUL_BACKOFF_STATE_KEY =
-  APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY;
 export const LEGACY_CODEX_APP_STATEFUL_BACKOFF_STATE_KEY =
   "scheduler_hint.codex_app.stateful_backoff";
+export const CODEX_APP_STATEFUL_BACKOFF_STATE_KEY =
+  LEGACY_CODEX_APP_STATEFUL_BACKOFF_STATE_KEY;
 export const CODEX_APP_SURFACE = "codex_app";
 
 const HOST_UPDATE_FAILURE_CACHE_LIMIT = 4;

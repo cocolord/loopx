@@ -283,8 +283,30 @@ def test_codex_app_runtime_profile_preserves_host_backoff() -> None:
         hint["cold_path_detail"]["execution_context"]["codex_app_applicability"]
         == "applicable"
     )
-    assert hint["codex_app"]["stateful_backoff"]["apply_needed"] is True
-    assert hint["codex_app"]["recommended_interval_minutes"] == 3
+    canonical = hint["app_automation"]
+    legacy = hint["codex_app"]
+    assert canonical is not legacy
+    assert canonical["stateful_backoff"]["schema_version"] == (
+        "app_automation_stateful_backoff_v0"
+    )
+    assert canonical["stateful_backoff"]["state_key"] == (
+        "scheduler_hint.app_automation.stateful_backoff"
+    )
+    assert canonical["ack_hint"]["schema_version"] == (
+        "app_automation_scheduler_ack_hint_v0"
+    )
+    assert legacy["stateful_backoff"]["schema_version"] == (
+        "codex_app_stateful_backoff_v0"
+    )
+    assert legacy["stateful_backoff"]["state_key"] == (
+        "scheduler_hint.codex_app.stateful_backoff"
+    )
+    assert legacy["ack_hint"]["schema_version"] == (
+        "codex_app_scheduler_ack_hint_v0"
+    )
+    assert legacy["rrule_source"] == "scheduler_hint.codex_app.recommended_rrule"
+    assert legacy["stateful_backoff"]["apply_needed"] is True
+    assert legacy["recommended_interval_minutes"] == 3
     assert hint["cold_path_detail"]["execution_phase"]["apply_needed"] is True
 
 

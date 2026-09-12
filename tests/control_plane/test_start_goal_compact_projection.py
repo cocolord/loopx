@@ -27,6 +27,7 @@ from loopx.cli_commands.todo_argument_validation import (
     validate_todo_add_options,
 )
 from loopx.control_plane import effect_runtime
+from loopx.slash_commands import build_slash_command_catalog
 
 GOAL_ID = "guided-projection-goal"
 AGENT_ID = "codex-guided-projection"
@@ -321,6 +322,18 @@ def test_goal_start_packet_is_parity_complete_behavior_authority(
     contract = payload["command_pack"]["goal_start_contract"]
     assert "ordered_steps + goal_start_contract" in contract["behavior_authority"]
     assert "passes raw arguments" in contract["behavior_authority"]
+    assert contract["activation"]["host_surfaces"]["trae_app"] == (
+        "Trae App heartbeat automation"
+    )
+    slash_catalog = build_slash_command_catalog()
+    goal_start = next(
+        command
+        for command in slash_catalog["commands"]
+        if command["command"] == "/loopx <goal text>"
+    )
+    assert goal_start["agent_contract"]["host_loop_activation_by_agent_type"][
+        "trae_app"
+    ].startswith("create/update Trae App heartbeat automation")
 
     invariants = contract["execution_invariants"]
     for marker in (

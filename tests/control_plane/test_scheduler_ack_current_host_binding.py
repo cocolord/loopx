@@ -4,9 +4,13 @@ from argparse import Namespace
 import json
 from pathlib import Path
 
+import pytest
+
 from examples.control_plane.quota_plan_fixtures import SCOPED_AGENT_ID, write_cli_fixture
+from loopx.cli import build_parser
 from loopx.cli_commands import quota as quota_command
 from loopx.cli_commands import quota_scheduler_followup
+from loopx.cli_commands.quota_context import validate_quota_command_context_request
 from loopx.control_plane.testing.canary_harness import run_json_cli, run_json_cli_result
 from loopx.control_plane.scheduler.state import (
     APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY,
@@ -74,7 +78,14 @@ def _trae_quota(
     registry_path: Path,
     runtime_root: Path,
     project: Path,
+    *,
+    current_rrule: str | None = None,
 ) -> dict:
+    rrule_args = (
+        ["--app-automation-current-rrule", current_rrule]
+        if current_rrule
+        else []
+    )
     _returncode, payload = run_json_cli_result(
         "quota",
         "should-run",
@@ -83,6 +94,7 @@ def _trae_quota(
         "--agent-id",
         SCOPED_AGENT_ID,
         "--trae_app",
+        *rrule_args,
         registry_path=registry_path,
         runtime_root=runtime_root,
         cwd=project,
@@ -149,9 +161,13 @@ def test_trae_app_real_cli_ack_and_failure_keep_independent_identity(
         failure_registry,
         failure_runtime,
         failure_project,
+        current_rrule="FREQ=MINUTELY;INTERVAL=5",
     )["scheduler_hint"]["app_automation"]
+    failure_args = failure_app["failure_hint"]["cli_args"]
+    assert "--app-automation-current-rrule" in failure_args
+    assert "--codex-app-current-rrule" not in failure_args
     failure = run_json_cli(
-        *failure_app["failure_hint"]["cli_args"],
+        *failure_args,
         registry_path=failure_registry,
         runtime_root=failure_runtime,
         cwd=failure_project,
@@ -159,6 +175,50 @@ def test_trae_app_real_cli_ack_and_failure_keep_independent_identity(
     assert failure["scheduler_state_mutated"] is True
     assert failure["surface"] == "trae_app"
     assert failure["state_key"] == APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY
+
+
+def test_trae_app_followup_defaults_to_its_own_surface_and_state_key() -> None:
+    args = build_parser().parse_args(
+        [
+            "quota",
+            "scheduler-fail-current",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            SCOPED_AGENT_ID,
+            "--trae_app",
+            "--failed-rrule",
+            "FREQ=MINUTELY;INTERVAL=3",
+            "--execute",
+        ]
+    )
+
+    validate_quota_command_context_request(args)
+
+    assert args.surface == "trae_app"
+    assert args.state_key == APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY
+
+
+def test_trae_app_followup_rejects_codex_rrule_alias() -> None:
+    args = build_parser().parse_args(
+        [
+            "quota",
+            "scheduler-fail-current",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            SCOPED_AGENT_ID,
+            "--trae_app",
+            "--failed-rrule",
+            "FREQ=MINUTELY;INTERVAL=3",
+            "--codex-app-current-rrule",
+            "FREQ=MINUTELY;INTERVAL=5",
+            "--execute",
+        ]
+    )
+
+    with pytest.raises(ValueError, match="Trae App uses --app-automation"):
+        validate_quota_command_context_request(args)
 
 
 def test_scheduler_ack_current_replays_host_binding_after_update(

@@ -8,6 +8,7 @@ from typing import Any
 from ..effect_runtime import _node_executable
 from ..runtime.time import now_local_iso
 from ..scheduler.state import (
+    APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY,
     CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
     CODEX_APP_SURFACE,
     normalize_scheduler_rrule,
@@ -24,15 +25,22 @@ def _scheduler_packet(
     before: dict[str, Any],
     *,
     surface: str,
+    state_key: str,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     scheduler_hint = (
         before.get("scheduler_hint")
         if isinstance(before.get("scheduler_hint"), dict)
         else {}
     )
-    packet_key = (
-        "app_automation" if surface in {"codex_app", "trae_app"} else surface
-    )
+    if surface == "trae_app":
+        packet_key = "app_automation"
+    elif (
+        surface == CODEX_APP_SURFACE
+        and state_key == APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY
+    ):
+        packet_key = "app_automation"
+    else:
+        packet_key = surface
     surface_packet = (
         scheduler_hint.get(packet_key)
         if isinstance(scheduler_hint.get(packet_key), dict)
@@ -50,6 +58,7 @@ def _current_hint_identity(
     before: dict[str, Any],
     *,
     surface: str,
+    state_key: str,
     applied_rrule: str | None,
     reset_token: str | None,
     identity_signature: str | None,
@@ -57,6 +66,7 @@ def _current_hint_identity(
     _, surface_packet, stateful_backoff = _scheduler_packet(
         before,
         surface=surface,
+        state_key=state_key,
     )
     ack_hint = (
         surface_packet.get("ack_hint")
@@ -99,6 +109,7 @@ def _host_facts(
     scheduler_hint, surface_packet, stateful_backoff = _scheduler_packet(
         before,
         surface=surface,
+        state_key=state_key,
     )
     if not stateful_backoff:
         raise ValueError(
@@ -300,6 +311,7 @@ def record_quota_scheduler_ack_for_decision(
         applied_rrule, reset_token, identity_signature = _current_hint_identity(
             before,
             surface=surface,
+            state_key=state_key,
             applied_rrule=applied_rrule,
             reset_token=reset_token,
             identity_signature=identity_signature,
@@ -307,7 +319,9 @@ def record_quota_scheduler_ack_for_decision(
     try:
         if not safe_agent_id:
             raise ValueError("`loopx quota scheduler-ack` requires --agent-id")
-        _, _, stateful_backoff = _scheduler_packet(before, surface=surface)
+        _, _, stateful_backoff = _scheduler_packet(
+            before, surface=surface, state_key=state_key
+        )
         if reset_token and str(reset_token).strip() != str(
             stateful_backoff.get("reset_token") or ""
         ):
@@ -376,6 +390,7 @@ def record_quota_scheduler_failure_for_decision(
         _, surface_packet, stateful_backoff = _scheduler_packet(
             before,
             surface=surface,
+            state_key=state_key,
         )
         target_rrule = normalize_scheduler_rrule(
             target_rrule
