@@ -59,7 +59,22 @@ def _generation_bundle() -> dict[str, Any]:
         source_kind="project_progress",
         status="complete",
         observed_at="2026-08-30T09:00:00Z",
-        sections=[],
+        sections=[
+            {
+                "section_id": "next_actions",
+                "title": "下一步",
+                "order": 40,
+                "items": [
+                    {
+                        "item_id": "next_action",
+                        "title": "推进下一个已验证步骤",
+                        "summary": "完成事实复核后推进下一个明确步骤。",
+                        "content_kind": "next_action",
+                        "value_rank": 90,
+                    }
+                ],
+            }
+        ],
     )
     document = build_periodic_report_document(
         title="阶段分析周报",
@@ -510,6 +525,13 @@ def test_goal_channel_delivery_accepts_normalized_cli_card_readback(
     assert result["ok"] is True
     assert result["status"] == "satisfied"
     assert result["sink_result"]["readback_verified"] is True
+    send_calls = [args for args in calls if "+messages-send" in args]
+    hosted_card = json.loads(
+        send_calls[0][send_calls[0].index("--content") + 1]
+    )
+    hosted_markdown = hosted_card["elements"][0]["text"]["content"]
+    assert "下一步：完成事实复核后推进下一个明确步骤。" in hosted_markdown
+    assert "https://example.com/reports/stage-1" in hosted_markdown
     assert len(result["sink_result"]["message_results"]) == 2
 
 

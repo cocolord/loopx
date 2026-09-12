@@ -41,6 +41,7 @@ from .goal_channel_targets import (
 from .presentation.kanban import CommandRunner, default_subprocess_runner
 from .presentation.periodic_report import periodic_report_lark_sink_adapter
 from ...registry import read_json
+from ...presentation.public_safety import redact_public_text
 
 
 GOAL_CHANNEL_DELIVERY_REQUEST_SCHEMA = (
@@ -110,9 +111,43 @@ def _announcements(value: object) -> list[dict[str, str]]:
     return normalized
 
 
-def _announcement_markdown(announcement: Mapping[str, str]) -> str:
+def _next_action_guidance(document: Mapping[str, Any]) -> str | None:
+    primary_items: list[dict[str, Any]] = []
+    for section in document.get("sections") or []:
+        if not isinstance(section, Mapping):
+            continue
+        for item in section.get("items") or []:
+            if (
+                isinstance(item, Mapping)
+                and str(item.get("visibility") or "primary") == "primary"
+            ):
+                primary_items.append(dict(item))
+    candidates = [
+        item.get("summary") or item.get("title")
+        for item in primary_items
+        if item.get("content_kind") == "next_action"
+    ]
+    if not candidates:
+        candidates = [
+            item.get("next_action")
+            for item in primary_items
+            if item.get("next_action")
+        ]
+    if not candidates:
+        return None
+    guidance = str(redact_public_text(candidates[0], limit=360)).strip()
+    return guidance or None
+
+
+def _announcement_markdown(
+    announcement: Mapping[str, str], *, next_action: str | None
+) -> str:
     if announcement["kind"] == "hosted_report":
-        return f"本期阶段周报已发布。\n\n[查看周报]({announcement['url']})"
+        guidance = f"\n\n下一步：{next_action}" if next_action else ""
+        return (
+            f"本期阶段周报已发布。{guidance}"
+            f"\n\n[查看周报]({announcement['url']})"
+        )
     return f"配套 Lark 文档已同步。\n\n[查看 Lark 文档]({announcement['url']})"
 
 
@@ -357,9 +392,12 @@ def deliver_periodic_report_to_goal_channel(
             sink_id=sink_id,
         )
     )
+    next_action = _next_action_guidance(generation["document"])
     message_results: list[dict[str, Any]] = []
     for announcement in announcements:
-        content = _announcement_markdown(announcement)
+        content = _announcement_markdown(
+            announcement, next_action=next_action
+        )
         result = registry.deliver(
             sink_id,
             {
