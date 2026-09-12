@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 import importlib.util
 import json
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -275,21 +277,26 @@ def assert_compact_runtime_policy_complete(
 
 
 def assert_compact_scheduler(name: str, source_payload: dict) -> None:
-    compact = build_scheduler_hint(
-        deepcopy(source_payload),
-        user_action_required=False,
-        scheduler_execution_context=APP_SCHEDULER_CONTEXT,
-    )
-    wrapper = _scheduler_hint(
-        deepcopy(source_payload),
-        scheduler_execution_context=APP_SCHEDULER_CONTEXT,
-    )
-    detailed = build_scheduler_hint(
-        deepcopy(source_payload),
-        user_action_required=False,
-        include_detail=True,
-        scheduler_execution_context=APP_SCHEDULER_CONTEXT,
-    )
+    fixed_now = datetime(2026, 9, 12, 0, 0, tzinfo=timezone.utc)
+    with patch(
+        "loopx.control_plane.scheduler.scheduler_hint.now_utc",
+        return_value=fixed_now,
+    ):
+        compact = build_scheduler_hint(
+            deepcopy(source_payload),
+            user_action_required=False,
+            scheduler_execution_context=APP_SCHEDULER_CONTEXT,
+        )
+        wrapper = _scheduler_hint(
+            deepcopy(source_payload),
+            scheduler_execution_context=APP_SCHEDULER_CONTEXT,
+        )
+        detailed = build_scheduler_hint(
+            deepcopy(source_payload),
+            user_action_required=False,
+            include_detail=True,
+            scheduler_execution_context=APP_SCHEDULER_CONTEXT,
+        )
 
     assert compact == wrapper, (name, compact, wrapper)
     assert compact["schema_version"] == "scheduler_hint_v0", (name, compact)
