@@ -19,6 +19,9 @@ from loopx.control_plane.scheduler.execution_context import (
     scheduler_execution_context_for_runtime_profile,
     scheduler_runtime_profile_for_execution_context,
 )
+from loopx.control_plane.scheduler.automation_liveness import (
+    build_automation_liveness,
+)
 from loopx.control_plane.scheduler.scheduler_hint import build_scheduler_hint
 from loopx.control_plane.testing.quota_fixtures import (
     quota_status_payload,
@@ -37,6 +40,7 @@ from loopx.quota import build_quota_should_run
 VALID_COMBINATIONS = {
     ("ark_managed_agent", "goal_runtime", "interactive"),
     ("codex_app", "host_automation", "hosted_automation"),
+    ("trae_app", "host_automation", "hosted_automation"),
     ("codex_app_ssh", "agent_cli_loop", "interactive"),
     ("local_scheduler", "host_automation", "hosted_automation"),
     *{
@@ -61,6 +65,11 @@ FIRST_CLASS_RUNTIME_PROFILES = (
         SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT,
         ("codex_app", "host_automation", "hosted_automation"),
         " --codex-app",
+    ),
+    (
+        SchedulerRuntimeProfile.TRAE_APP,
+        ("trae_app", "host_automation", "hosted_automation"),
+        " --trae_app",
     ),
     (
         SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE,
@@ -197,11 +206,10 @@ def test_scheduler_execution_context_decision_table(
         assert hint["codex_app"]["applicability"] == "blocked_invalid_context"
         return
 
-    app_expected = values == (
-        "codex_app",
-        "host_automation",
-        "hosted_automation",
-    )
+    app_expected = values in {
+        ("codex_app", "host_automation", "hosted_automation"),
+        ("trae_app", "host_automation", "hosted_automation"),
+    }
     assert hint["codex_app"]["applicability"] == (
         "applicable" if app_expected else "not_applicable"
     )
@@ -255,7 +263,68 @@ def test_codex_app_runtime_profile_preserves_host_backoff() -> None:
         == "applicable"
     )
     assert hint["codex_app"]["stateful_backoff"]["apply_needed"] is True
+    assert hint["codex_app"]["recommended_interval_minutes"] == 3
     assert hint["cold_path_detail"]["execution_phase"]["apply_needed"] is True
+
+
+def test_trae_app_runtime_profile_preserves_host_backoff_and_identity() -> None:
+    context = scheduler_execution_context_for_runtime_profile(
+        SchedulerRuntimeProfile.TRAE_APP
+    )
+    hint = build_scheduler_hint(
+        _active_payload(),
+        include_detail=True,
+        scheduler_execution_context=context,
+    )
+
+    execution_context = hint["cold_path_detail"]["execution_context"]
+    assert execution_context["source"] == "runtime_profile:trae_app"
+    assert execution_context["host_surface"] == "trae_app"
+    assert execution_context["codex_app_applicability"] == "not_applicable"
+    assert hint["codex_app"]["stateful_backoff"]["apply_needed"] is True
+    assert hint["codex_app"]["recommended_interval_minutes"] == 3
+    assert "fallback_hint" not in hint["codex_app"]
+    assert "--trae_app" in hint["codex_app"]["ack_hint"]["cli_args"]
+    assert "--surface" in hint["codex_app"]["ack_hint"]["cli_args"]
+    assert hint["cold_path_detail"]["execution_phase"]["host_surface"] == (
+        "trae_app"
+    )
+
+
+@pytest.mark.parametrize(
+    "profile",
+    (
+        SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT,
+        SchedulerRuntimeProfile.TRAE_APP,
+    ),
+)
+def test_app_heartbeat_settlement_keeps_automation_active_until_terminal(
+    profile: SchedulerRuntimeProfile,
+) -> None:
+    context = scheduler_execution_context_for_runtime_profile(profile)
+    assert context.ok and context.context is not None
+    assert context.context.app_automation_applicable is True
+
+    settled = build_automation_liveness(
+        {
+            "effective_action": "heartbeat_settled_skip",
+            "heartbeat_recommendation": {},
+            "execution_obligation": {"must_attempt_work": False},
+        }
+    )
+    terminal = build_automation_liveness(
+        {
+            "effective_action": "terminal_no_followup",
+            "heartbeat_recommendation": {},
+            "execution_obligation": {"must_attempt_work": False},
+        }
+    )
+
+    assert settled["keep_active"] is True
+    assert settled["next_trigger"] == (
+        "next heartbeat turn with a fresh turn identity"
+    )
+    assert terminal["keep_active"] is False
 
 
 def test_goal_runtime_projects_typed_immediate_continuation() -> None:

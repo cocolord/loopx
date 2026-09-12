@@ -884,6 +884,47 @@ def test_cli_codex_app_reuses_ambient_thread_binding(
     assert payload["guided_transaction"].get("blocked_by") is None
 
 
+def test_cli_trae_app_reuses_ambient_thread_binding(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = _write_connected_project(tmp_path)
+    registry_path = project / ".loopx" / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["goals"][0]["coordination"]["thread_agent_bindings"] = [
+        {"thread_id": "trae-thread", "host_surface": "trae_app", "agent_id": AGENT_ID}
+    ]
+    registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+    monkeypatch.setenv("TRAECLI_THREAD_ID", "trae-thread")
+
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--format",
+                "json",
+                "start-goal",
+                "--guided",
+                "--project",
+                str(project),
+                "--goal-id",
+                GOAL_ID,
+                "--host-surface",
+                "trae_app",
+                "--goal-text",
+                GOAL_TEXT,
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(output.getvalue())
+    assert payload["thread_id"] == "trae-thread"
+    assert payload["agent_id"] == AGENT_ID
+    assert payload["thread_agent_binding"]["status"] == "bound"
+    assert "--trae_app" in payload["command_pack"]["commands"][
+        "heartbeat_prompt"
+    ]
+
+
 def test_start_goal_binds_selected_lane_before_todo_writeback(
     tmp_path: Path,
 ) -> None:
@@ -1613,6 +1654,7 @@ def test_cli_without_host_returns_read_only_host_selection_gate(
     choices = payload["host_surface_selection_gate"]["choices"]
     assert [choice["host_surface"] for choice in choices] == [
         "codex-app",
+        "trae_app",
         "codex-app-ssh",
         "codex-ide-plugin",
         "codex-cli-tui",

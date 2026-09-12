@@ -13,6 +13,10 @@ from loopx.control_plane.scheduler.state import (
     scheduler_state_path,
     write_scheduler_state,
 )
+from loopx.control_plane.scheduler.execution_context import (
+    SchedulerRuntimeProfile,
+    scheduler_execution_context_for_runtime_profile,
+)
 from loopx.status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK
 
 
@@ -242,6 +246,69 @@ def test_scheduler_fail_current_rejects_missing_turn_receipt_without_state_write
     assert payload["scheduler_state_mutated"] is False
     assert payload["quota_spend_performed"] is False
     assert not state_path.exists()
+
+
+def test_trae_app_scheduler_failure_does_not_read_codex_automation_store(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def reject_codex_store_read(**_kwargs):
+        raise AssertionError("Trae App must not read the Codex automation store")
+
+    def fake_build_decision(*_args, **_kwargs):
+        return {"effective_action": "execute_todo"}
+
+    def fake_record_failure(_decision, **kwargs):
+        observed.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        quota_scheduler_followup,
+        "resolve_codex_app_automation_rrule",
+        reject_codex_store_read,
+    )
+    monkeypatch.setattr(
+        quota_scheduler_followup,
+        "_build_scheduler_followup_decision",
+        fake_build_decision,
+    )
+    monkeypatch.setattr(
+        quota_scheduler_followup,
+        "record_quota_scheduler_failure_for_decision",
+        fake_record_failure,
+    )
+    args = Namespace(
+        quota_command="scheduler-fail-current",
+        goal_id=GOAL_ID,
+        agent_id=SCOPED_AGENT_ID,
+        codex_app_current_rrule=None,
+        applied_rrule="FREQ=MINUTELY;INTERVAL=3",
+        host_match_observed=False,
+        execute=True,
+        surface="trae_app",
+        state_key="scheduler_hint.codex_app.stateful_backoff",
+        failed_rrule="FREQ=MINUTELY;INTERVAL=3",
+        failure_kind="host_update_failed",
+        available_capabilities=[],
+    )
+
+    payload = quota_scheduler_followup.build_scheduler_followup_payload(
+        {},
+        args,
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+        turn_instance_id=None,
+        scheduler_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.TRAE_APP
+        ),
+        operator_inbox_urgency_projector=lambda **_kwargs: {},
+    )
+
+    assert payload == {"ok": True}
+    assert observed["surface"] == "trae_app"
+    assert observed["observed_host_rrule"] == ""
 
 
 def test_scheduler_ack_collects_the_periodic_should_run_lookback(
