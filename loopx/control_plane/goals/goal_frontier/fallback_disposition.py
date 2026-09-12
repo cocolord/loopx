@@ -135,6 +135,33 @@ def parse_fallback_declarations(
     return declarations
 
 
+def select_fallback_source_items(
+    source: list[dict[str, Any]], requested: set[str],
+) -> FallbackTodoSource:
+    """Bound transport for every caller, including already-loaded writeback sources."""
+    if not isinstance(source, list) or any(not isinstance(item, dict) for item in source):
+        return FallbackTodoReadState.UNAVAILABLE
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    for item in source:
+        todo_id = normalize_todo_id(item.get("todo_id"))
+        if todo_id:
+            by_id.setdefault(todo_id, []).append(item)
+    selected = set(requested)
+    for todo_id in requested:
+        for item in by_id.get(todo_id, []):
+            resume = normalize_todo_resume_when(item.get("resume_when"))
+            kind, _, target = (resume or "").partition(":")
+            if kind in {"todo_done", "monitor_changed"}:
+                dependency = normalize_todo_id(target)
+                if dependency:
+                    selected.add(dependency)
+    # Four declarations name at most eight alternatives and eight direct
+    # dependencies. Do not follow dependency chains or re-read another revision.
+    if any(len(by_id.get(todo_id, [])) > 1 for todo_id in selected):
+        return FallbackTodoReadState.UNAVAILABLE
+    return [by_id[todo_id][0] for todo_id in sorted(selected) if todo_id in by_id]
+
+
 def declared_fallback_gap_from_agent_vision(
     agent_vision: dict[str, Any] | None,
     *,
@@ -151,6 +178,10 @@ def declared_fallback_gap_from_agent_vision(
     assert isinstance(agent_vision, dict)
     summary = agent_todo_summary if isinstance(agent_todo_summary, dict) else {}
     source = agent_todo_source_items
+    if isinstance(source, list):
+        source = select_fallback_source_items(source, {
+            todo_id for entry in declarations for todo_id in entry.candidate_todo_ids
+        })
     items = [
         {
             **item,

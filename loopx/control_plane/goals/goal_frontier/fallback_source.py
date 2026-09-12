@@ -13,9 +13,9 @@ from ...coordination.local_authority import (
 )
 from ...effect_runtime import EffectRuntimeRemoteError
 from ...todos.active_state_todo_parser import parse_todo_source
-from ...todos.contract import normalize_todo_id, normalize_todo_resume_when
 from .fallback_disposition import (
     FallbackTodoReadState, FallbackTodoSource, parse_fallback_declarations,
+    select_fallback_source_items,
 )
 from .semantic_history import latest_agent_vision_from_status_payload
 
@@ -56,24 +56,4 @@ def live_fallback_authority_items(
         )
     except (EffectRuntimeRemoteError, LocalCoordinationAuthorityUnavailable, OSError, ValueError):
         return FallbackTodoReadState.UNAVAILABLE
-    if not isinstance(source, list) or any(not isinstance(item, dict) for item in source):
-        return FallbackTodoReadState.UNAVAILABLE
-    by_id: dict[str, list[dict[str, Any]]] = {}
-    for item in source:
-        todo_id = normalize_todo_id(item.get("todo_id"))
-        if todo_id:
-            by_id.setdefault(todo_id, []).append(item)
-    selected = set(requested)
-    for todo_id in requested:
-        for item in by_id.get(todo_id, []):
-            resume = normalize_todo_resume_when(item.get("resume_when"))
-            kind, _, target = (resume or "").partition(":")
-            if kind in {"todo_done", "monitor_changed"}:
-                dependency = normalize_todo_id(target)
-                if dependency:
-                    selected.add(dependency)
-    # Four declarations name at most eight alternatives and eight direct
-    # dependencies. Do not follow dependency chains or re-read another revision.
-    if any(len(by_id.get(todo_id, [])) > 1 for todo_id in selected):
-        return FallbackTodoReadState.UNAVAILABLE
-    return [by_id[todo_id][0] for todo_id in sorted(selected) if todo_id in by_id]
+    return select_fallback_source_items(source, requested)

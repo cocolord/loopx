@@ -69,6 +69,28 @@ def test_one_resolved_alternative_discharges_only_its_declaration(
     ) is None
 
 
+def test_loaded_writeback_source_is_bounded_before_effect_transport(monkeypatch) -> None:
+    from loopx.control_plane.goals.goal_frontier import fallback_disposition as module
+
+    source = [quota_todo_item(todo_id=f"todo_unrelated_{index}", index=index + 1,
+                             text="Unrelated work") for index in range(4096)]
+    source.append(quota_todo_item(todo_id=FALLBACK_ID, index=4097, text="Fallback"))
+    original = module.effect_runtime_result
+    counts = []
+
+    def capture(method, request):
+        counts.append(len(request["items"]))
+        return original(method, request)
+
+    monkeypatch.setattr(module, "effect_runtime_result", capture)
+    assert module.declared_fallback_gap_from_agent_vision(
+        {"fallback_declarations": [{"declaration_id": "direction", "target_todo_id": FALLBACK_ID}]},
+        agent_todo_summary={"current_agent_blocker_items": [{}]},
+        agent_id=AGENT_ID, agent_todo_source_items=source,
+    ) is None
+    assert counts == [1]
+
+
 def _fallback_vision_run(
     *,
     state: str = "vision_drift_detected",
