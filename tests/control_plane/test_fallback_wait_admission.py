@@ -9,7 +9,10 @@ import pytest
 
 from loopx.cli import main as cli_main
 from loopx.control_plane.goals.goal_vision import normalize_goal_vision_packet
-from loopx.control_plane.quota import live_decision
+from loopx.control_plane.goals.goal_frontier import fallback_disposition, fallback_source
+from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime
+from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+from loopx.control_plane.todos.todo_summary import TODO_ITEM_SCHEMA_VERSION
 
 GOAL_ID = "fallback-wait-capacity-fixture"
 AGENT_ID = "worker"
@@ -222,7 +225,7 @@ def test_real_cli_authority_read_failure_projects_uncertainty(
         raise OSError("fixture canonical authority unavailable")
 
     monkeypatch.setattr(
-        "loopx.control_plane.quota.live_decision.list_goal_todos",
+        "loopx.control_plane.goals.goal_frontier.fallback_source.read_fallback_source_snapshot",
         fail_authority_read,
     )
 
@@ -278,37 +281,47 @@ def test_real_cli_reads_only_direct_fallback_dependencies(
         )
     state_file.write_text(state)
     reads: list[str] = []
-    original_read = live_decision.list_goal_todos
+    original_read = fallback_source.read_fallback_source_snapshot
 
-    def record_read(**kwargs: object) -> dict:
-        reads.append(str(kwargs["todo_id"]))
+    def record_read(**kwargs: object) -> list[dict]:
+        reads.append(str(kwargs["goal_id"]))
         return original_read(**kwargs)
 
-    monkeypatch.setattr(live_decision, "list_goal_todos", record_read)
+    monkeypatch.setattr(fallback_source, "read_fallback_source_snapshot", record_read)
+    transported: list[int] = []
+    original_projection = fallback_disposition.effect_runtime_result
+
+    def record_projection(method: str, params: dict) -> object:
+        if method == "goal.fallback_disposition.project":
+            transported.append(len(params["items"]))
+        return original_projection(method, params)
+
+    monkeypatch.setattr(fallback_disposition, "effect_runtime_result", record_projection)
     assert cli_main(args) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["should_run"] is False
     assert "fallback_gaps" not in result["goal_frontier_projection"]
     # The direct prerequisite is deferred regardless of its own dependency.
     # Its chain cannot alter this wait or add canonical lookup calls.
-    assert reads == [FALLBACK_TODO_ID, PREREQUISITE_TODO_ID]
+    assert reads == [GOAL_ID]
+    assert transported and set(transported) == {2}
 
 
 @pytest.mark.parametrize("unrelated_deferred_count", [0, 20])
-def test_real_cli_mismatched_authority_identity_is_uncertain(
+def test_real_cli_malformed_authority_snapshot_is_uncertain(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
     unrelated_deferred_count: int,
 ) -> None:
     args = _write_fixture(tmp_path, unrelated_deferred_count=unrelated_deferred_count)
-    original_read = live_decision.list_goal_todos
+    original_read = fallback_source.read_fallback_source_snapshot
 
-    def mismatched_read(**kwargs: object) -> dict:
+    def mismatched_read(**kwargs: object) -> list:
         projection = original_read(**kwargs)
-        return {**projection, "todo": {**projection["todo"], "todo_id": "todo_other"}}
+        return [*projection, None]
 
-    monkeypatch.setattr(live_decision, "list_goal_todos", mismatched_read)
+    monkeypatch.setattr(fallback_source, "read_fallback_source_snapshot", mismatched_read)
     assert cli_main(args) == 0
     result = json.loads(capsys.readouterr().out)
     gap = result["goal_frontier_projection"]["fallback_gaps"][0]
@@ -332,7 +345,7 @@ def test_real_cli_without_declarations_does_not_read_fallback_authority(
     def unexpected_read(**_kwargs: object) -> dict:
         pytest.fail("No fallback declaration authorizes an exact fallback lookup")
 
-    monkeypatch.setattr(live_decision, "list_goal_todos", unexpected_read)
+    monkeypatch.setattr(fallback_source, "read_fallback_source_snapshot", unexpected_read)
     assert cli_main(args) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["should_run"] is False
@@ -410,3 +423,58 @@ def test_real_cli_ambiguous_canonical_fallback_read_is_uncertain(
     assert gap["kind"] == "vision_fallback_lookup_uncertain"
     assert gap["lookup_uncertain_todo_ids"] == [FALLBACK_TODO_ID]
     assert "unresolved_todo_ids" not in gap
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("display", ["stale", "missing"])
+@pytest.mark.parametrize("dependency_status", ["open", "done"])
+def test_real_provider_cli_uses_one_snapshot_including_archived_dependency(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+    provider: str, display: str, dependency_status: str,
+) -> None:
+    if provider == "sqlite":
+        isolate_sqlite_runtime(tmp_path, monkeypatch)
+    args = _write_fixture(tmp_path, unrelated_deferred_count=20,
+                          prerequisite_status=dependency_status)
+    state_file = tmp_path / "ACTIVE_GOAL_STATE.md"
+    runtime_root = tmp_path / "runtime"
+    rows = fallback_source.read_fallback_source_snapshot(
+        registry_path=tmp_path / "registry.json", runtime_root=runtime_root, goal_id=GOAL_ID,
+    )
+    for row in rows:
+        row["schema_version"] = TODO_ITEM_SCHEMA_VERSION
+    if dependency_status == "done":
+        for row in rows:
+            if row["todo_id"] == PREREQUISITE_TODO_ID:
+                row["archive_state"] = "archive"
+    projection = build_todo_runtime_shadow_projection(
+        goal_id=GOAL_ID, todos=rows, handoff_mode="soft_claim",
+    )
+    initialize_canonical_authority(runtime_root, GOAL_ID, projection,
+                                   state_path=state_file, provider=provider)
+    before = fallback_source.read_canonical_todos_if_promoted(
+        runtime_root=runtime_root, goal_id=GOAL_ID,
+    )
+    if display == "missing":
+        state_file.unlink()
+    else:
+        state_file.write_text("# Stale display\n\n## Agent Todo\n")
+    saved_display = state_file.read_bytes() if state_file.exists() else None
+    snapshots: list[int] = []
+    original = fallback_source.read_fallback_source_snapshot
+
+    def read_once(**kwargs: object) -> list[dict]:
+        snapshot = original(**kwargs)
+        snapshots.append(len(snapshot))
+        return snapshot
+
+    monkeypatch.setattr(fallback_source, "read_fallback_source_snapshot", read_once)
+    assert cli_main(args) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert "fallback_gaps" not in result["goal_frontier_projection"]
+    assert snapshots == [len(rows)]
+    after = fallback_source.read_canonical_todos_if_promoted(
+        runtime_root=runtime_root, goal_id=GOAL_ID,
+    )
+    assert before == after
+    assert (state_file.read_bytes() if state_file.exists() else None) == saved_display

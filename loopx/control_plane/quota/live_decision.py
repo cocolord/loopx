@@ -6,19 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from ...quota import build_quota_should_run
-from ...todos import list_goal_todos
 from ..agent_context import project_agent_context
-from ..coordination.local_authority import LocalCoordinationAuthorityUnavailable
-from ..effect_runtime import EffectRuntimeRemoteError
-from ..goals.goal_frontier.fallback_disposition import (
-    FallbackTodoReadState,
-    FallbackTodoSource,
-    parse_fallback_declarations,
-)
-from ..goals.goal_frontier.semantic_history import (
-    latest_agent_vision_from_status_payload,
-)
-from ..todos.contract import normalize_todo_id, normalize_todo_resume_when
+from ..goals.goal_frontier.fallback_source import live_fallback_authority_items
 from ..capability_hooks import (
     InteractionProjectionHookRegistration,
     dispatch_interaction_projection_hooks,
@@ -38,95 +27,6 @@ from ..scheduler.execution_context import (
 
 HostObservationResolver = Callable[..., Mapping[str, Any]]
 BoundedResearchFrontierProjector = Callable[..., Mapping[str, Any] | None]
-
-
-def _fallback_authority_todo_ids(
-    status_payload: dict[str, Any],
-    *,
-    goal_id: str,
-    agent_id: str | None,
-) -> set[str]:
-    vision = latest_agent_vision_from_status_payload(
-        status_payload,
-        goal_id=goal_id,
-        agent_id=agent_id,
-    )
-    return {
-        todo_id
-        for declaration in parse_fallback_declarations(vision)
-        for todo_id in declaration.candidate_todo_ids
-    }
-
-
-def _live_fallback_authority_items(
-    status_payload: dict[str, Any],
-    *,
-    registry_path: Path,
-    runtime_root: Path,
-    goal_id: str,
-    agent_id: str | None,
-) -> FallbackTodoSource:
-    """Read only the exact canonical Todos needed by fallback disposition.
-
-    ``status`` is deliberately presentation-bounded, so omission from it can
-    never prove that a declared fallback is absent. The live CLI path owns the
-    registry/runtime authority needed for exact reads. Resume dependencies are
-    included only when directly referenced by a declared Todo. Four declarations
-    can name eight targets/successors and eight direct dependencies: at most 16
-    reads. The TypeScript evaluator inspects a dependency's current state, not
-    its own resume chain, and retains state-transition authority.
-    """
-
-    requested_ids = _fallback_authority_todo_ids(
-        status_payload,
-        goal_id=goal_id,
-        agent_id=agent_id,
-    )
-    if not requested_ids:
-        return None
-
-    items: dict[str, dict[str, Any]] = {}
-    pending_ids = set(requested_ids)
-    for include_dependencies in (True, False):
-        dependency_ids: set[str] = set()
-        for todo_id in sorted(pending_ids):
-            try:
-                projection = list_goal_todos(
-                    registry_path=registry_path,
-                    goal_id=goal_id,
-                    todo_id=todo_id,
-                    runtime_root_arg=str(runtime_root),
-                    limit=None,
-                )
-            except (
-                EffectRuntimeRemoteError,
-                LocalCoordinationAuthorityUnavailable,
-                OSError,
-                ValueError,
-            ):
-                return FallbackTodoReadState.UNAVAILABLE
-            if projection.get("ambiguous") is True:
-                return FallbackTodoReadState.UNAVAILABLE
-            item = projection.get("todo")
-            if item is None:
-                if projection.get("not_found") is True:
-                    continue
-                return FallbackTodoReadState.UNAVAILABLE
-            if not isinstance(item, dict) or normalize_todo_id(item.get("todo_id")) != todo_id:
-                return FallbackTodoReadState.UNAVAILABLE
-            items[todo_id] = dict(item)
-            resume_when = normalize_todo_resume_when(item.get("resume_when"))
-            if include_dependencies and resume_when:
-                resume_kind, _, target = resume_when.partition(":")
-                dependency_id = (
-                    normalize_todo_id(target)
-                    if resume_kind in {"todo_done", "monitor_changed"}
-                    else None
-                )
-                if dependency_id:
-                    dependency_ids.add(dependency_id)
-        pending_ids = dependency_ids - requested_ids
-    return list(items.values())
 
 
 def _fresh_read_covers_all_pending_material(
@@ -542,7 +442,7 @@ def build_live_quota_should_run_decision(
     fresh_operator_inbox_read = _fresh_operator_inbox_read_required(
         turn_start_hook_dispatch
     )
-    authoritative_fallback_todo_items = _live_fallback_authority_items(
+    authoritative_fallback_todo_items = live_fallback_authority_items(
         decision_status_payload,
         registry_path=registry_path,
         runtime_root=runtime_root,

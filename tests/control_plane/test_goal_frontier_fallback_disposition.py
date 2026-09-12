@@ -37,6 +37,38 @@ DECLARED_FALLBACK_ACCEPTANCE = (
 )
 
 
+@pytest.mark.parametrize("resolution", ["waiting", "runnable"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_one_resolved_alternative_discharges_only_its_declaration(
+    resolution: str, reverse: bool,
+) -> None:
+    from loopx.control_plane.goals.goal_frontier.fallback_disposition import (
+        declared_fallback_gap_from_agent_vision,
+    )
+
+    ready = quota_todo_item(todo_id="todo_ready", index=1, text="Deliver alternative")
+    source = [ready]
+    if resolution == "waiting":
+        ready.update(status="deferred", resume_when="todo_done:todo_dependency")
+        source.append(quota_todo_item(todo_id="todo_dependency", index=2, text="Dependency"))
+    else:
+        source.append(quota_todo_item(
+            todo_id="todo_uncertain", index=2, text="Other alternative",
+            status="deferred", resume_when="capacity_available:delivery",
+        ))
+    alternatives = ["todo_missing" if resolution == "waiting" else "todo_uncertain", "todo_ready"]
+    if reverse:
+        alternatives.reverse()
+    vision = {"state": "vision_drift_detected", "fallback_declarations": [{
+        "declaration_id": "direction", "target_todo_id": alternatives[0],
+        "successor_todo_id": alternatives[1],
+    }]}
+    assert declared_fallback_gap_from_agent_vision(
+        vision, agent_todo_summary={"current_agent_blocker_items": [{}]},
+        agent_id=AGENT_ID, agent_todo_source_items=source,
+    ) is None
+
+
 def _fallback_vision_run(
     *,
     state: str = "vision_drift_detected",
