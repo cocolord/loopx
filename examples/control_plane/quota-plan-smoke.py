@@ -1033,8 +1033,8 @@ def assert_heartbeat_recommendation_lifecycle() -> None:
     assert isinstance(reset["reset_token"], str) and len(reset["reset_token"]) == 16, reset
     assert reset["reset_token"] == expected_scheduler_reset_token(scheduler, mapped_decision), reset
     assert reset["host_state_key"] == "scheduler_hint.reset_policy.reset_token", reset
-    assert reset["codex_app_initial_interval_minutes"] == 60, reset
-    assert reset["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=60", reset
+    assert reset["app_automation_initial_interval_minutes"] == 60, reset
+    assert reset["app_automation_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=60", reset
     assert len(reset["identity_signature"]) == 12, reset
     assert "identity_snapshot" not in reset, reset
     assert "profile_snapshot" not in reset, reset
@@ -1042,8 +1042,8 @@ def assert_heartbeat_recommendation_lifecycle() -> None:
     assert "profile" not in reset, reset
     profile_snapshot = scheduler_reset_profile_snapshot(scheduler)
     assert profile_snapshot["cadence_class"] == "unchanged_noop", profile_snapshot
-    assert profile_snapshot["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=60", profile_snapshot
-    assert profile_snapshot["codex_app_max_interval_minutes"] == 60, profile_snapshot
+    assert profile_snapshot["app_automation_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=60", profile_snapshot
+    assert profile_snapshot["app_automation_max_interval_minutes"] == 60, profile_snapshot
     assert profile_snapshot["unchanged_poll_backoff_multiplier"] == 2, profile_snapshot
     identity_snapshot = {
         key: _nested_value(mapped_decision, key)

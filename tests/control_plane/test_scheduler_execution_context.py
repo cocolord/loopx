@@ -203,17 +203,21 @@ def test_scheduler_execution_context_decision_table(
     if values not in VALID_COMBINATIONS:
         assert hint["execution_phase"]["disposition"] == "contract_error"
         assert hint["execution_phase"]["completed"] is False
-        assert hint["codex_app"]["applicability"] == "blocked_invalid_context"
+        assert hint["app_automation"]["applicability"] == (
+            "blocked_invalid_context"
+        )
+        assert ("codex_app" in hint) is (host_surface is not HostSurface.TRAE_APP)
         return
 
     app_expected = values in {
         ("codex_app", "host_automation", "hosted_automation"),
         ("trae_app", "host_automation", "hosted_automation"),
     }
-    assert hint["codex_app"]["applicability"] == (
+    assert hint["app_automation"]["applicability"] == (
         "applicable" if app_expected else "not_applicable"
     )
-    assert ("stateful_backoff" in hint["codex_app"]) is app_expected
+    assert ("stateful_backoff" in hint["app_automation"]) is app_expected
+    assert ("codex_app" in hint) is (host_surface is not HostSurface.TRAE_APP)
     if app_expected:
         assert "execution_context" not in hint
         assert "execution_phase" not in hint
@@ -281,11 +285,19 @@ def test_trae_app_runtime_profile_preserves_host_backoff_and_identity() -> None:
     assert execution_context["source"] == "runtime_profile:trae_app"
     assert execution_context["host_surface"] == "trae_app"
     assert execution_context["codex_app_applicability"] == "not_applicable"
-    assert hint["codex_app"]["stateful_backoff"]["apply_needed"] is True
-    assert hint["codex_app"]["recommended_interval_minutes"] == 3
-    assert "fallback_hint" not in hint["codex_app"]
-    assert "--trae_app" in hint["codex_app"]["ack_hint"]["cli_args"]
-    assert "--surface" in hint["codex_app"]["ack_hint"]["cli_args"]
+    assert execution_context["app_automation_applicability"] == "applicable"
+    assert "codex_app" not in hint
+    app = hint["app_automation"]
+    assert app["host_surface"] == "trae_app"
+    assert app["stateful_backoff"]["apply_needed"] is True
+    assert app["stateful_backoff"]["state_key"] == (
+        "scheduler_hint.app_automation.stateful_backoff"
+    )
+    assert app["recommended_interval_minutes"] == 3
+    assert app["rrule_source"] == "scheduler_hint.app_automation.recommended_rrule"
+    assert "fallback_hint" not in app
+    assert "--trae_app" in app["ack_hint"]["cli_args"]
+    assert "--surface" in app["ack_hint"]["cli_args"]
     assert hint["cold_path_detail"]["execution_phase"]["host_surface"] == (
         "trae_app"
     )
@@ -1446,7 +1458,7 @@ def test_stale_unbound_guard_converges_after_profile_regeneration(
 
     assert stale_hint["action"] == "repair_scheduler_execution_context"
     assert regenerated_hint.get("action") != "repair_scheduler_execution_context"
-    assert regenerated_hint["codex_app"]["applicability"] in {
+    assert regenerated_hint["app_automation"]["applicability"] in {
         "applicable",
         "not_applicable",
     }

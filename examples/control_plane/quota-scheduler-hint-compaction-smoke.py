@@ -117,32 +117,32 @@ def assert_compact_runtime_policy_complete(
     expected_registry_path: Path | None = None,
     expected_runtime_root: Path | None = None,
 ) -> None:
-    codex_app = compact["codex_app"]
+    app_automation = compact["app_automation"]
     unchanged_poll = compact["unchanged_poll"]
-    stateful_backoff = codex_app["stateful_backoff"]
-    ack_hint = codex_app["ack_hint"]
-    failure_hint = codex_app["failure_hint"]
+    stateful_backoff = app_automation["stateful_backoff"]
+    ack_hint = app_automation["ack_hint"]
+    failure_hint = app_automation["failure_hint"]
     ack_args = ack_hint["args"]
     ack_cli_args = ack_hint["cli_args"]
-    assert codex_app["recommended_interval_minutes"], (name, compact)
-    assert codex_app["recommended_rrule"], (name, compact)
-    assert codex_app["max_interval_minutes"], (name, compact)
-    assert isinstance(codex_app["example_progression_minutes"], list), (name, compact)
-    assert codex_app["host_tool"] == "automation_update", (name, compact)
-    assert codex_app["host_action"] == "update_current_heartbeat_rrule", (name, compact)
-    assert "automation_update" in codex_app["host_action_contract"], (name, compact)
-    assert codex_app["rrule_source"] == "scheduler_hint.codex_app.recommended_rrule", (name, compact)
-    assert stateful_backoff["schema_version"] == "codex_app_stateful_backoff_v0", (name, compact)
-    assert stateful_backoff["state_key"] == "scheduler_hint.codex_app.stateful_backoff", (name, compact)
+    assert app_automation["recommended_interval_minutes"], (name, compact)
+    assert app_automation["recommended_rrule"], (name, compact)
+    assert app_automation["max_interval_minutes"], (name, compact)
+    assert isinstance(app_automation["example_progression_minutes"], list), (name, compact)
+    assert app_automation["host_tool"] == "automation_update", (name, compact)
+    assert app_automation["host_action"] == "update_current_heartbeat_rrule", (name, compact)
+    assert "automation_update" in app_automation["host_action_contract"], (name, compact)
+    assert app_automation["rrule_source"] == "scheduler_hint.app_automation.recommended_rrule", (name, compact)
+    assert stateful_backoff["schema_version"] == "app_automation_stateful_backoff_v0", (name, compact)
+    assert stateful_backoff["state_key"] == "scheduler_hint.app_automation.stateful_backoff", (name, compact)
     assert stateful_backoff["identity_signature"] == compact["reset_policy"]["identity_signature"], (
         name,
         compact,
     )
     assert stateful_backoff["reset_token"] == compact["reset_policy"]["reset_token"], (name, compact)
     assert stateful_backoff["apply_needed"] is True, (name, compact)
-    assert stateful_backoff["current_rrule"] == codex_app["recommended_rrule"], (name, compact)
+    assert stateful_backoff["current_rrule"] == app_automation["recommended_rrule"], (name, compact)
     assert stateful_backoff["state_status"] == "missing", (name, compact)
-    assert ack_hint["schema_version"] == "codex_app_scheduler_ack_hint_v0", (name, compact)
+    assert ack_hint["schema_version"] == "app_automation_scheduler_ack_hint_v0", (name, compact)
     assert ack_hint["after"] == "automation_update_rrule_success", (name, compact)
     assert ack_hint["command"] == "quota scheduler-ack-current", (name, compact)
     assert ack_hint["execute"] is True, (name, compact)
@@ -152,7 +152,7 @@ def assert_compact_runtime_policy_complete(
     assert ack_args["agent_id"] == expected_agent_id, (name, compact)
     assert ack_args["surface"] == "codex_app", (name, compact)
     assert ack_args["state_key"] == stateful_backoff["state_key"], (name, compact)
-    assert ack_args["applied_rrule"] == codex_app["recommended_rrule"], (name, compact)
+    assert ack_args["applied_rrule"] == app_automation["recommended_rrule"], (name, compact)
     assert ack_args["reset_token"] == stateful_backoff["reset_token"], (name, compact)
     assert ack_args["identity_signature"] == stateful_backoff["identity_signature"], (name, compact)
     assert ack_args["host_match_observed"] is True, (name, compact)
@@ -197,7 +197,7 @@ def assert_compact_runtime_policy_complete(
     host_fact_args = ack_cli_args[len(expected_cli_prefix) : -len(expected_cli_suffix)]
     assert scheduler_host_fact_chunks(host_fact_args), (name, compact)
     failure_cli_args = failure_hint["cli_args"]
-    assert failure_hint["schema_version"] == "codex_app_scheduler_failure_hint_v0", (
+    assert failure_hint["schema_version"] == "app_automation_scheduler_failure_hint_v0", (
         name,
         compact,
     )
@@ -250,11 +250,11 @@ def assert_compact_runtime_policy_complete(
     assert "final_quota_replan_check_action" in unchanged_poll, (name, compact)
     assert unchanged_poll["spend_policy"], (name, compact)
     assert compact["reset_policy"]["reset_token"], (name, compact)
-    assert compact["reset_policy"]["codex_app_initial_rrule"], (name, compact)
+    assert compact["reset_policy"]["app_automation_initial_rrule"], (name, compact)
     for omitted in (
         "schema_version",
-        "codex_app_tool",
-        "codex_app_apply",
+        "app_automation_tool",
+        "app_automation_apply",
         "profile_signature",
         "identity_key_count",
         "reset_condition_summary",
@@ -263,7 +263,7 @@ def assert_compact_runtime_policy_complete(
     detail_ref = compact["detail_ref"]
     assert detail_ref["omitted_by_default"] is True, (name, compact)
     assert detail_ref["execution_required"] is False, (name, compact)
-    assert detail_ref["hot_path_runtime_fields"] == ["codex_app", "unchanged_poll", "reset_policy"], (
+    assert detail_ref["hot_path_runtime_fields"] == ["app_automation", "unchanged_poll", "reset_policy"], (
         name,
         compact,
     )
@@ -302,7 +302,7 @@ def assert_compact_scheduler(name: str, source_payload: dict) -> None:
         expected_agent_id=source_payload["agent_identity"]["agent_id"],
     )
     assert compact["reset_policy"]["reset_token"], (name, compact)
-    assert compact["reset_policy"]["codex_app_initial_rrule"] == compact["codex_app"]["recommended_rrule"], (
+    assert compact["reset_policy"]["app_automation_initial_rrule"] == compact["app_automation"]["recommended_rrule"], (
         name,
         compact,
     )
@@ -324,7 +324,7 @@ def assert_compact_scheduler(name: str, source_payload: dict) -> None:
     )
     assert cold_path["claude_code_loop"]["after_limit"], (name, detailed)
     stateful_detail = cold_path["stateful_backoff_detail"]
-    assert stateful_detail["progression_minutes"] == compact["codex_app"]["example_progression_minutes"], (
+    assert stateful_detail["progression_minutes"] == compact["app_automation"]["example_progression_minutes"], (
         name,
         detailed,
     )
@@ -340,8 +340,8 @@ def assert_compact_scheduler(name: str, source_payload: dict) -> None:
     )
     reset_detail = cold_path["reset_policy_detail"]
     assert reset_detail["schema_version"] == "scheduler_reset_policy_v0", (name, detailed)
-    assert reset_detail["codex_app_tool"] == "automation_update", (name, detailed)
-    assert "automation_update" in reset_detail["codex_app_apply"], (name, detailed)
+    assert reset_detail["app_automation_tool"] == "automation_update", (name, detailed)
+    assert "automation_update" in reset_detail["app_automation_apply"], (name, detailed)
     assert len(reset_detail["profile_signature"]) == 12, (name, detailed)
     assert json_size(compact) < json_size(detailed), (name, json_size(compact), json_size(detailed))
     # Native scheduler follow-up embeds bounded host-fact chunks in the ack and
@@ -440,9 +440,9 @@ def assert_cli_compact_and_detail_contract() -> None:
     assert detailed["cold_path_detail"]["claude_code_loop"]["after_limit"] == (
         compact["unchanged_poll"]["after_limits"]["claude_code_loop"]
     ), detailed
-    assert detailed["cold_path_detail"]["reset_policy_detail"]["codex_app_tool"] == "automation_update", detailed
+    assert detailed["cold_path_detail"]["reset_policy_detail"]["app_automation_tool"] == "automation_update", detailed
     assert detailed["cold_path_detail"]["stateful_backoff_detail"]["progression_minutes"] == (
-        compact["codex_app"]["example_progression_minutes"]
+        compact["app_automation"]["example_progression_minutes"]
     ), detailed
 
 
