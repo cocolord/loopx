@@ -175,20 +175,25 @@ class SchedulerExecutionContext:
         )
 
     def projection(self) -> dict[str, Any]:
-        return {
+        projection = {
             "schema_version": SCHEDULER_EXECUTION_CONTEXT_SCHEMA_VERSION,
             "host_surface": self.host_surface.value,
             "scheduler_owner": self.scheduler_owner.value,
             "execution_mode": self.execution_mode.value,
             "source": self.source,
             "valid": True,
-            "app_automation_applicability": (
-                "applicable" if self.app_automation_applicable else "not_applicable"
-            ),
-            "codex_app_applicability": (
-                "applicable" if self.codex_app_applicable else "not_applicable"
-            ),
         }
+        # Keep existing non-Trae projections byte-compatible. The neutral App
+        # field is needed to identify Trae's independent automation contract,
+        # but a second negative applicability flag adds no information for CLI
+        # and Goal runtimes.
+        if self.host_surface is HostSurface.TRAE_APP:
+            projection["app_automation_applicability"] = "applicable"
+        else:
+            projection["codex_app_applicability"] = (
+                "applicable" if self.codex_app_applicable else "not_applicable"
+            )
+        return projection
 
 
 @dataclass(frozen=True)
@@ -205,17 +210,20 @@ class SchedulerExecutionContextResolution:
         if self.context is not None:
             return self.context.projection()
         supplied = dict(self.supplied or {})
-        return {
+        projection = {
             "schema_version": SCHEDULER_EXECUTION_CONTEXT_SCHEMA_VERSION,
             "host_surface": supplied.get("host_surface"),
             "scheduler_owner": supplied.get("scheduler_owner"),
             "execution_mode": supplied.get("execution_mode"),
             "source": supplied.get("source") or "explicit",
             "valid": False,
-            "app_automation_applicability": "blocked_invalid_context",
-            "codex_app_applicability": "blocked_invalid_context",
             "errors": list(self.errors),
         }
+        if supplied.get("host_surface") == HostSurface.TRAE_APP.value:
+            projection["app_automation_applicability"] = "blocked_invalid_context"
+        else:
+            projection["codex_app_applicability"] = "blocked_invalid_context"
+        return projection
 
 
 def _validation_errors(context: SchedulerExecutionContext) -> list[str]:
@@ -604,21 +612,20 @@ def apply_scheduler_execution_context(
     )
 
     result["execution_context"] = resolution.projection()
-    result["app_automation"] = {
+    not_applicable = {
         "applicability": "not_applicable",
-        "host_surface": context.host_surface.value,
         "reason_code": f"cadence_owned_by_{context.scheduler_owner.value}",
         "apply": "none",
         "host_action": "none",
         "ack_required": False,
         "no_spend_for_cadence_change": True,
     }
-    # Keep the historical packet only outside Trae App. Trae must never derive
-    # scheduler authority through a Codex-labelled compatibility projection.
-    if context.host_surface is not HostSurface.TRAE_APP:
-        result["codex_app"] = result["app_automation"]
-    else:
-        result.pop("codex_app", None)
+    # Preserve the historical non-App response exactly. Provider-neutral App
+    # automation is emitted only when a real App host owns the cadence; adding
+    # it to unrelated CLI/Goal-runtime responses would duplicate a negative
+    # projection and expand every agent-facing payload.
+    result.pop("app_automation", None)
+    result["codex_app"] = not_applicable
     reset_policy = result.get("reset_policy")
     if isinstance(reset_policy, dict):
         for key in tuple(reset_policy):

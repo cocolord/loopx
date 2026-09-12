@@ -1098,7 +1098,6 @@ def build_scheduler_hint(
                 "ack_needed": False,
                 "acknowledged": False,
             },
-            "app_automation": blocked_app_automation,
             "unchanged_poll": {
                 "local_scheduler": "stop_until_context_repaired",
                 "codex_cli_tui": "stop_until_context_repaired",
@@ -1115,7 +1114,9 @@ def build_scheduler_hint(
         supplied_host_surface = str(
             (execution_context.supplied or {}).get("host_surface") or ""
         ).strip()
-        if supplied_host_surface != "trae_app":
+        if supplied_host_surface == "trae_app":
+            blocked_hint["app_automation"] = blocked_app_automation
+        else:
             blocked_hint["codex_app"] = blocked_app_automation
         return blocked_hint
 
