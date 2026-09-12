@@ -15,6 +15,7 @@ class HostSurface(str, Enum):
     CODEX_APP = "codex_app"
     CODEX_APP_SSH = "codex_app_ssh"
     CODEX_CLI = "codex_cli"
+    TRAE_APP = "trae_app"
     GENERIC_CLI = "generic_cli"
     CLAUDE_CODE = "claude_code"
     KUNLUNCODE = "kunluncode"
@@ -40,6 +41,7 @@ class SchedulerRuntimeProfile(str, Enum):
     CODEX_APP_HEARTBEAT = "codex_app_heartbeat"
     CODEX_APP_SSH_VISIBLE = "codex_app_ssh_goal"
     CODEX_CLI_VISIBLE = "codex_cli"
+    TRAE_APP = "trae_app"
     CLAUDE_CODE_VISIBLE = "claude_code"
     KUNLUNCODE_VISIBLE = "kunluncode"
     GENERIC_CLI_AGENT_LOOP = "generic_cli"
@@ -87,6 +89,7 @@ VISIBLE_GOAL_SETTLEMENT_RUNTIME_PROFILES = frozenset(
 GUIDED_START_TURN_RUNTIME_PROFILES = frozenset(
     {
         SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT,
+        SchedulerRuntimeProfile.TRAE_APP,
         SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE,
     }
 )
@@ -112,6 +115,11 @@ _SCHEDULER_RUNTIME_PROFILE_CONTEXTS = {
         HostSurface.CODEX_CLI,
         SchedulerOwner.AGENT_CLI_LOOP,
         ExecutionMode.INTERACTIVE,
+    ),
+    SchedulerRuntimeProfile.TRAE_APP: (
+        HostSurface.TRAE_APP,
+        SchedulerOwner.HOST_AUTOMATION,
+        ExecutionMode.HOSTED_AUTOMATION,
     ),
     SchedulerRuntimeProfile.CLAUDE_CODE_VISIBLE: (
         HostSurface.CLAUDE_CODE,
@@ -154,6 +162,14 @@ class SchedulerExecutionContext:
     def codex_app_applicable(self) -> bool:
         return (
             self.host_surface is HostSurface.CODEX_APP
+            and self.scheduler_owner is SchedulerOwner.HOST_AUTOMATION
+            and self.execution_mode is ExecutionMode.HOSTED_AUTOMATION
+        )
+
+    @property
+    def app_automation_applicable(self) -> bool:
+        return (
+            self.host_surface in {HostSurface.CODEX_APP, HostSurface.TRAE_APP}
             and self.scheduler_owner is SchedulerOwner.HOST_AUTOMATION
             and self.execution_mode is ExecutionMode.HOSTED_AUTOMATION
         )
@@ -207,11 +223,12 @@ def _validation_errors(context: SchedulerExecutionContext) -> list[str]:
         HostSurface.CLAUDE_CODE,
         HostSurface.KUNLUNCODE,
     }
-    if context.host_surface is HostSurface.CODEX_APP:
+    if context.host_surface in {HostSurface.CODEX_APP, HostSurface.TRAE_APP}:
+        host_name = context.host_surface.value
         if context.scheduler_owner is not SchedulerOwner.HOST_AUTOMATION:
-            errors.append("codex_app requires scheduler_owner=host_automation")
+            errors.append(f"{host_name} requires scheduler_owner=host_automation")
         if context.execution_mode is not ExecutionMode.HOSTED_AUTOMATION:
-            errors.append("codex_app requires execution_mode=hosted_automation")
+            errors.append(f"{host_name} requires execution_mode=hosted_automation")
     if context.host_surface is HostSurface.ARK_MANAGED_AGENT:
         if context.scheduler_owner is not SchedulerOwner.GOAL_RUNTIME:
             errors.append("ark_managed_agent requires scheduler_owner=goal_runtime")
@@ -372,6 +389,8 @@ def _render_scheduler_runtime_profile_args(
 ) -> str:
     if profile is SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT:
         return " --codex-app"
+    if profile is SchedulerRuntimeProfile.TRAE_APP:
+        return " --trae_app"
     return f" --runtime-profile {shlex.quote(profile.value)}"
 
 
@@ -503,7 +522,7 @@ def apply_scheduler_execution_context(
     codex_app = (
         result.get("codex_app") if isinstance(result.get("codex_app"), dict) else {}
     )
-    if context.codex_app_applicable:
+    if context.app_automation_applicable:
         codex_app["applicability"] = "applicable"
         backoff = (
             codex_app.get("stateful_backoff")

@@ -348,6 +348,7 @@ def _requested_quota_action_todo_id(
 ) -> str | None:
     if not (
         bool(args.codex_app)
+        or bool(getattr(args, "trae_app", False))
         or args.runtime_profile
         in {profile.value for profile in GUIDED_START_TURN_RUNTIME_PROFILES}
     ):

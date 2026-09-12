@@ -327,6 +327,7 @@ def build_codex_app_scheduler_ack_hint(
                 and safe_capability not in safe_available_capabilities
             ):
                 safe_available_capabilities.append(safe_capability)
+    runtime_alias = "--trae_app" if safe_surface == "trae_app" else "-A"
     cli_args = [
         "quota",
         "scheduler-ack-current",
@@ -334,7 +335,7 @@ def build_codex_app_scheduler_ack_hint(
         safe_goal_id,
         "--agent-id",
         safe_agent_id,
-        "-A",
+        runtime_alias,
     ]
     for capability in safe_available_capabilities:
         cli_args.extend(["--available-capability", capability])
@@ -395,6 +396,8 @@ def build_codex_app_scheduler_failure_hint(
     available_capabilities: Any = None,
     scheduler_host_facts: Mapping[str, Any] | None = None,
     scheduler_before: Mapping[str, Any] | None = None,
+    surface: str = CODEX_APP_SURFACE,
+    state_key: str = CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
 ) -> dict[str, Any]:
     safe_goal_id = str(goal_id or "").strip()
     safe_agent_id = str(agent_id or "").strip()
@@ -410,6 +413,9 @@ def build_codex_app_scheduler_failure_hint(
                 and safe_capability not in safe_capabilities
             ):
                 safe_capabilities.append(safe_capability)
+    safe_surface = str(surface or "").strip()
+    safe_state_key = str(state_key or "").strip()
+    runtime_alias = "--trae_app" if safe_surface == "trae_app" else "-A"
     cli_args = [
         "quota",
         "scheduler-fail-current",
@@ -417,7 +423,7 @@ def build_codex_app_scheduler_failure_hint(
         safe_goal_id,
         "--agent-id",
         safe_agent_id,
-        "-A",
+        runtime_alias,
     ]
     for capability in safe_capabilities:
         cli_args.extend(["--available-capability", capability])
@@ -427,6 +433,10 @@ def build_codex_app_scheduler_failure_hint(
         use_current_hint=False,
     )
     cli_args.extend(native_args)
+    if safe_surface != CODEX_APP_SURFACE:
+        cli_args.extend(["--surface", safe_surface])
+    if safe_state_key != CODEX_APP_STATEFUL_BACKOFF_STATE_KEY:
+        cli_args.extend(["--state-key", safe_state_key])
     cli_args.extend(
         [
             "--failed-rrule",
@@ -558,6 +568,12 @@ class _SchedulerHintBuilder:
         notification_cooldown_interval_minutes: int | None = None,
         advance_same_identity: bool = True,
     ) -> dict[str, Any]:
+        context = self.execution_context.context
+        app_surface = (
+            context.host_surface.value
+            if context is not None and context.app_automation_applicable
+            else CODEX_APP_SURFACE
+        )
         local_cadence_progression = cadence_progression_override or [
             min(codex_interval * (multiplier**step), codex_max) for step in range(3)
         ]
@@ -794,7 +810,7 @@ class _SchedulerHintBuilder:
                 "schema_version": "loopx_scheduler_heartbeat_host_facts_v0",
                 "goal_id": str(goal_id),
                 "agent_id": str(agent_id),
-                "surface": CODEX_APP_SURFACE,
+                "surface": app_surface,
                 "state_key": CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
                 "reset_token": reset_token,
                 "identity_signature": identity_signature,
@@ -829,12 +845,14 @@ class _SchedulerHintBuilder:
                         "host_match_observed": False,
                     },
                     scheduler_before=self.payload,
+                    surface=app_surface,
                 )
-                codex_app["fallback_hint"] = build_codex_app_scheduler_fallback_hint(
-                    goal_id=goal_id,
-                    agent_id=agent_id,
-                    automation_id=self.codex_app_automation_id,
-                )
+                if app_surface == CODEX_APP_SURFACE:
+                    codex_app["fallback_hint"] = build_codex_app_scheduler_fallback_hint(
+                        goal_id=goal_id,
+                        agent_id=agent_id,
+                        automation_id=self.codex_app_automation_id,
+                    )
         if ack_needed and goal_id and agent_id:
             codex_app["ack_hint"] = build_codex_app_scheduler_ack_hint(
                 goal_id=goal_id,
@@ -859,6 +877,7 @@ class _SchedulerHintBuilder:
                     "host_match_observed": True,
                 },
                 scheduler_before=self.payload,
+                surface=app_surface,
             )
         unchanged_poll_limits = {
             "local_scheduler": cli_limit,

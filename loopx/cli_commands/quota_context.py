@@ -64,9 +64,16 @@ def _scheduler_execution_context_from_args(
         args.scheduler_owner,
         args.execution_mode,
     )
-    if args.codex_app and (args.runtime_profile or any(explicit_scheduler_fields)):
+    codex_app = bool(getattr(args, "codex_app", False))
+    trae_app = bool(getattr(args, "trae_app", False))
+    app_alias_count = int(codex_app) + int(trae_app)
+    if app_alias_count > 1:
         raise QuotaCommandValidationError(
-            "--codex-app cannot be combined with --runtime-profile, "
+            "--codex-app and --trae_app are mutually exclusive"
+        )
+    if app_alias_count and (args.runtime_profile or any(explicit_scheduler_fields)):
+        raise QuotaCommandValidationError(
+            "app runtime aliases cannot be combined with --runtime-profile, "
             "--host-surface, --scheduler-owner, or --execution-mode"
         )
     if args.runtime_profile and any(explicit_scheduler_fields):
@@ -76,7 +83,9 @@ def _scheduler_execution_context_from_args(
         )
     runtime_profile = (
         SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT.value
-        if args.codex_app
+        if codex_app
+        else SchedulerRuntimeProfile.TRAE_APP.value
+        if trae_app
         else args.runtime_profile
     )
     if runtime_profile:
@@ -177,8 +186,8 @@ def validate_quota_command_context_request(
         profile = scheduler_runtime_profile_for_execution_context(scheduler_context)
         if profile not in GUIDED_START_TURN_RUNTIME_PROFILES:
             raise QuotaCommandValidationError(
-                "--begin-turn requires runtime-profile codex_app_heartbeat "
-                "or codex_app_ssh_goal; every other host starts its turn by "
+                "--begin-turn requires runtime-profile codex_app_heartbeat, "
+                "trae_app, or codex_app_ssh_goal; every other host starts its turn by "
                 "passing its own --turn-instance-id"
             )
     if (

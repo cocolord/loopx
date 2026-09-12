@@ -392,15 +392,20 @@ def build_live_quota_should_run_decision(
     """Build one live CLI decision while keeping host observation injectable."""
 
     resolved_context = resolve_scheduler_execution_context(scheduler_execution_context)
-    codex_app_applicable = (
+    app_automation_applicable = (
         resolved_context.ok
         and resolved_context.context is not None
-        and resolved_context.context.codex_app_applicable
+        and resolved_context.context.app_automation_applicable
+    )
+    codex_app_host = bool(
+        app_automation_applicable
+        and resolved_context.context is not None
+        and resolved_context.context.host_surface.value == "codex_app"
     )
     observed_rrule = str(codex_app_current_rrule or "").strip()
     observed_automation_id = ""
     if (
-        codex_app_applicable
+        codex_app_host
         and not observed_rrule
         and host_observation_resolver is not None
     ):

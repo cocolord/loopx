@@ -30,9 +30,10 @@ def _scheduler_packet(
         if isinstance(before.get("scheduler_hint"), dict)
         else {}
     )
+    packet_key = "codex_app" if surface in {"codex_app", "trae_app"} else surface
     surface_packet = (
-        scheduler_hint.get(surface)
-        if isinstance(scheduler_hint.get(surface), dict)
+        scheduler_hint.get(packet_key)
+        if isinstance(scheduler_hint.get(packet_key), dict)
         else {}
     )
     stateful_backoff = (

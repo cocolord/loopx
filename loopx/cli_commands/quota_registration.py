@@ -117,6 +117,15 @@ def register_quota_command(
         ),
     )
     quota_parser.add_argument(
+        "--trae_app",
+        action="store_true",
+        help=(
+            "Compact explicit alias for --runtime-profile "
+            "trae_app. Cannot be combined with another scheduler "
+            "runtime or execution context."
+        ),
+    )
+    quota_parser.add_argument(
         "-H",
         "--host-surface",
         choices=[
@@ -124,6 +133,7 @@ def register_quota_command(
             "codex_app",
             "codex_app_ssh",
             "codex_cli",
+            "trae_app",
             "generic_cli",
             "claude_code",
             "local_scheduler",
