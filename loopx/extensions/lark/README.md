@@ -244,6 +244,10 @@ execute resolves only selected recipients and omits unrelated recipients. Raw
 The Goal Channel delivery command accepts exactly two ordered HTTPS entries
 (hosted report, then Lark document), emits two independently idempotent
 messages, and verifies the native sender App plus exact chat for each readback.
+Each provider idempotency key binds the base delivery identity to the rendered
+announcement kind, title, body, footer, and an explicit semantic version. A
+renderer change therefore cannot make an upgraded retry reuse an older card
+under the same provider key.
 
 Installation controls discoverability and provider lifecycle only. Every
 private chat, app, group, Base, document, or Miaoda target remains in ignored

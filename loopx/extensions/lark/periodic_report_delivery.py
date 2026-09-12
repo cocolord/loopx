@@ -49,7 +49,9 @@ GOAL_CHANNEL_DELIVERY_REQUEST_SCHEMA = (
 )
 GOAL_CHANNEL_DELIVERY_RESULT_SCHEMA = "periodic_report_goal_channel_delivery_result_v0"
 DELIVERY_INTENT_SCHEMA = "periodic_report_delivery_intent_v0"
+ANNOUNCEMENT_IDEMPOTENCY_SCHEMA = "periodic_report_goal_channel_announcement_v1"
 _ANNOUNCEMENT_KINDS = ("hosted_report", "lark_document")
+_ANNOUNCEMENT_FOOTER = "LoopX periodic report · Goal Channel"
 
 
 def _mapping(value: object, label: str) -> dict[str, Any]:
@@ -129,9 +131,7 @@ def _next_action_guidance(document: Mapping[str, Any]) -> str | None:
     ]
     if not candidates:
         candidates = [
-            item.get("next_action")
-            for item in primary_items
-            if item.get("next_action")
+            item.get("next_action") for item in primary_items if item.get("next_action")
         ]
     if not candidates:
         return None
@@ -144,11 +144,30 @@ def _announcement_markdown(
 ) -> str:
     if announcement["kind"] == "hosted_report":
         guidance = f"\n\n下一步：{next_action}" if next_action else ""
-        return (
-            f"本期阶段周报已发布。{guidance}"
-            f"\n\n[查看周报]({announcement['url']})"
-        )
+        return f"本期阶段周报已发布。{guidance}\n\n[查看周报]({announcement['url']})"
     return f"配套 Lark 文档已同步。\n\n[查看 Lark 文档]({announcement['url']})"
+
+
+def _announcement_idempotency_key(
+    *,
+    delivery_idempotency_key: str,
+    announcement: Mapping[str, str],
+    content: str,
+) -> str:
+    material = "\0".join(
+        (
+            ANNOUNCEMENT_IDEMPOTENCY_SCHEMA,
+            delivery_idempotency_key,
+            announcement["kind"],
+            announcement["title"],
+            content,
+            _ANNOUNCEMENT_FOOTER,
+        )
+    )
+    return (
+        "periodic-report-announcement-v1:"
+        + hashlib.sha256(material.encode("utf-8")).hexdigest()
+    )
 
 
 def _normalized_generation_bundle(raw: object) -> dict[str, Any]:
@@ -395,8 +414,11 @@ def deliver_periodic_report_to_goal_channel(
     next_action = _next_action_guidance(generation["document"])
     message_results: list[dict[str, Any]] = []
     for announcement in announcements:
-        content = _announcement_markdown(
-            announcement, next_action=next_action
+        content = _announcement_markdown(announcement, next_action=next_action)
+        announcement_idempotency_key = _announcement_idempotency_key(
+            delivery_idempotency_key=idempotency_key,
+            announcement=announcement,
+            content=content,
         )
         result = registry.deliver(
             sink_id,
@@ -409,9 +431,9 @@ def deliver_periodic_report_to_goal_channel(
             {
                 "execute": bool(execute),
                 "goal_id": goal_id,
-                "idempotency_key": f"{idempotency_key}:{announcement['kind']}",
+                "idempotency_key": announcement_idempotency_key,
                 "title": announcement["title"],
-                "footer": "LoopX periodic report · Goal Channel",
+                "footer": _ANNOUNCEMENT_FOOTER,
             },
         )
         message_results.append({"kind": announcement["kind"], **result})
@@ -480,6 +502,7 @@ def deliver_periodic_report_to_goal_channel(
             "caller_identity_override_allowed": False,
             "exact_sender_and_chat_readback_required": True,
             "exact_history_dedupe_required": True,
+            "rendered_announcement_idempotency_bound": True,
             "sender_evidence_source": "message_readback",
             "external_writes_performed": sink_result.get("external_writes_performed")
             is True,
@@ -488,6 +511,7 @@ def deliver_periodic_report_to_goal_channel(
 
 
 __all__ = [
+    "ANNOUNCEMENT_IDEMPOTENCY_SCHEMA",
     "DELIVERY_INTENT_SCHEMA",
     "GOAL_CHANNEL_DELIVERY_REQUEST_SCHEMA",
     "GOAL_CHANNEL_DELIVERY_RESULT_SCHEMA",
