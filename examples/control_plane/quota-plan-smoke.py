@@ -1042,8 +1042,8 @@ def assert_heartbeat_recommendation_lifecycle() -> None:
     assert "profile" not in reset, reset
     profile_snapshot = scheduler_reset_profile_snapshot(scheduler)
     assert profile_snapshot["cadence_class"] == "unchanged_noop", profile_snapshot
-    assert profile_snapshot["app_automation_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=60", profile_snapshot
-    assert profile_snapshot["app_automation_max_interval_minutes"] == 60, profile_snapshot
+    assert profile_snapshot["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=60", profile_snapshot
+    assert profile_snapshot["codex_app_max_interval_minutes"] == 60, profile_snapshot
     assert profile_snapshot["unchanged_poll_backoff_multiplier"] == 2, profile_snapshot
     identity_snapshot = {
         key: _nested_value(mapped_decision, key)
@@ -1057,8 +1057,8 @@ def assert_heartbeat_recommendation_lifecycle() -> None:
     assert "heartbeat_recommendation: mode=mapped_noop_if_unchanged notify=DONT_NOTIFY" in mapped_markdown
     assert "heartbeat_stop_if_unchanged: `True`" in mapped_markdown, mapped_markdown
     assert "scheduler_hint: action=backoff_until_fresh_evidence" in mapped_markdown, mapped_markdown
-    assert "codex_app_rrule=FREQ=MINUTELY;INTERVAL=60" in mapped_markdown, mapped_markdown
-    assert "codex_app_progression=[60]" in mapped_markdown, mapped_markdown
+    assert "app_automation_rrule=FREQ=MINUTELY;INTERVAL=60" in mapped_markdown, mapped_markdown
+    assert "app_automation_progression=[60]" in mapped_markdown, mapped_markdown
     assert "scheduler_reset: initial_interval=60" in mapped_markdown, mapped_markdown
     assert "initial_rrule=FREQ=MINUTELY;INTERVAL=60" in mapped_markdown, mapped_markdown
     assert "reset_generation=" in mapped_markdown, mapped_markdown
